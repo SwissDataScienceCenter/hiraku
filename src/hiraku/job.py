@@ -20,13 +20,67 @@ from uuid import UUID
 import psij
 import psutil
 from psij.serialize import JSONSerializer
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+)
 
 from .errors import ExecutionError, ObservationError, ValidationError
 from .io import atomic_write
 
 if TYPE_CHECKING:
     from .project import Project
+
+
+class JobRequest(BaseModel):
+    """Typed parameters for submitting a project job."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    command: list[str] = Field(
+        min_length=1,
+        description="Command as an argv list; each item is one literal argument.",
+        examples=["uv", "run", "my_script.py", "--option", "value"],
+    )
+    # TODO: find another way of specifying the list of executors.
+    executor: Literal["local", "slurm", "local-detached", "renku"] = Field(
+        default="local-detached",
+        description="Registered PSI/J executor name.",
+    )
+    record_id: str | None = Field(
+        default=None,
+        description="Record ID to attribute this job to; omit for no attribution.",
+    )
+    executor_url: str | None = Field(
+        default=None,
+        description="Optional URL for the selected executor.",
+    )
+    custom_attributes: dict[str, str] | None = Field(
+        default=None,
+        description="Optional executor-specific string attributes.",
+    )
+    directory: str | None = Field(
+        default=None,
+        description="Optional working directory for the command.",
+    )
+    launcher: str | None = Field(
+        default=None,
+        description="Optional registered PSI/J launcher name.",
+    )
+
+    @field_validator("command")
+    @classmethod
+    def validate_argv(cls, value: list[str]) -> list[str]:
+        try:
+            command = validate_command(value)
+        except ValidationError as exc:
+            raise ValueError(str(exc)) from exc
+        if command is None:
+            raise ValueError("command must be an argv sequence")
+        return command
 
 
 def get_executor(

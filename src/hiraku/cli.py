@@ -39,7 +39,7 @@ from .git import GitRepository, init_code_repository, require_git
 from .io import dump_yaml
 from .job import Submission, get_executor, observe_submission, prepare_job, run_local
 from .project import Project
-from .record import Record, validate_identifier
+from .record import Record, RecordUpdate, validate_identifier
 from .tracking import Leaderboard, Run
 from .tracking.leaderboard import _leaderboard_path
 
@@ -470,7 +470,6 @@ def record_show(
 @click.option("--related-to", multiple=True)
 @click.option("--commit")
 @click.option("--set", "set_values", multiple=True, metavar="KEY=VALUE")
-@click.option("--unset", "unset_values", multiple=True)
 @click.option("--markdown-file", type=click.Path(path_type=Path))
 @click.pass_obj
 def record_update(
@@ -479,10 +478,9 @@ def record_update(
     related_to: tuple[str, ...],
     commit: str | None,
     set_values: tuple[str, ...],
-    unset_values: tuple[str, ...],
     markdown_file: Path | None,
 ) -> None:
-    """Update stored fields; --unset removes an override."""
+    """Update stored fields; set optional fields to null with --set KEY=null."""
     record = state.project.vault.load(record_id)
     changes = _fields(set_values)
     if "markdown" in changes:
@@ -493,16 +491,12 @@ def record_update(
         changes["related_to"] = list(related_to)
     if commit is not None:
         changes["commit"] = GitRepository(state.project.root).resolve(commit)
-    for key in unset_values:
-        if key == "id":
-            raise ValidationError(f"Cannot unset {key}")
-        if key in changes:
-            raise ValidationError(f"Cannot set and unset {key!r} together")
     state.project.vault.update(
         record,
-        changes,
-        markdown=_markdown(markdown_file) if markdown_file is not None else None,
-        unset=unset_values,
+        RecordUpdate(
+            **changes,
+            markdown=(_markdown(markdown_file) if markdown_file is not None else None),
+        ),
     )
     click.echo(f"Updated record {record_id}")
 

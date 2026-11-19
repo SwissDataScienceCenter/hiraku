@@ -25,14 +25,21 @@ from pydantic import BaseModel, ConfigDict, Field
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_core import to_jsonable_python
 
+from hiraku.record import Record, RecordUpdate
+
 from .errors import ExecutionError, HirakuError, ValidationError
-from .job import Submission, get_executor, observe_submission, prepare_job
+from .job import JobRequest, Submission, get_executor, observe_submission, prepare_job
 from .project import Project
 from .tracking import Leaderboard
+from .workflows.langgraph import (
+    WorkflowResume,
+    WorkflowStart,
+    workflow_ids,
+    workflow_mermaid,
+)
 from .workflows.langgraph import resume_workflow as resume_langgraph_workflow
 from .workflows.langgraph import start_workflow as start_langgraph_workflow
 from .workflows.langgraph import workflow_details as langgraph_workflow_details
-from .workflows.langgraph import workflow_ids, workflow_mermaid
 from .workflows.langgraph import workflow_status as langgraph_workflow_status
 
 logger = logging.getLogger(__name__)
@@ -89,7 +96,7 @@ def create_server(project: Project | None = None) -> ProjectMCP:
     The MCP SDK is a regular Hiraku dependency. Resources are read afresh on
     each request so external edits and tool mutations remain visible.
     """
-    selected = project or Project.discover()
+    project = project or Project.discover()
 
     server = ProjectMCP(
         name="Hiraku",
@@ -98,12 +105,12 @@ def create_server(project: Project | None = None) -> ProjectMCP:
         description=INSTRUCTIONS,
         version=importlib.metadata.version("hiraku"),
     )
-    register_tools(server, selected)
-    register_workflow_tools(server, selected)
+    register_tools(server, project)
+    register_workflow_tools(server, project)
     return server
 
 
-def register_tools(server: MCPServer, selected: Project) -> None:
+def register_tools(server: MCPServer, project: Project) -> None:
     """Register the project, record, execution, and tracking capabilities.
 
     Tools: project_info, leaderboard_list, record_list, record_show, record_create,
@@ -118,7 +125,7 @@ def register_tools(server: MCPServer, selected: Project) -> None:
     )
     def project_info() -> dict[str, Any]:
         """Read the current project settings."""
-        return to_jsonable_python(Project.load(selected.path).to_dict(), fallback=dict)
+        return Project.load(project.path).to_dict()
 
     @server.tool(
         title="List leaderboards",
@@ -126,7 +133,7 @@ def register_tools(server: MCPServer, selected: Project) -> None:
     )
     def leaderboard_list() -> list[str]:
         """List leaderboard names, like `hiraku leaderboard list --json`."""
-        return Leaderboard.list(selected)
+        return Leaderboard.list(project)
 
     @server.tool(
         title="List research records",
@@ -134,15 +141,17 @@ def register_tools(server: MCPServer, selected: Project) -> None:
     )
     def record_list() -> list[dict[str, Any]]:
         """List research records in the selected project."""
-        return [item.model_dump(mode="json") for item in selected.vault.list()]
+        return [item.model_dump(mode="json") for item in project.vault.list()]
 
     @server.tool(
         title="Show research record",
         annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     )
-    def record_show(record_id: str) -> dict[str, Any]:
+    def record_show(
+        record_id: Annotated[str, Field(description="The ID of the record to show")],
+    ) -> dict[str, Any]:
         """Read the document's local fields and Markdown."""
-        return selected.vault.load(record_id).model_dump(mode="json")
+        return project.vault.load(record_id).model_dump(mode="json")
 
     @server.tool(
         title="Create research record",
@@ -153,39 +162,9 @@ def register_tools(server: MCPServer, selected: Project) -> None:
             open_world_hint=False,
         ),
     )
-    def record_create(
-        record_id: str,
-        type: str,
-        title: str | None = None,
-        parent_id: str | None = None,
-        related_to: list[str] | None = None,
-        markdown: str = "",
-        fields: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
+    def record_create(record: Record) -> dict[str, Any]:
         """Create a research record."""
-        extras = fields or {}
-        reserved = {
-            "type",
-            "title",
-            "id",
-            "parent_id",
-            "related_to",
-            "markdown",
-            "record_id",
-            "project",
-        }
-        if reserved.intersection(extras):
-            raise ValidationError("Use named arguments for identity and relationships")
-        if title is not None:
-            extras = {**extras, "title": title}
-        record = selected.vault.create(
-            record_id,
-            type=type,
-            parent_id=parent_id,
-            markdown=markdown,
-            related_to=related_to or [],
-            **extras,
-        )
+        project.vault.save(record)
         return record.model_dump(mode="json")
 
     @server.tool(
@@ -198,14 +177,13 @@ def register_tools(server: MCPServer, selected: Project) -> None:
         ),
     )
     def record_update(
-        record_id: str,
-        fields: dict[str, Any],
-        markdown: str | None = None,
+        record_id: Annotated[str, Field(description="The ID of the record to update")],
+        patch: RecordUpdate,
     ) -> dict[str, Any]:
-        """Merge record fields and optionally replace Markdown; null clears a field."""
-        return selected.vault.update(
-            selected.vault.load(record_id), fields, markdown=markdown
-        ).model_dump(mode="json")
+        """Partially update an existing research record by ID."""
+        record = project.vault.load(record_id)
+        updated = project.vault.update(record, patch)
+        return updated.model_dump(mode="json")
 
     @server.tool(
         title="Delete research record",
@@ -216,9 +194,11 @@ def register_tools(server: MCPServer, selected: Project) -> None:
             open_world_hint=False,
         ),
     )
-    def record_delete(record_id: str) -> dict[str, str]:
+    def record_delete(
+        record_id: Annotated[str, Field(description="The ID of the record to delete")],
+    ) -> dict[str, str]:
         """Delete the document at the given OKF ID."""
-        selected.vault.delete(record_id)
+        project.vault.delete(record_id)
         return {"deleted": record_id}
 
     @server.tool(
@@ -230,65 +210,69 @@ def register_tools(server: MCPServer, selected: Project) -> None:
             open_world_hint=True,
         ),
     )
-    def job_submit(
-        command: list[str],
-        executor: str = "local-detached",
-        record_id: str | None = None,
-        executor_url: str | None = None,
-        custom_attributes: dict[str, str] | None = None,
-        directory: str | None = None,
-        launcher: str | None = None,
-    ) -> dict[str, Any]:
-        """Submit through PSI/J; record attribution requires an explicit record_id."""
-        if executor == "local":
+    def job_submit(request: JobRequest) -> dict[str, Any]:
+        """Submit an argv command through PSI/J and record its job history."""
+        if request.executor == "local":
             raise ValidationError(
                 "Native local execution cannot recover submission status; "
                 "use hiraku run or the local-detached executor"
             )
         job = prepare_job(
-            command,
-            record_id=record_id,
-            project=selected,
+            request.command,
+            record_id=request.record_id,
+            project=project,
             env={
                 key: value
                 for key, value in os.environ.items()
                 if key not in {"HIRAKU_RECORD_ID", "HIRAKU_JOB_ID"}
             },
-            directory=Path(directory) if directory is not None else None,
-            launcher=launcher,
-            attributes=JobAttributes(custom_attributes=custom_attributes)
-            if custom_attributes
+            directory=Path(request.directory)
+            if request.directory is not None
+            else None,
+            launcher=request.launcher,
+            attributes=JobAttributes(custom_attributes=request.custom_attributes)
+            if request.custom_attributes
             else None,
         )
         try:
             get_executor(
-                executor,
-                work_directory=selected.psij_dir,
-                url=executor_url,
+                request.executor,
+                work_directory=project.psij_dir,
+                url=request.executor_url,
             ).submit(job)
         except (InvalidJobException, SubmitException, ValueError, OSError) as exc:
             raise ExecutionError(str(exc)) from exc
         entry = Submission.from_psi_job(job)
-        entry.save(selected)
+        entry.save(project)
         return entry.model_dump(mode="json")
 
     @server.tool(
         annotations=ToolAnnotations(read_only_hint=False, open_world_hint=True)
     )
-    def job_status(job_id: str) -> dict[str, Any]:
+    def job_status(
+        job_id: Annotated[
+            str,
+            Field(min_length=1, description="Full job ID or unique nonempty prefix."),
+        ],
+    ) -> dict[str, Any]:
         """Sync and show status by full ID or unique nonempty prefix."""
-        entry = Submission.from_prefix(selected, job_id)
+        entry = Submission.from_prefix(project, job_id)
         entry.sync()
-        entry.save(selected)
+        entry.save(project)
         return entry.model_dump(mode="json")
 
     @server.tool(
         annotations=ToolAnnotations(read_only_hint=False, open_world_hint=True)
     )
-    def job_list(record_id: str | None = None) -> list[dict[str, Any]]:
+    def job_list(
+        record_id: Annotated[
+            str | None,
+            Field(description="Filter to jobs attributed to this record ID."),
+        ] = None,
+    ) -> list[dict[str, Any]]:
         """List jobs and status, refreshing and saving nonfinal submissions."""
-        entries = Submission.list(selected, record_id=record_id)
-        results = [observe_submission(entry, selected) for entry in entries]
+        entries = Submission.list(project, record_id=record_id)
+        results = [observe_submission(entry, project) for entry in entries]
         for result in results:
             if "observation_error" in result:
                 logger.warning(
@@ -301,12 +285,25 @@ def register_tools(server: MCPServer, selected: Project) -> None:
         annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     )
     def runs(
-        leaderboard: str | None = None,
-        record_id: str | None = None,
-        include_unattributed: bool = False,
-        sort: str | None = None,
-        ascending: bool | None = None,
-        limit: int | None = None,
+        leaderboard: Annotated[
+            str | None, Field(description="Leaderboard name; defaults when unique.")
+        ] = None,
+        record_id: Annotated[
+            str | None, Field(description="Filter runs by exact record ID.")
+        ] = None,
+        include_unattributed: Annotated[
+            bool, Field(description="Include runs without a record ID.")
+        ] = False,
+        sort: Annotated[
+            str | None, Field(description="Metric name to sort by.")
+        ] = None,
+        ascending: Annotated[
+            bool | None,
+            Field(description="Sort direction; defaults to the metric declaration."),
+        ] = None,
+        limit: Annotated[
+            int | None, Field(ge=0, description="Maximum number of runs to return.")
+        ] = None,
     ) -> list[dict[str, Any]]:
         """List attributed runs in a leaderboard, optionally filtered by record ID.
 
@@ -314,8 +311,8 @@ def register_tools(server: MCPServer, selected: Project) -> None:
 
         Sorting uses plain metric names and their declared direction.
         """
-        found = Leaderboard.load(selected, leaderboard).list_runs(
-            selected,
+        found = Leaderboard.load(project, leaderboard).list_runs(
+            project,
             record_id=record_id,
             include_unattributed=include_unattributed,
             sort=sort,
@@ -327,18 +324,18 @@ def register_tools(server: MCPServer, selected: Project) -> None:
     @server.resource("hiraku://catalog", mime_type="application/json")
     def catalog() -> str:
         """List current OKF record IDs."""
-        return json.dumps([record.id for record in selected.vault.list()])
+        return json.dumps([record.id for record in project.vault.list()])
 
     @server.resource("hiraku://records/{record_id}", mime_type="application/json")
     def record_resource(record_id: str) -> str:
-        return _research_content(unquote(record_id), selected)
+        return _research_content(unquote(record_id), project)
 
     @server.prompt(title="Propose implementation")
     def propose_implementation(record_id: str, related_record_ids: str = "") -> str:
         """Ground a proposal in a record and comma-separated related records."""
-        record = selected.vault.load(record_id)
+        record = project.vault.load(record_id)
         related = [
-            selected.vault.load(identifier.strip())
+            project.vault.load(identifier.strip())
             for identifier in related_record_ids.split(",")
             if identifier.strip()
         ]
@@ -384,13 +381,10 @@ def register_workflow_tools(server: MCPServer, project: Project) -> None:
     def workflow_list() -> list[dict[str, Any]]:
         return langgraph_workflow_details(project=project())
 
-    def workflow_start(
-        workflow_id: Annotated[str, Field(description="Project workflow ID.")],
-        arguments: Annotated[
-            dict[str, Any] | None, Field(description="Workflow input object.")
-        ] = None,
-    ) -> dict[str, Any]:
-        return start_langgraph_workflow(workflow_id, arguments, project=project())
+    def workflow_start(request: WorkflowStart) -> dict[str, Any]:
+        return start_langgraph_workflow(
+            request.workflow_id, request.arguments, project=project()
+        )
 
     def workflow_status(
         workflow_session_id: Annotated[
@@ -399,23 +393,12 @@ def register_workflow_tools(server: MCPServer, project: Project) -> None:
     ) -> dict[str, Any]:
         return langgraph_workflow_status(workflow_session_id, project=project())
 
-    def workflow_resume(
-        workflow_session_id: Annotated[
-            str, Field(description="Workflow session ID returned by workflow_start.")
-        ],
-        response: Annotated[
-            dict[str, Any],
-            Field(description="Response to the current graph interrupt."),
-        ],
-        checkpoint_id: Annotated[
-            str, Field(description="Checkpoint ID from workflow status.")
-        ],
-    ) -> dict[str, Any]:
+    def workflow_resume(request: WorkflowResume) -> dict[str, Any]:
         return resume_langgraph_workflow(
-            workflow_session_id,
-            response,
+            request.workflow_session_id,
+            request.response,
             project=project(),
-            checkpoint_id=checkpoint_id,
+            checkpoint_id=request.checkpoint_id,
         )
 
     def resolve_workflow_approval(

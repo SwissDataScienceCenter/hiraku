@@ -65,24 +65,54 @@ class Record(BaseModel):
     model_config = ConfigDict(extra="allow", validate_assignment=True)
 
     # OKF fields
-    type: str
-    title: str | None = None
-    description: str | None = None
-    status: Literal["draft", "stable", "deprecated"] = "stable"
-    resource: str | None = None
-    tags: list[str] = Field(default_factory=list)
-    generated: dict[str, Any] = Field(default_factory=dict)
-    verified: list[dict[str, Any]] | None = None
+    type: str = Field(..., description="OKF concept type.", min_length=1)
+    title: str | None = Field(default=None, description="Optional OKF display title.")
+    description: str | None = Field(
+        default=None, description="Optional short description of the concept."
+    )
+    status: Literal["draft", "stable", "deprecated"] = Field(
+        default="stable", description="OKF concept lifecycle status."
+    )
+    resource: str | None = Field(
+        default=None, description="Optional URI or path to an associated resource."
+    )
+    tags: list[str] = Field(
+        default_factory=list, description="Tags that categorize this concept."
+    )
+    generated: dict[str, Any] = Field(
+        default_factory=dict, description="Generated metadata for this concept."
+    )
+    verified: list[dict[str, Any]] | None = Field(
+        default=None, description="Verification evidence associated with this concept."
+    )
 
     # Hiraku fields
-    id: str
-    markdown: Markdown = Field(default_factory=lambda: Markdown(""))
-    parent_id: str | None = None
-    related_to: list[str] = Field(default_factory=list)
-    commit: str | None = None
-    decision: str | None = None
-    branch: str | None = None
-    state: str | None = None
+    id: str = Field(
+        ..., description="Bundle-relative concept path, without the .md suffix."
+    )
+    markdown: Markdown = Field(
+        default_factory=lambda: Markdown(""),
+        description="Markdown content of the record.",
+    )
+    parent_id: str | None = Field(
+        default=None, description="Optional bundle-relative ID of a parent record."
+    )
+    related_to: list[str] = Field(
+        default_factory=list,
+        description="Bundle-relative IDs of related records.",
+    )
+    commit: str | None = Field(
+        default=None, description="Optional commit hash associated with the record."
+    )
+    decision: str | None = Field(
+        default=None, description="Optional decision recorded for this concept."
+    )
+    branch: str | None = Field(
+        default=None, description="Optional version-control branch associated with it."
+    )
+    state: str | None = Field(
+        default=None, description="Optional workflow-defined research progress state."
+    )
 
     @field_validator("id")
     @classmethod
@@ -151,6 +181,49 @@ class Record(BaseModel):
             raise ValidationError(f"Unsupported YAML value: {exc}") from exc
 
 
+class RecordUpdate(BaseModel):
+    """Partial update payload for an existing research record."""
+
+    # Updates may include producer-defined front matter fields.
+    model_config = ConfigDict(extra="allow")
+
+    type: str | None = Field(default=None, description="OKF concept type.")
+    title: str | None = Field(default=None, description="Optional OKF display title.")
+    description: str | None = Field(
+        default=None, description="Short summary of the record."
+    )
+    status: Literal["draft", "stable", "deprecated"] | None = Field(
+        default=None, description="OKF concept lifecycle."
+    )
+    resource: str | None = Field(
+        default=None, description="External URI or resource reference."
+    )
+    tags: list[str] | None = Field(
+        default=None, description="Replaces existing categorization tags."
+    )
+    verified: list[dict[str, Any]] | None = Field(
+        default=None, description="Replacement verification evidence."
+    )
+    generated: dict[str, Any] | None = Field(
+        default=None, description="Replacement generated metadata."
+    )
+    parent_id: str | None = Field(
+        default=None, description="Relative path of a parent record."
+    )
+    related_to: list[str] | None = Field(
+        default=None, description="Replaces existing related record paths."
+    )
+    commit: str | None = Field(default=None, description="Associated git commit hash.")
+    decision: str | None = Field(default=None, description="Recorded decision.")
+    branch: str | None = Field(default=None, description="Research branch name.")
+    state: str | None = Field(
+        default=None, description="Workflow-defined research progress."
+    )
+    markdown: str | None = Field(
+        default=None, description="Updated Markdown body content."
+    )
+
+
 class Vault:
     """A Markdown bundle that owns filesystem access and workspace operations."""
 
@@ -179,9 +252,9 @@ class Vault:
         data, markdown = self._parse_markdown(target)
         return Record.model_validate({**data, "id": record_id, "markdown": markdown})
 
-    def create(self, record_id: str, **fields: Any) -> Record:
+    def create(self, id: str, **fields: Any) -> Record:
         """Construct and save a document at an explicit concept ID."""
-        record = Record(id=record_id, **fields)
+        record = Record(id=id, **fields)
         self.save(record)
         return record
 
@@ -239,20 +312,16 @@ class Vault:
     def update(
         self,
         record: Record,
-        fields: dict[str, Any],
-        *,
-        markdown: str | None = None,
-        unset: tuple[str, ...] = (),
+        patch: RecordUpdate,
     ) -> Record:
         """Apply local field changes and explicitly overwrite the document."""
-        if {"id", "markdown"}.intersection(fields) or "id" in unset:
+        changes = patch.model_dump(exclude_unset=True)
+        markdown = changes.pop("markdown", None)
+        fields = changes
+        if {"id", "markdown"}.intersection(fields):
             raise ValidationError("Cannot update ID or set Markdown through metadata")
-        values = record.model_dump(exclude_unset=True)
+        values = record.model_dump(include=record.model_fields_set)
         values.update(fields)
-        for key in unset:
-            if key in fields:
-                raise ValidationError(f"Cannot set and unset {key!r} together")
-            values.pop(key, None)
         if markdown is not None:
             values["markdown"] = markdown
         updated = Record.model_validate(values)

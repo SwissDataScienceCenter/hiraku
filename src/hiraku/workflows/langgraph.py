@@ -17,12 +17,39 @@ import frontmatter
 from filelock import FileLock
 from langgraph.checkpoint.sqlite import SqliteSaver
 from langgraph.types import Command
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..errors import ValidationError, WorkflowError
 from ..project import Project
 
 _WORKFLOW_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
 _CHECKPOINTS = "langgraph-checkpoints.sqlite"
+
+
+class WorkflowStart(BaseModel):
+    """Common request envelope for starting a project-defined workflow."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    workflow_id: str = Field(description="Project workflow ID.")
+    arguments: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Workflow-specific inputs; see that workflow's input schema.",
+    )
+
+
+class WorkflowResume(BaseModel):
+    """Common request envelope for resuming an interrupted workflow."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    workflow_session_id: str = Field(
+        description="Workflow session ID returned by workflow_start."
+    )
+    response: dict[str, Any] = Field(
+        description="Response to the current graph interrupt."
+    )
+    checkpoint_id: str = Field(description="Checkpoint ID from workflow status.")
 
 
 def checkpoint_database(project: Project) -> Path:

@@ -12,7 +12,14 @@ import frontmatter
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, create_model
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    TypeAdapter,
+    create_model,
+    field_validator,
+)
 from pydantic import ValidationError as PydanticValidationError
 
 from hiraku.errors import HirakuError, ValidationError
@@ -43,10 +50,18 @@ class ResearchState(TypedDict, total=False):
 class CollaborativeInput(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    task: str = Field(min_length=1, description="Explicit task record ID.")
+    task: str = Field(
+        min_length=1,
+        description="ID of an existing task record in this project's vault.",
+    )
     command: list[str] = Field(min_length=1)
     rounds: int = Field(default=3, ge=1)
     leaderboard: str | None = Field(default=None, description="Leaderboard name.")
+
+    @field_validator("task")
+    @classmethod
+    def validate_task_id(cls, value: str) -> str:
+        return Record._validate_reference_id(value, "task record ID") or value
 
 
 class DraftedArguments(BaseModel):

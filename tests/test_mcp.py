@@ -74,17 +74,29 @@ def test_registration_exposes_described_tools(tmp_path: Path, monkeypatch) -> No
         assert tools["workflow_start"].title == "Start workflow"
         assert tools["workflow_start"].description
         record_schema = tools["record_create"].input_schema
-        assert "type" in record_schema["required"]
-        assert record_schema["properties"]["type"]["type"] == "string"
+        create_input = record_schema["$defs"]["Record"]
+        assert {"type", "id"} <= set(create_input["required"])
+        assert create_input["properties"]["type"]["description"]
+        update_input = tools["record_update"].input_schema["$defs"]["RecordUpdate"]
+        assert update_input["properties"]["status"]["description"]
+        assert "unset" not in update_input["properties"]
+        job_input = tools["job_submit"].input_schema["$defs"]["JobRequest"]
+        assert job_input["additionalProperties"] is False
+        assert job_input["properties"]["command"]["description"]
         result = await server.call_tool("project_info", {})
         assert result.structured_content == project.to_dict()
 
     asyncio.run(exercise())
 
 
-def test_tools_and_validation(tmp_path: Path) -> None:
+def test_tools_and_validation(tmp_path: Path, monkeypatch) -> None:
     config = Project.create(tmp_path)
     server = create_server(config)
+
+    async def run_inline(func, *args, **kwargs):
+        return func(*args)
+
+    monkeypatch.setattr(anyio.to_thread, "run_sync", run_inline)
 
     async def exercise() -> None:
         async def call(tool_name: str, **args):
@@ -92,55 +104,66 @@ def test_tools_and_validation(tmp_path: Path) -> None:
 
         await call(
             "record_create",
-            type="task",
-            title="root",
-            fields={
+            record={
+                "type": "task",
+                "title": "root",
+                "id": "root/root",
                 "state": "new",
             },
-            record_id="root/root",
         )
         await call(
             "record_create",
-            type="task",
-            title="child",
-            parent_id="root/root",
-            record_id="root/child/child",
+            record={
+                "type": "task",
+                "title": "child",
+                "parent_id": "root/root",
+                "id": "root/child/child",
+            },
         )
         await call(
-            "record_update", record_id="root/child/child", fields={"state": "done"}
+            "record_update",
+            record_id="root/child/child",
+            patch={"state": "done"},
         )
         assert config.vault.load("root/child/child").state == "done"
         for name, args in [
             (
                 "record_create",
                 {
-                    "record_id": "../bad/bad",
-                    "type": "task",
-                    "title": "bad",
-                    "parent_id": "../missing",
+                    "record": {
+                        "id": "../bad/bad",
+                        "type": "task",
+                        "title": "bad",
+                        "parent_id": "../missing",
+                    }
                 },
             ),
             (
                 "record_create",
-                {"record_id": "  ", "type": "task", "title": "  "},
+                {"record": {"id": "  ", "type": "task", "title": "  "}},
             ),
             (
                 "record_create",
                 {
-                    "record_id": "root/my run",
-                    "type": "task",
-                    "title": "bad",
+                    "record": {
+                        "id": "root/my run",
+                        "type": "task",
+                        "title": "bad",
+                    }
                 },
-            ),
-            (
-                "record_update",
-                {"record_id": "root/child/child", "fields": {"id": "renamed"}},
             ),
             (
                 "record_update",
                 {
                     "record_id": "root/child/child",
-                    "fields": {"related_to": ["../no"]},
+                    "patch": {"id": "renamed"},
+                },
+            ),
+            (
+                "record_update",
+                {
+                    "record_id": "root/child/child",
+                    "patch": {"related_to": ["../no"]},
                 },
             ),
             ("record_delete", {"record_id": "missing"}),
@@ -148,21 +171,40 @@ def test_tools_and_validation(tmp_path: Path) -> None:
             with pytest.raises(ToolError):
                 await server.call_tool(name, args)
         assert config.vault.load("root/child/child").related_to == []
+        await call(
+            "record_create",
+            record={
+                "id": "root/unknown",
+                "type": "task",
+                "extra_field": "producer data",
+            },
+        )
+        assert config.vault.load("root/unknown").extra_field == "producer data"
+        await call(
+            "record_update",
+            record_id="root/child/child",
+            patch={"unknown_field": "producer update"},
+        )
+        assert config.vault.load("root/child/child").unknown_field == "producer update"
         await call("record_delete", record_id="root/child/child")
         await call(
             "record_create",
-            type="context",
-            title="sources",
-            markdown="Evidence",
-            record_id="sources/sources",
+            record={
+                "type": "context",
+                "title": "sources",
+                "markdown": "Evidence",
+                "id": "sources/sources",
+            },
         )
         with pytest.raises(ToolError):
-            await call("record_create", type="task", title="  ", record_id="  ")
+            await call(
+                "record_create",
+                record={"type": "task", "title": "  ", "id": "  "},
+            )
         await call(
             "record_update",
             record_id="sources/sources",
-            fields={},
-            markdown="Updated",
+            patch={"markdown": "Updated"},
         )
         assert config.vault.load("sources/sources").markdown == "Updated"
         await call("record_show", record_id="sources/sources")
@@ -176,11 +218,16 @@ def test_tools_and_validation(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("deleted_id", ["active", "other"])
-def test_record_delete_does_not_manage_project_state(tmp_path, deleted_id):
+def test_record_delete_does_not_manage_project_state(tmp_path, deleted_id, monkeypatch):
     project = Project.create(tmp_path, install_skill=False, install_mcp=False)
     project.vault.create("active", type="task")
     project.vault.create("other", type="task")
     server = create_server(project)
+
+    async def run_inline(func, *args, **kwargs):
+        return func(*args)
+
+    monkeypatch.setattr(anyio.to_thread, "run_sync", run_inline)
 
     asyncio.run(server.call_tool("record_delete", {"record_id": deleted_id}))
 
@@ -212,8 +259,7 @@ def test_record_update_uses_vault_validation(
             "record_update",
             {
                 "record_id": record.id,
-                "fields": {"related_to": [other.id]},
-                "markdown": "After",
+                "patch": {"related_to": [other.id], "markdown": "After"},
             },
         )
         assert result.structured_content["title"] == "original"
@@ -223,33 +269,44 @@ def test_record_update_uses_vault_validation(
         assert updated.markdown == "After"
         assert updated.related_to == [other.id]
 
-        for fields in ({"related_to": ["../missing"]}, {"title": []}):
+        for patch in ({"related_to": ["../missing"]}, {"title": []}):
             with pytest.raises(ToolError):
                 await server.call_tool(
-                    "record_update", {"record_id": record.id, "fields": fields}
+                    "record_update", {"record_id": record.id, "patch": patch}
                 )
-        assert project.vault.load(record.id).title == "original"
+        result = await server.call_tool(
+            "record_update", {"record_id": record.id, "patch": {"title": None}}
+        )
+        assert result.structured_content["title"] is None
+        assert project.vault.load(record.id).title is None
         assert project.vault.load(record.id).related_to == [other.id]
 
     asyncio.run(exercise())
 
 
-def test_resources_and_prompt(tmp_path: Path) -> None:
+def test_resources_and_prompt(tmp_path: Path, monkeypatch) -> None:
     config = Project.create(tmp_path)
     server = create_server(config)
+
+    async def run_inline(func, *args, **kwargs):
+        return func(*args)
+
+    monkeypatch.setattr(anyio.to_thread, "run_sync", run_inline)
 
     async def exercise() -> None:
         await server.call_tool(
             "record_create",
-            {"record_id": "demo/demo", "type": "task", "title": "demo"},
+            {"record": {"id": "demo/demo", "type": "task", "title": "demo"}},
         )
         await server.call_tool(
             "record_create",
             {
-                "record_id": "literature/literature",
-                "type": "context",
-                "title": "literature",
-                "markdown": "Curated evidence",
+                "record": {
+                    "id": "literature/literature",
+                    "type": "context",
+                    "title": "literature",
+                    "markdown": "Curated evidence",
+                }
             },
         )
         literature = config.vault.load("literature/literature")
@@ -283,10 +340,21 @@ def test_submit_rejects_native_local(tmp_path: Path, monkeypatch) -> None:
         lambda *args: pytest.fail("Native local job must not be submitted"),
     )
 
+    async def run_inline(func, *args, **kwargs):
+        return func(*args)
+
+    monkeypatch.setattr(anyio.to_thread, "run_sync", run_inline)
+
     async def exercise() -> None:
+        with pytest.raises(ToolError):
+            await server.call_tool(
+                "job_submit",
+                {"request": {"command": ["echo", "hello"], "executorr": "local"}},
+            )
         with pytest.raises(ToolError, match="use hiraku run or the local-detached"):
             await server.call_tool(
-                "job_submit", {"command": ["echo", "hello"], "executor": "local"}
+                "job_submit",
+                {"request": {"command": ["echo", "hello"], "executor": "local"}},
             )
 
     asyncio.run(exercise())
@@ -320,6 +388,11 @@ def test_job_list_refreshes_only_nonfinal_jobs(
     monkeypatch.setattr(Submission, "sync", sync)
     server = create_server(project)
 
+    async def run_inline(func, *args, **kwargs):
+        return func(*args)
+
+    monkeypatch.setattr(anyio.to_thread, "run_sync", run_inline)
+
     async def exercise():
         result = await server.call_tool("job_list", {})
         expected = "COMPLETED" if state == "ACTIVE" and not unavailable else state
@@ -350,6 +423,11 @@ def test_submit_and_status_use_native_executor(
     server = create_server(config)
     config.vault.create("active", title="Active", type="task")
 
+    async def run_inline(func, *args, **kwargs):
+        return func(*args)
+
+    monkeypatch.setattr(anyio.to_thread, "run_sync", run_inline)
+
     async def exercise() -> None:
         async def completed_job(receipt):
             for _ in range(300):
@@ -368,29 +446,31 @@ def test_submit_and_status_use_native_executor(
 
         await server.call_tool(
             "record_create",
-            {"record_id": "demo/demo", "type": "task", "title": "demo"},
+            {"record": {"id": "demo/demo", "type": "task", "title": "demo"}},
         )
         result = await server.call_tool(
             "job_submit",
             {
-                "record_id": "demo/demo",
-                **(
-                    {"executor_url": (tmp_path / "backend").as_uri()}
-                    if custom_url
-                    else {}
-                ),
-                "launcher": "single",
-                "custom_attributes": {"example": "value"},
-                "command": [
-                    sys.executable,
-                    "-c",
-                    "import sys,time; from pathlib import Path\n"
-                    f"while not Path({str(config.root / 'release')!r}).exists(): "
-                    "time.sleep(.05)\n"
-                    "import os; print(os.environ['HIRAKU_RECORD_ID']); "
-                    "print('err', file=sys.stderr); "
-                    "raise SystemExit(7)",
-                ],
+                "request": {
+                    "record_id": "demo/demo",
+                    **(
+                        {"executor_url": (tmp_path / "backend").as_uri()}
+                        if custom_url
+                        else {}
+                    ),
+                    "launcher": "single",
+                    "custom_attributes": {"example": "value"},
+                    "command": [
+                        sys.executable,
+                        "-c",
+                        "import sys,time; from pathlib import Path\n"
+                        f"while not Path({str(config.root / 'release')!r}).exists(): "
+                        "time.sleep(.05)\n"
+                        "import os; print(os.environ['HIRAKU_RECORD_ID']); "
+                        "print('err', file=sys.stderr); "
+                        "raise SystemExit(7)",
+                    ],
+                }
             },
         )
         job = dict(result.structured_content)
@@ -430,18 +510,22 @@ def test_submit_and_status_use_native_executor(
             await server.call_tool(
                 "job_submit",
                 {
-                    "command": [sys.executable, "-c", "pass"],
-                    "launcher": "not-installed",
-                    "executor_url": (tmp_path / "backend").as_uri(),
+                    "request": {
+                        "command": [sys.executable, "-c", "pass"],
+                        "launcher": "not-installed",
+                        "executor_url": (tmp_path / "backend").as_uri(),
+                    }
                 },
             )
         submitted = await server.call_tool(
             "job_submit",
             {
-                "executor": "local-detached",
-                "executor_url": (tmp_path / "backend").as_uri(),
-                "record_id": "demo/demo",
-                "command": [sys.executable, "-c", "raise SystemExit(3)"],
+                "request": {
+                    "executor": "local-detached",
+                    "executor_url": (tmp_path / "backend").as_uri(),
+                    "record_id": "demo/demo",
+                    "command": [sys.executable, "-c", "raise SystemExit(3)"],
+                }
             },
         )
         assert submitted.structured_content["executor"] == "local-detached"
@@ -450,8 +534,10 @@ def test_submit_and_status_use_native_executor(
         submitted = await server.call_tool(
             "job_submit",
             {
-                "command": [sys.executable, "-c", "pass"],
-                "executor_url": (tmp_path / "backend").as_uri(),
+                "request": {
+                    "command": [sys.executable, "-c", "pass"],
+                    "executor_url": (tmp_path / "backend").as_uri(),
+                }
             },
         )
         completed = await completed_job(submitted.structured_content)
@@ -498,6 +584,11 @@ def test_submit_exposes_expected_backend_errors(
 ):
     server = create_server(Project.create(tmp_path))
 
+    async def run_inline(func, *args, **kwargs):
+        return func(*args)
+
+    monkeypatch.setattr(anyio.to_thread, "run_sync", run_inline)
+
     def fail(*args, **kwargs):
         raise error
 
@@ -513,7 +604,9 @@ def test_submit_exposes_expected_backend_errors(
 
     async def exercise():
         with pytest.raises(ToolError) as caught:
-            await server.call_tool("job_submit", {"command": ["echo", "hello"]})
+            await server.call_tool(
+                "job_submit", {"request": {"command": ["echo", "hello"]}}
+            )
         assert str(error) in str(caught.value)
 
     asyncio.run(exercise())
@@ -526,6 +619,11 @@ def test_leaderboard_list_matches_cli_and_reads_current_definitions(
     project = Project.create(tmp_path, install_skill=False, install_mcp=False)
     monkeypatch.chdir(tmp_path)
     server = create_server(project)
+
+    async def run_inline(func, *args, **kwargs):
+        return func(*args)
+
+    monkeypatch.setattr(anyio.to_thread, "run_sync", run_inline)
 
     async def exercise():
         empty = await server.call_tool("leaderboard_list", {})
@@ -546,7 +644,7 @@ def test_leaderboard_list_matches_cli_and_reads_current_definitions(
     asyncio.run(exercise())
 
 
-def test_runs(tmp_path: Path) -> None:
+def test_runs(tmp_path: Path, monkeypatch) -> None:
     config = Project.create(tmp_path)
     (config.leaderboards_dir / "default.yml").write_text(
         "source: {type: csv, path: runs.csv}\n"
@@ -557,14 +655,15 @@ def test_runs(tmp_path: Path) -> None:
     )
     server = create_server(config)
 
+    async def run_inline(func, *args, **kwargs):
+        return func(*args)
+
+    monkeypatch.setattr(anyio.to_thread, "run_sync", run_inline)
+
     async def exercise() -> None:
         await server.call_tool(
             "record_create",
-            {
-                "record_id": "task/task",
-                "type": "task",
-                "title": "task",
-            },
+            {"record": {"id": "task/task", "type": "task", "title": "task"}},
         )
 
         async def ids(**args) -> list[str]:
@@ -600,7 +699,7 @@ def test_stdio_session(tmp_path: Path) -> None:
             cwd=str(tmp_path),
         )
         async with stdio_client(params) as (read, write):  # noqa: SIM117
-            async with ClientSession(read, write, read_timeout_seconds=10) as client:
+            async with ClientSession(read, write, read_timeout_seconds=30) as client:
                 await client.initialize()
                 tools = await client.list_tools()
                 assert "record_create" in {tool.name for tool in tools.tools}
@@ -619,10 +718,12 @@ def test_stdio_session(tmp_path: Path) -> None:
                     await client.call_tool(
                         "record_create",
                         {
-                            "record_id": "papers/papers",
-                            "type": "context",
-                            "title": "papers",
-                            "markdown": "Literature",
+                            "record": {
+                                "id": "papers/papers",
+                                "type": "context",
+                                "title": "papers",
+                                "markdown": "Literature",
+                            }
                         },
                     )
                 ).is_error
@@ -814,7 +915,11 @@ def test_collaborative_workflow_is_a_checkpointed_langgraph(tmp_path) -> None:
     config.vault.create("task/task", type="task", title="task")
     started = start_workflow(
         "collaborative",
-        {"task": "task/task", "rounds": 1, "command": ["python", "train.py"]},
+        {
+            "task": "task/task",
+            "rounds": 1,
+            "command": ["python", "train.py"],
+        },
         project=config,
     )
     assert started["status"] == "waiting"
@@ -851,7 +956,11 @@ def test_collaborative_approval_uses_mcp_elicitation(tmp_path) -> None:
     config.vault.create("task/task", type="task", title="task")
     started = start_workflow(
         "collaborative",
-        {"task": "task/task", "rounds": 1, "command": ["python", "train.py"]},
+        {
+            "task": "task/task",
+            "rounds": 1,
+            "command": ["python", "train.py"],
+        },
         project=config,
     )
     requested = []
@@ -880,9 +989,11 @@ def test_collaborative_approval_uses_mcp_elicitation(tmp_path) -> None:
             resumed = await client.call_tool(
                 "workflow_resume",
                 {
-                    "workflow_session_id": started["workflow_session_id"],
-                    "response": approval.structured_content,
-                    "checkpoint_id": started["checkpoint_id"],
+                    "request": {
+                        "workflow_session_id": started["workflow_session_id"],
+                        "response": approval.structured_content,
+                        "checkpoint_id": started["checkpoint_id"],
+                    }
                 },
             )
             return approval, resumed
@@ -911,7 +1022,11 @@ def test_cancelled_collaborative_approval_leaves_run_waiting(tmp_path) -> None:
     config.vault.create("task/task", type="task", title="task")
     started = start_workflow(
         "collaborative",
-        {"task": "task/task", "rounds": 1, "command": ["python", "train.py"]},
+        {
+            "task": "task/task",
+            "rounds": 1,
+            "command": ["python", "train.py"],
+        },
         project=config,
     )
 
@@ -990,9 +1105,11 @@ def test_mcp_approval_supports_other_workflows(tmp_path) -> None:
             return await client.call_tool(
                 "workflow_resume",
                 {
-                    "workflow_session_id": started["workflow_session_id"],
-                    "response": approval.structured_content,
-                    "checkpoint_id": started["checkpoint_id"],
+                    "request": {
+                        "workflow_session_id": started["workflow_session_id"],
+                        "response": approval.structured_content,
+                        "checkpoint_id": started["checkpoint_id"],
+                    }
                 },
             )
 
@@ -1005,7 +1122,11 @@ def test_approval_result_can_resume_after_server_restart(tmp_path) -> None:
     config.vault.create("task/task", type="task", title="task")
     first = start_workflow(
         "collaborative",
-        {"task": "task/task", "rounds": 1, "command": ["python", "train.py"]},
+        {
+            "task": "task/task",
+            "rounds": 1,
+            "command": ["python", "train.py"],
+        },
         project=config,
     )
 
@@ -1027,9 +1148,11 @@ def test_approval_result_can_resume_after_server_restart(tmp_path) -> None:
             return await client.call_tool(
                 "workflow_resume",
                 {
-                    "workflow_session_id": first["workflow_session_id"],
-                    "response": approval.structured_content,
-                    "checkpoint_id": first["checkpoint_id"],
+                    "request": {
+                        "workflow_session_id": first["workflow_session_id"],
+                        "response": approval.structured_content,
+                        "checkpoint_id": first["checkpoint_id"],
+                    }
                 },
             )
 
