@@ -82,6 +82,10 @@ class LocalDetachedJobExecutor(JobExecutor):
                 {key: str(value) for key, value in (spec.environment or {}).items()}
             )
             path.parent.mkdir(parents=True, exist_ok=True)
+            if path.exists():
+                raise InvalidJobException(
+                    f"Detached job result path already exists: {path}"
+                )
             process = subprocess.Popen(
                 [
                     sys.executable,

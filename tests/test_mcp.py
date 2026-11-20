@@ -583,6 +583,7 @@ def test_submit_and_status_use_native_executor(
             raise ObservationError("backend unavailable")
 
         cached = completed.structured_content
+        cached_entry = Submission.load(config, cached["id"])
         path = config.root / ".hiraku/jobs" / f"{cached['id']}.json"
         before = path.read_bytes()
         monkeypatch.setattr("hiraku.job.Submission.get_psi_job", unavailable)
@@ -592,8 +593,8 @@ def test_submit_and_status_use_native_executor(
         listed = await server.call_tool("job_list", {})
         assert {
             "id": cached["id"],
-            "record_id": cached["record_id"],
-            "executor": cached["executor"],
+            "record_id": cached_entry.record_id,
+            "executor": cached_entry.executor,
             "state": cached["status"]["state"],
         } in listed.structured_content["result"]
         assert path.read_bytes() == before

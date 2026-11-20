@@ -509,9 +509,10 @@ def test_supervisor_identity_failure_prevents_execution(
     )
     path = detached._result_path(job.id)
     path.parent.mkdir(parents=True)
-    path.with_name("supervisor.json").mkdir()
     if block_result:
         path.mkdir()
+    else:
+        path.with_name("supervisor.json").mkdir()
     processes = []
     popen = subprocess.Popen
 
@@ -521,25 +522,22 @@ def test_supervisor_identity_failure_prevents_execution(
         return process
 
     monkeypatch.setattr(subprocess, "Popen", capture)
-    detached.submit(job)
-    assert job.native_id == job.id
-    entry = Submission.from_psi_job(job)
-    entry.save(project)
-    status = wait(job)
-    assert status.state == psij.JobState.FAILED
-    assert status.message
+    if block_result:
+        with pytest.raises(
+            psij.InvalidJobException, match="Detached job result path already exists"
+        ):
+            detached.submit(job)
+        assert not processes
+    else:
+        with pytest.raises(
+            psij.SubmitException, match="Could not start detached supervisor"
+        ):
+            detached.submit(job)
+        assert len(processes) == 1 and processes[0].returncode is not None
+
+    assert job.status.state == psij.JobState.NEW
+    assert job.executor is None and job.native_id is None
     assert not marker.exists()
-    entry.sync(job)
-    entry.save(project)
-    assert Submission.load(project, job.id).status.state == "FAILED"
-    deadline = time.monotonic() + 5
-    while processes[0].returncode is None:
-        assert time.monotonic() < deadline, "Failed supervisor was not reaped"
-        time.sleep(0.01)
-    if not block_result:
-        attached = psij.Job()
-        detached.attach(attached, job.native_id)
-        assert wait(attached).state == psij.JobState.FAILED
 
 
 def test_supervisor_records_launcher_start_failure(project, detached, monkeypatch):
