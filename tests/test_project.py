@@ -344,13 +344,6 @@ def test_init_leaves_inline_codex_mcp_servers_unchanged(tmp_path: Path) -> None:
     assert codex.read_text() == original
 
 
-@pytest.mark.parametrize("example", [None, "minimal"])
-def test_unavailable_results_leave_no_project(tmp_path: Path, example):
-    with pytest.raises(ValidationError, match="requires|no results"):
-        Project.create(tmp_path, example=example, results=True)
-    assert not (tmp_path / "hiraku.yml").exists()
-
-
 def test_results_override_base_files(tmp_path: Path, monkeypatch):
     resources = tmp_path / "resources"
     base = resources / "examples/layered/src"

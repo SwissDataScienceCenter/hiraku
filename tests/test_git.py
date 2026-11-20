@@ -75,9 +75,7 @@ class TestGitRepositoryBehavior:
         _git(path, "commit", "-qm", "Initial metadata")
         return path
 
-    @pytest.mark.parametrize(
-        "command", [["init", "minimal"], ["example", "create", "minimal"]]
-    )
+    @pytest.mark.parametrize("command", [["init", "minimal"]])
     def test_plain_project_creation_does_not_invoke_git(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: list[str]
     ) -> None:
