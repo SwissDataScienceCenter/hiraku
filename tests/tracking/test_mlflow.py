@@ -50,7 +50,7 @@ def test_mlflow_destination_precedence(tmp_path, monkeypatch, options):
 def test_mlflow_experiment_environment(
     tmp_path, monkeypatch, name, experiment_id, explicit, error
 ):
-    mlflow = pytest.importorskip("mlflow")
+    mlflow = pytest.importorskip("mlflow", exc_type=ImportError)
     for key, value in (
         ("MLFLOW_EXPERIMENT_NAME", name),
         ("MLFLOW_EXPERIMENT_ID", experiment_id),
@@ -90,7 +90,7 @@ def test_mlflow_experiment_environment(
 
 
 def test_training_and_leaderboard_share_mlflow_environment(tmp_path, monkeypatch):
-    mlflow = pytest.importorskip("mlflow")
+    mlflow = pytest.importorskip("mlflow", exc_type=ImportError)
     from mlflow.tracking._tracking_service import utils
 
     monkeypatch.chdir(tmp_path)
@@ -139,7 +139,7 @@ def test_mlflow_backend_rejects_database_symlink_escape(tmp_path) -> None:
 def test_mlflow_backend_requires_existing_database(
     tmp_path, monkeypatch, database, directory
 ) -> None:
-    mlflow = pytest.importorskip("mlflow")
+    mlflow = pytest.importorskip("mlflow", exc_type=ImportError)
     config = Project.create(tmp_path)
     path = tmp_path / (database or "mlflow.db")
     if directory:
@@ -187,7 +187,7 @@ def _native_run(
 def test_mlflow_backend_paginates_runs_in_named_experiment(
     tmp_path, monkeypatch
 ) -> None:
-    mlflow = pytest.importorskip("mlflow")
+    mlflow = pytest.importorskip("mlflow", exc_type=ImportError)
     calls: list[str | None] = []
 
     class FakeClient:
@@ -216,7 +216,7 @@ def test_mlflow_backend_paginates_runs_in_named_experiment(
 def test_mlflow_backend_reads_duration_from_start_and_end(
     tmp_path, monkeypatch
 ) -> None:
-    mlflow = pytest.importorskip("mlflow")
+    mlflow = pytest.importorskip("mlflow", exc_type=ImportError)
 
     class FakeClient:
         def __init__(self, tracking_uri: str | None = None) -> None:
@@ -253,7 +253,7 @@ def test_mlflow_backend_reports_missing_optional_dependency(
 def test_mlflow_backend_returns_no_runs_for_unknown_experiment(
     tmp_path, monkeypatch
 ) -> None:
-    mlflow = pytest.importorskip("mlflow")
+    mlflow = pytest.importorskip("mlflow", exc_type=ImportError)
 
     class FakeClient:
         def __init__(self, tracking_uri: str | None = None) -> None:
@@ -275,7 +275,7 @@ def test_mlflow_backend_returns_no_runs_for_unknown_experiment(
 
 
 def test_mlflow_backend_wraps_client_query_errors(tmp_path, monkeypatch) -> None:
-    mlflow = pytest.importorskip("mlflow")
+    mlflow = pytest.importorskip("mlflow", exc_type=ImportError)
 
     class FakeClient:
         def __init__(self, tracking_uri: str | None = None) -> None:
@@ -299,7 +299,7 @@ def test_mlflow_backend_wraps_client_query_errors(tmp_path, monkeypatch) -> None
 def test_mlflow_backend_preserves_backend_errors_from_client(
     tmp_path, monkeypatch
 ) -> None:
-    mlflow = pytest.importorskip("mlflow")
+    mlflow = pytest.importorskip("mlflow", exc_type=ImportError)
 
     class FakeClient:
         def __init__(self, tracking_uri: str | None = None) -> None:

@@ -768,7 +768,7 @@ def resume_workflow(session_id, response, *, project):
 
 
 def _project(tmp_path) -> Project:
-    return Project.create(tmp_path, example="workflows", install_skill=False)
+    return Project.create(tmp_path, install_skill=False)
 
 
 def _tool_names(server: Any) -> set[str]:

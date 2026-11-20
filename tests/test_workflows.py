@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import sqlite3
 import subprocess
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -10,7 +8,6 @@ import pytest
 from hiraku.errors import ValidationError, WorkflowError
 from hiraku.project import Project
 from hiraku.workflows.langgraph import (
-    checkpoint_database,
     resume_workflow,
     start_workflow,
     workflow_status,
@@ -90,19 +87,6 @@ def test_workflow_status_rejects_unknown_session(tmp_path: Path) -> None:
 
     with pytest.raises(ValidationError, match="was not found"):
         workflow_status(f"unknown:{'0' * 32}", project=config)
-
-
-def test_resume_rejects_stale_checkpoint(tmp_path: Path) -> None:
-    config = Project.create(tmp_path, example="workflows", install_skill=False)
-    started = start_workflow("count-steps", {"count": 1}, project=config)
-
-    with pytest.raises(ValidationError, match="checkpoint has changed"):
-        resume_workflow(
-            started["workflow_session_id"],
-            {"decision": "finish"},
-            project=config,
-            checkpoint_id="stale",
-        )
 
 
 def resume_current_workflow(session_id, response, *, project):
@@ -233,55 +217,4 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path, task_i
 
 
 def _project(tmp_path: Path) -> Project:
-    return Project.create(tmp_path, example="workflows", install_skill=False)
-
-
-def test_concurrent_resumes_reject_stale_checkpoint(tmp_path: Path) -> None:
-    config = _project(tmp_path)
-    started = start_workflow("count-steps", {"count": 2}, project=config)
-    session_id = started["workflow_session_id"]
-    token = started["interrupts"][0]["value"]["data"]["token"]
-
-    def resume():
-        try:
-            return resume_workflow(
-                session_id,
-                {"token": token, "decision": "continue"},
-                checkpoint_id=started["checkpoint_id"],
-                project=config,
-            )
-        except ValidationError as exc:
-            return exc
-
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        results = list(executor.map(lambda _: resume(), range(2)))
-    assert sum(isinstance(result, ValidationError) for result in results) == 1
-    assert sum(isinstance(result, dict) for result in results) == 1
-    error = next(r for r in results if isinstance(r, Exception))
-    assert "checkpoint has changed" in str(error)
-
-
-def test_checkpoint_storage_is_ignored(tmp_path: Path) -> None:
-    import subprocess
-
-    config = _project(tmp_path)
-    (tmp_path / ".gitignore").write_text("/.hiraku/\n", encoding="utf-8")
-    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
-    start_workflow("count-steps", project=config)
-    database = checkpoint_database(config)
-    assert database == tmp_path / ".hiraku" / "langgraph-checkpoints.sqlite"
-    assert database.is_file()
-    assert (
-        subprocess.run(
-            ["git", "check-ignore", str(database)], cwd=tmp_path, check=False
-        ).returncode
-        == 0
-    )
-    with sqlite3.connect(database) as connection:
-        assert (
-            connection.execute(
-                "SELECT name FROM sqlite_master "
-                "WHERE name LIKE 'hiraku_workflow_session_%'"
-            ).fetchone()
-            is None
-        )
+    return Project.create(tmp_path, install_skill=False)

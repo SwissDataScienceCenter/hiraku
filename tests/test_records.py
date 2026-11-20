@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import warnings
+
 import frontmatter
 import pytest
 from pydantic import BaseModel, Field
@@ -169,8 +171,11 @@ def test_save_revalidates_nested_mutations_without_changing_file(tmp_path):
     path = vault.save(record)
     before = path.read_bytes()
     record.tags.append(123)
-    with pytest.raises(ValidationError):
-        vault.save(record, overwrite=True)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with pytest.raises(ValidationError):
+            vault.save(record, overwrite=True)
+    assert not caught
     assert path.read_bytes() == before
     record = vault.load("a")
     record.custom = {"unsupported": object()}

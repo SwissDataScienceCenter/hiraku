@@ -384,11 +384,13 @@ class Vault:
             True
         """
         try:
+            values = dict(record.__dict__)
+            values.update(record.__pydantic_extra__ or {})
+            candidate = Record.model_validate(values)
             keys = (
                 record.model_fields_set
-                | record.model_dump(exclude_defaults=True).keys()
+                | candidate.model_dump(exclude_defaults=True).keys()
             )
-            candidate = Record.model_validate(record.model_dump(include=keys))
         except (TypeError, ValueError) as exc:
             raise ValidationError(f"Invalid record {record.id!r}: {exc}") from exc
         target = self.file_path(candidate.id)

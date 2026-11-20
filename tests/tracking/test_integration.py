@@ -25,7 +25,7 @@ def test_backend_runs_rejects_empty_record_id_before_reading_source(
 
 
 def test_real_mlflow_sqlite_adapter(tmp_path: Path) -> None:
-    mlflow = pytest.importorskip("mlflow")
+    mlflow = pytest.importorskip("mlflow", exc_type=ImportError)
     config = Project.create(tmp_path)
     source = MLflowBackendConfig(experiment_name="hiraku-test")
     task = config.vault.create("task/task", type="task", title="task")
