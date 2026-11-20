@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
+import math
 import shlex
 import shutil
 from collections.abc import Iterator
@@ -12,7 +15,7 @@ import frontmatter
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic import ValidationError as PydanticValidationError
 
 from hiraku.errors import HirakuError, ValidationError
@@ -25,6 +28,7 @@ from hiraku.tracking import Run
 from hiraku.tracking.leaderboard import Leaderboard
 
 Verdict = Literal["supports", "refutes", "inconclusive"]
+Affects = Literal["analysis", "runs", "code", "design", "setup", "task", "unknown"]
 TriageDecision = Literal["follow-up", "stop"]
 # Compute comes first, so jobs run while the agent analyzes and designs; reviews
 # come right before the step they unblock.
@@ -32,6 +36,8 @@ WORK_PRIORITIES = (
     "launch",
     "review_code",
     "review_design",
+    "meta_review",
+    "fix",
     "implement",
     "review_result",
     "triage",
@@ -43,7 +49,35 @@ APPROVAL = (
     "response; apply their changes first."
 )
 AUTONOMOUS = "Decide on your own; do not wait for the user."
-REVIEW_CAPABILITIES = ["record.read", "filesystem.read", "web.search"]
+RESEARCHER = (
+    "Ask the researcher this question and wait for their answer. Do not answer "
+    "for them, even when the study is autonomous."
+)
+REVIEW_CAPABILITIES = [
+    "record.read",
+    "filesystem.read",
+    "web.search",
+    "tracking.run.read",
+]
+FIX_CAPABILITIES = [
+    "record.read",
+    "filesystem.read",
+    "filesystem.write",
+    "shell.execute",
+    "git.commit",
+    "experiment.launch",
+    "tracking.run.read",
+]
+# Where each review kind keeps its approval; an acceptance reopen is a result fix.
+STAGE_FIELDS = {
+    "design": "design_review",
+    "code": "code_review",
+    "result": "result_review",
+}
+NOT_RUN = {
+    "design": "Not run: design did not pass review.",
+    "code": "Not run: code did not pass review.",
+}
 # Keep the end of long smoke-test output.
 SMOKE_OUTPUT_LIMIT = 4000
 Sources = Annotated[
@@ -67,11 +101,11 @@ class ResearchState(TypedDict, total=False):
     autonomous: bool
     review_rounds: int
     current: str
+    acceptance_rounds: int
     # The commit under code review; a review must not change it.
     review_commit: str
-    # Feedback of rejected design reviews and their count, by parent record.
-    design_feedback: dict[str, str]
-    design_rounds: dict[str, int]
+    # Self-reported agent IDs and the role each one acted in.
+    agents: dict[str, str]
     step: str
     feedback: str
     final: str
@@ -100,8 +134,22 @@ class ResearchInput(BaseModel):
         default=2,
         ge=0,
         le=5,
-        description="Reviews that may send an experiment back before it is kept "
-        "as unresolved or concluded as inconclusive.",
+        description="Fix rounds a review may send an experiment back for before "
+        "a meta review rules on the open findings.",
+    )
+    acceptance_rounds: int = Field(
+        default=1,
+        ge=0,
+        le=3,
+        description="Times the acceptance review may reopen experiments.",
+    )
+
+
+def _agent() -> Any:
+    return Field(
+        default="",
+        description="Your session or agent ID, if you have one. One ID cannot act "
+        "in two roles of a study (author, a reviewer, meta reviewer).",
     )
 
 
@@ -119,6 +167,7 @@ class DesignedResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     experiments: list[Plan] = Field(min_length=1)
+    agent: str = _agent()
 
 
 class CommitResponse(BaseModel):
@@ -127,32 +176,177 @@ class CommitResponse(BaseModel):
     commit: str = Field(min_length=1)
     smoke_command: str = Field(default="", description="The smoke test you ran.")
     smoke_output: str = Field(default="", description="Its output, or the end of it.")
+    agent: str = _agent()
+
+
+class Finding(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    claim: str = Field(min_length=1, description="What is wrong.")
+    evidence: str = Field(
+        min_length=1, description="Why: run IDs with values, a diff line, a source."
+    )
+    severity: Literal["blocking", "minor"] = Field(
+        default="blocking",
+        description="Only blocking findings send the experiment back; minor ones "
+        "are recorded as limitations.",
+    )
+    affects: Affects = Field(
+        default="unknown",
+        description="What the finding is about. `task` or `setup` is outside the "
+        "experiment: the researcher decides.",
+    )
+    suggested_fix: str = ""
+    unfixable: bool = Field(
+        default=False,
+        description="No fix to this experiment can resolve it, but it stays within "
+        "the experiment's scope.",
+    )
+    continues: str = Field(
+        default="",
+        description="ID of an earlier finding that this one keeps open.",
+    )
+
+
+class Evidence(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    run_id: str = Field(min_length=1)
+    metric: str = Field(min_length=1)
+    value: float
+
+
+class Judgement(BaseModel):
+    """A decision with findings; `fix` needs a blocking finding."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    decision: Literal["approve", "fix"]
+    findings: list[Finding] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _consistent(self) -> Judgement:
+        blocking = any(item.severity == "blocking" for item in self.findings)
+        if self.decision == "fix" and not blocking:
+            raise ValueError("`fix` needs at least one blocking finding")
+        if self.decision == "approve" and blocking:
+            raise ValueError("`approve` cannot come with a blocking finding")
+        return self
+
+
+class DesignVerdict(Judgement):
+    record_id: str = Field(min_length=1)
 
 
 class DesignReviewResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
-    decision: Literal["approve", "revise"]
-    findings: str = Field(min_length=1)
+    verdicts: list[DesignVerdict] = Field(min_length=1)
     sources: Sources
+    agent: str = _agent()
 
 
-class CodeReviewResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
-    decision: Literal["approve", "fix"]
-    findings: str = Field(min_length=1)
+class CodeReviewResponse(Judgement):
+    agent: str = _agent()
 
 
-class ResultReviewResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid", strict=True)
-
+class ResultReviewResponse(Judgement):
     own_verdict: Verdict = Field(
         description="Your verdict from the runs, formed before reading the analysis."
     )
-    decision: Literal["approve", "reanalyze", "fix_code"]
-    findings: str = Field(min_length=1)
     sources: Sources
+    evidence: list[Evidence] = Field(
+        default_factory=list,
+        description="The run values your findings rest on; each is checked against "
+        "the data.",
+    )
+    agent: str = _agent()
+
+
+class Ruling(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    finding_id: str = Field(min_length=1)
+    ruling: Literal["overrule", "limitation", "sustain"]
+    reason: str = Field(min_length=1)
+
+
+class MetaReviewResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    rulings: list[Ruling] = Field(min_length=1)
+    sources: Sources
+    evidence: list[Evidence] = Field(default_factory=list)
+    agent: str = _agent()
+
+
+class FindingResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    id: str = Field(min_length=1)
+    action: Literal["done", "dispute", "limitation"] = Field(
+        description="`done`: what changed. `dispute`: your argument and evidence. "
+        "`limitation`: accepted and recorded."
+    )
+    note: str = Field(min_length=1)
+
+
+class ExcludedRun(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    run_id: str = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+
+class FixResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    responses: list[FindingResponse] = Field(min_length=1)
+    plan: Plan | None = Field(
+        default=None, description="Design fix: the amended plan of this experiment."
+    )
+    commit: str = Field(default="", description="Code changed: the new commit.")
+    smoke_command: str = ""
+    smoke_output: str = ""
+    verdict: Verdict | None = None
+    conclusion: str | None = None
+    excluded_runs: list[ExcludedRun] = Field(
+        default_factory=list,
+        description="Runs that are not valid evidence, each with a reason.",
+    )
+    agent: str = _agent()
+
+
+class ResearcherResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    answer: Literal["resolved", "accept_risk", "conclude"]
+    note: str = ""
+
+
+class SummaryResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    report: str = Field(min_length=1)
+    agent: str = _agent()
+
+
+class Reopen(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    record_id: str = Field(min_length=1)
+    findings: list[Finding] = Field(min_length=1)
+
+
+class AcceptanceResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    outcome: Literal["accept", "accept_with_caveats", "reopen"]
+    caveats: list[str] = Field(default_factory=list)
+    reopen: list[Reopen] = Field(default_factory=list)
+    evidence: list[Evidence] = Field(default_factory=list)
+    sources: Sources
+    agent: str = _agent()
 
 
 class LaunchResponse(BaseModel):
@@ -176,6 +370,7 @@ class AnalysisResponse(BaseModel):
 
     verdict: Verdict
     conclusion: str = Field(min_length=1)
+    agent: str = _agent()
 
 
 class TriageResponse(BaseModel):
@@ -233,8 +428,8 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
                 "max_repairs": arguments.max_repairs,
                 "autonomous": arguments.autonomous,
                 "review_rounds": arguments.review_rounds,
-                "design_feedback": {},
-                "design_rounds": {},
+                "acceptance_rounds": arguments.acceptance_rounds,
+                "agents": {},
                 "feedback": "",
             },
             goto="select",
@@ -254,7 +449,12 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             "wait",
             "analyze",
             "review_result",
+            "fix",
+            "meta_review",
+            "researcher",
             "triage",
+            "summarize",
+            "accept",
             "done",
         ]
     ]:
@@ -275,11 +475,14 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
 
         candidates: list[tuple[str, str]] = []
         waiting = False
+        asking: list[str] = []
         children = _children(project)
         for experiment, depth in _ordered(task_id, children):
             step = _step_of(experiment, depth, state, children, project)
             if step == "waiting":
                 waiting = True
+            elif step == "researcher":
+                asking.append(experiment.id)
             elif step in WORK_PRIORITIES and (step != "design" or remaining > 0):
                 candidates.append((step, experiment.id))
         if not tree and remaining > 0:
@@ -298,8 +501,20 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             if step == "review_code":
                 update["review_commit"] = project.vault.load(current).commit or ""
             return Command(update=update, goto=step)
+        if asking:
+            # Only experiments that can make no progress wait for the researcher;
+            # every other experiment ran first.
+            return Command(
+                update={"step": "researcher", "current": asking[0]}, goto="researcher"
+            )
         if waiting:
             return Command(update={"step": "wait", "current": ""}, goto="wait")
+        if tree and _autonomous(state):
+            task = _task(task_id, project)
+            if not getattr(task, "report", None):
+                return Command(update={"step": "summarize"}, goto="summarize")
+            if not getattr(task, "acceptance", None):
+                return Command(update={"step": "accept"}, goto="accept")
         return Command(update={"step": "done", "current": ""}, goto="done")
 
     def setup(state: ResearchState) -> Command[Literal["setup", "select", "done"]]:
@@ -353,7 +568,6 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             "depth": depth + 1,
             "remaining": remaining,
             "tree": tree,
-            "review_feedback": state.get("design_feedback", {}).get(parent.id),
         }
         response = _ask(
             markdown,
@@ -363,28 +577,22 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             state.get("feedback", ""),
             ["record.read", "record.create", "workflow.user_input"],
             approval=_approval(state),
+            role="author",
+            agents=state.get("agents"),
         )
+
+        def retry(message: str) -> Command[Literal["design", "select"]]:
+            return _next("design", state, "author", response, feedback=message)
+
         if len(response.experiments) > remaining:
-            return Command(
-                update={"feedback": f"Propose at most {remaining} experiments."},
-                goto="design",
-            )
+            return retry(f"Propose at most {remaining} experiments.")
         if depth >= state["max_depth"]:
-            return Command(
-                update={"feedback": f"The maximum depth is {state['max_depth']}."},
-                goto="design",
-            )
+            return retry(f"The maximum depth is {state['max_depth']}.")
         known = {record.id for record in project.vault.list()}
         identifiers = [plan.record_id for plan in response.experiments]
         if len(set(identifiers)) != len(identifiers) or known.intersection(identifiers):
-            return Command(
-                update={"feedback": "Experiment record IDs must be new and distinct."},
-                goto="design",
-            )
-        existing_tree = _tree(
-            state["task"], project, state["max_depth"], _autonomous(state)
-        )
-        sequence = max((int(item["sequence"]) for item in existing_tree), default=0)
+            return retry("Experiment record IDs must be new and distinct.")
+        sequence = max((int(item["sequence"]) for item in tree), default=0)
         try:
             for index, plan in enumerate(response.experiments, start=1):
                 project.vault.create(
@@ -399,8 +607,8 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
                     markdown=f"## Change\n\n{plan.change.strip()}\n",
                 )
         except HirakuError as exc:
-            return Command(update={"feedback": str(exc)}, goto="design")
-        return Command(update={"feedback": ""}, goto="select")
+            return retry(str(exc))
+        return _next("select", state, "author", response, feedback="")
 
     def implement(state: ResearchState) -> Command[Literal["implement", "select"]]:
         experiment = project.vault.load(state["current"])
@@ -411,7 +619,6 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             "parent_commit": parent.commit if parent.type == "experiment" else None,
             "command": state["command"],
             "failure": getattr(experiment, "failure", None),
-            "review_feedback": getattr(experiment, "review_feedback", None),
             "smoke_test_required": _autonomous(state),
         }
         response = _ask(
@@ -421,29 +628,30 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             CommitResponse,
             state.get("feedback", ""),
             ["filesystem.read", "filesystem.write", "shell.execute", "git.commit"],
+            role="author",
+            agents=state.get("agents"),
         )
+
+        def retry(message: str) -> Command[Literal["implement", "select"]]:
+            return _next("implement", state, "author", response, feedback=message)
+
         if _autonomous(state) and not (
             response.smoke_command.strip() and response.smoke_output.strip()
         ):
-            return Command(
-                update={
-                    "feedback": "Run a smoke test of the change and send its "
-                    "command and output."
-                },
-                goto="implement",
+            return retry(
+                "Run a smoke test of the change and send its command and output."
             )
         try:
             sha = GitRepository(project.root).resolve(response.commit)
         except HirakuError as exc:
-            return Command(update={"feedback": str(exc)}, goto="implement")
+            return retry(str(exc))
         experiment.commit = sha
         experiment.state = "implemented"
         experiment.failure = None
         experiment.smoke_command = response.smoke_command or None
         experiment.smoke_output = response.smoke_output[-SMOKE_OUTPUT_LIMIT:] or None
-        experiment.review_feedback = None
         project.vault.save(experiment, overwrite=True)
-        return Command(update={"feedback": ""}, goto="select")
+        return _next("select", state, "author", response, feedback="")
 
     def launch(state: ResearchState) -> Command[Literal["launch", "select"]]:
         experiment = project.vault.load(state["current"])
@@ -535,7 +743,6 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
                 }
                 for run in usable
             ],
-            "review_feedback": getattr(experiment, "review_feedback", None),
         }
         response = _ask(
             markdown,
@@ -544,19 +751,23 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             AnalysisResponse,
             state.get("feedback", ""),
             ["record.read", "tracking.run.read", "workflow.user_input"],
+            role="author",
+            agents=state.get("agents"),
         )
         if not usable:
-            return Command(
-                update={"feedback": "No attributed run with metrics is available yet."},
-                goto="analyze",
+            return _next(
+                "analyze",
+                state,
+                "author",
+                response,
+                feedback="No attributed run with metrics is available yet.",
             )
         experiment.state = "analyzed"
         experiment.verdict = response.verdict
         experiment.conclusion = response.conclusion
         experiment.result_review = None
-        experiment.review_feedback = None
         project.vault.save(experiment, overwrite=True)
-        return Command(update={"feedback": ""}, goto="select")
+        return _next("select", state, "author", response, feedback="")
 
     def review_design(
         state: ResearchState,
@@ -578,44 +789,31 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             DesignReviewResponse,
             state.get("feedback", ""),
             REVIEW_CAPABILITIES,
+            role="design_review",
+            agents=state.get("agents"),
         )
-        rounds = state.get("design_rounds", {}).get(parent.id, 0) + 1
-        if response.decision == "revise" and rounds <= state["review_rounds"]:
-            # The experiments are not implemented yet: drop them and redesign.
-            for item in batch:
-                project.vault.delete(item.id)
-            return Command(
-                update={
-                    "design_rounds": {
-                        **state.get("design_rounds", {}),
-                        parent.id: rounds,
-                    },
-                    "design_feedback": {
-                        **state.get("design_feedback", {}),
-                        parent.id: response.findings,
-                    },
-                    "feedback": "",
-                },
-                goto="select",
+        wanted = sorted(item.id for item in batch)
+        given = sorted(item.record_id for item in response.verdicts)
+        if given != wanted:
+            return _next(
+                "review_design",
+                state,
+                "design_review",
+                response,
+                feedback="Give exactly one verdict for each experiment: "
+                + ", ".join(wanted),
             )
-        outcome = "approved" if response.decision == "approve" else "unresolved"
-        for item in batch:
-            item.design_review = outcome
-            _log_review(
-                item,
-                {
-                    "kind": "design",
-                    "decision": response.decision,
-                    "findings": response.findings,
-                    "sources": response.sources,
-                },
+        for verdict in response.verdicts:
+            experiment = project.vault.load(verdict.record_id)
+            _review(
+                experiment,
+                "design",
+                verdict,
+                state["review_rounds"],
+                {"sources": response.sources, "agent": response.agent},
             )
-            project.vault.save(item, overwrite=True)
-        design_feedback = dict(state.get("design_feedback", {}))
-        design_feedback.pop(parent.id, None)
-        return Command(
-            update={"design_feedback": design_feedback, "feedback": ""}, goto="select"
-        )
+            project.vault.save(experiment, overwrite=True)
+        return _next("select", state, "design_review", response, feedback="")
 
     def review_code(
         state: ResearchState,
@@ -640,36 +838,28 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             CodeReviewResponse,
             state.get("feedback", ""),
             [*REVIEW_CAPABILITIES, "shell.execute"],
+            role="code_review",
+            agents=state.get("agents"),
         )
         experiment = project.vault.load(state["current"])
         if experiment.commit != state.get("review_commit"):
-            return Command(
-                update={
-                    "feedback": "The experiment's commit changed during the review; "
-                    "a review must not change code."
-                },
-                goto="review_code",
+            return _next(
+                "review_code",
+                state,
+                "code_review",
+                response,
+                feedback="The experiment's commit changed during the review; "
+                "a review must not change code.",
             )
-        _log_review(
+        _review(
             experiment,
-            {
-                "kind": "code",
-                "decision": response.decision,
-                "findings": response.findings,
-            },
+            "code",
+            response,
+            state["review_rounds"],
+            {"agent": response.agent},
         )
-        if response.decision == "approve":
-            experiment.code_review = experiment.commit
-        else:
-            _send_back(
-                experiment,
-                "code",
-                response.findings,
-                to="implement",
-                rounds=state["review_rounds"],
-            )
         project.vault.save(experiment, overwrite=True)
-        return Command(update={"feedback": ""}, goto="select")
+        return _next("select", state, "code_review", response, feedback="")
 
     def review_result(
         state: ResearchState,
@@ -682,18 +872,12 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             "verdict": plan.pop("verdict", None),
             "conclusion": plan.pop("conclusion", None),
         }
+        evidence = _evidence(experiment, project)
         data = {
             "experiment": plan,
             "parent": _describe(parent) if parent.type == "experiment" else None,
             "metrics": _metrics(task),
-            "runs": [
-                {
-                    "run_id": run.id,
-                    "metrics": dict(run.metrics),
-                    "params": dict(run.params),
-                }
-                for run in _matching_runs(experiment, project)
-            ],
+            **evidence,
             "analysis": analysis,
         }
         response = _ask(
@@ -703,29 +887,280 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             ResultReviewResponse,
             state.get("feedback", ""),
             REVIEW_CAPABILITIES,
+            role="result_review",
+            agents=state.get("agents"),
         )
-        _log_review(
+        problem = _check_evidence(response.evidence, [evidence])
+        if problem:
+            return _next(
+                "review_result", state, "result_review", response, feedback=problem
+            )
+        experiment = project.vault.load(state["current"])
+        _review(
             experiment,
+            "result",
+            response,
+            state["review_rounds"],
             {
-                "kind": "result",
-                "decision": response.decision,
                 "own_verdict": response.own_verdict,
-                "findings": response.findings,
                 "sources": response.sources,
+                "evidence": [item.model_dump() for item in response.evidence],
+                "agent": response.agent,
             },
         )
-        if response.decision == "approve":
-            experiment.result_review = "approved"
-        else:
-            _send_back(
-                experiment,
-                "result",
-                response.findings,
-                to="analyze" if response.decision == "reanalyze" else "implement",
-                rounds=state["review_rounds"],
+        project.vault.save(experiment, overwrite=True)
+        return _next("select", state, "result_review", response, feedback="")
+
+    def fix(state: ResearchState) -> Command[Literal["fix", "select"]]:
+        experiment = project.vault.load(state["current"])
+        fixing = dict(experiment.fixing)
+        kind = str(fixing["kind"])
+        if not fixing.get("snapshot"):
+            # Taken once, before the question: a resumed node runs again from the
+            # top, and by then the author's changes are in place.
+            fixing["snapshot"] = _snapshot(experiment, project)
+            experiment.fixing = fixing
+            project.vault.save(experiment, overwrite=True)
+        snapshot = fixing["snapshot"]
+        task = _task(state["task"], project)
+        data: dict[str, Any] = {
+            "kind": kind,
+            "task": _describe(task),
+            "metrics": _metrics(task),
+            "experiment": _describe(experiment),
+            "findings": fixing["findings"],
+            "thread": _thread(experiment),
+            "command": state["command"],
+            "tree": _tree(state["task"], project, state["max_depth"], True),
+        }
+        if kind in ("result", "acceptance"):
+            data.update(_evidence(experiment, project))
+        if kind == "code":
+            parent = project.vault.load(str(experiment.parent_id))
+            base = parent.commit if parent.type == "experiment" else None
+            data["diff"] = f"git diff {base or str(experiment.commit) + '^'} " + str(
+                experiment.commit
             )
+        response = _ask(
+            markdown,
+            "Fix",
+            data,
+            FixResponse,
+            state.get("feedback", ""),
+            FIX_CAPABILITIES,
+            role="author",
+            agents=state.get("agents"),
+        )
+
+        def retry(message: str) -> Command[Literal["fix", "select"]]:
+            return _next("fix", state, "author", response, feedback=message)
+
+        wanted = sorted(item["id"] for item in fixing["findings"])
+        given = sorted(item.id for item in response.responses)
+        if given != wanted:
+            return retry("Answer every finding exactly once: " + ", ".join(wanted))
+        experiment = project.vault.load(state["current"])
+        problem = _apply_fix(project, experiment, kind, response, snapshot)
+        if problem:
+            project.vault.save(experiment, overwrite=True)
+            return retry(problem)
+        outside = _scope_changes(project, experiment.id, snapshot["scope"])
+        if outside:
+            experiment.researcher = {
+                "stage": _stage(kind),
+                "reason": "scope",
+                "findings": [_scope_finding(outside)],
+                "records": outside,
+            }
+        project.vault.save(experiment, overwrite=True)
+        return _next("select", state, "author", response, feedback="")
+
+    def meta_review(
+        state: ResearchState,
+    ) -> Command[Literal["meta_review", "select"]]:
+        experiment = project.vault.load(state["current"])
+        pending = dict(experiment.meta_pending)
+        kind = str(pending["kind"])
+        task = _task(state["task"], project)
+        parent = project.vault.load(str(experiment.parent_id))
+        data: dict[str, Any] = {
+            "stage": kind,
+            # The whole study, so a ruling can weigh the experiment against it.
+            "task": _describe(task),
+            "metrics": _metrics(task),
+            "project_setup": str(project.vault.load("project-setup").markdown),
+            "tree": _tree(state["task"], project, state["max_depth"], True),
+            "parent": _describe(parent),
+            "experiment": _describe(experiment),
+            "open_findings": pending["findings"],
+            "thread": _thread(experiment),
+            "command": state["command"],
+        }
+        evidence = None
+        if kind == "result":
+            evidence = _evidence(experiment, project)
+            data.update(evidence)
+        if kind == "code":
+            base = parent.commit if parent.type == "experiment" else None
+            data["diff"] = f"git diff {base or str(experiment.commit) + '^'} " + str(
+                experiment.commit
+            )
+        response = _ask(
+            markdown,
+            "Meta review",
+            data,
+            MetaReviewResponse,
+            state.get("feedback", ""),
+            [*REVIEW_CAPABILITIES, "shell.execute"],
+            role="meta_review",
+            agents=state.get("agents"),
+        )
+
+        def retry(message: str) -> Command[Literal["meta_review", "select"]]:
+            return _next(
+                "meta_review", state, "meta_review", response, feedback=message
+            )
+
+        wanted = sorted(item["id"] for item in pending["findings"])
+        given = sorted(item.finding_id for item in response.rulings)
+        if given != wanted:
+            return retry("Rule on every open finding once: " + ", ".join(wanted))
+        problem = _check_evidence(response.evidence, [evidence] if evidence else [])
+        if problem:
+            return retry(problem)
+        experiment = project.vault.load(state["current"])
+        _rule(experiment, kind, pending, response)
+        project.vault.save(experiment, overwrite=True)
+        return _next("select", state, "meta_review", response, feedback="")
+
+    def researcher(
+        state: ResearchState,
+    ) -> Command[Literal["researcher", "select"]]:
+        experiment = project.vault.load(state["current"])
+        task = _task(state["task"], project)
+        data = {
+            "task": _describe(task),
+            "experiment": _describe(experiment),
+            "question": experiment.researcher,
+            "thread": _thread(experiment),
+            "tree": _tree(state["task"], project, state["max_depth"], True),
+        }
+        response = _ask(
+            markdown,
+            "Researcher",
+            data,
+            ResearcherResponse,
+            state.get("feedback", ""),
+            ["record.read", "workflow.user_input"],
+            approval=RESEARCHER,
+        )
+        experiment = project.vault.load(state["current"])
+        _answer(experiment, response)
         project.vault.save(experiment, overwrite=True)
         return Command(update={"feedback": ""}, goto="select")
+
+    def summarize(state: ResearchState) -> Command[Literal["summarize", "select"]]:
+        task = _task(state["task"], project)
+        tree = _tree(state["task"], project, state["max_depth"], True)
+        data = {
+            "task": _describe(task),
+            "metrics": _metrics(task),
+            "tree": tree,
+            "best_results": _best_results(state["task"], project),
+            "disputed": _disputed_events(tree),
+            "reopened": int(getattr(task, "acceptance_rounds", 0) or 0),
+            "acceptance_feedback": getattr(task, "acceptance_log", None) or [],
+        }
+        response = _ask(
+            markdown,
+            "Summarize",
+            data,
+            SummaryResponse,
+            state.get("feedback", ""),
+            ["record.read", "tracking.run.read"],
+            role="author",
+            agents=state.get("agents"),
+        )
+        task = _task(state["task"], project)
+        task.report = response.report
+        project.vault.save(task, overwrite=True)
+        return _next("select", state, "author", response, feedback="")
+
+    def accept(state: ResearchState) -> Command[Literal["accept", "select"]]:
+        task = _task(state["task"], project)
+        tree = _tree(state["task"], project, state["max_depth"], True)
+        experiments = [project.vault.load(item["id"]) for item in tree]
+        evidence = {
+            item.id: _evidence(item, project) for item in experiments if item.commit
+        }
+        data = {
+            "task": _describe(task),
+            "metrics": _metrics(task),
+            "report": getattr(task, "report", ""),
+            "tree": tree,
+            "evidence": evidence,
+            "disputed": _disputed_events(tree),
+            "command": state["command"],
+            "reopen_allowed": int(getattr(task, "acceptance_rounds", 0) or 0)
+            < state["acceptance_rounds"],
+        }
+        response = _ask(
+            markdown,
+            "Acceptance review",
+            data,
+            AcceptanceResponse,
+            state.get("feedback", ""),
+            REVIEW_CAPABILITIES,
+            role="accept_review",
+            agents=state.get("agents"),
+        )
+
+        def retry(message: str) -> Command[Literal["accept", "select"]]:
+            return _next("accept", state, "accept_review", response, feedback=message)
+
+        problem = _check_evidence(response.evidence, list(evidence.values()))
+        if problem:
+            return retry(problem)
+        known = {item.id: item for item in experiments}
+        if (response.outcome == "reopen") != bool(response.reopen):
+            return retry("Send `reopen` entries exactly when the outcome is `reopen`.")
+        if any(item.record_id not in known for item in response.reopen):
+            return retry("Reopen only experiments of this study.")
+        task = _task(state["task"], project)
+        count = int(getattr(task, "acceptance_rounds", 0) or 0)
+        log = [*(getattr(task, "acceptance_log", None) or [])]
+        entry: dict[str, Any] = {
+            "round": count + 1,
+            "outcome": response.outcome,
+            "caveats": response.caveats,
+            "sources": response.sources,
+            "agent": response.agent,
+        }
+        if response.outcome == "reopen" and count < state["acceptance_rounds"]:
+            task.acceptance_rounds = count + 1
+            task.report = None
+            task.acceptance = None
+            for item in response.reopen:
+                experiment = known[item.record_id]
+                _reopen(experiment, count + 1, item.findings)
+                project.vault.save(experiment, overwrite=True)
+            entry["reopened"] = [item.record_id for item in response.reopen]
+            task.acceptance_log = [*log, entry]
+        else:
+            caveats = list(response.caveats)
+            outcome = response.outcome
+            if outcome == "reopen":
+                # The budget is spent: record what stays open.
+                outcome = "not_accepted"
+                caveats += [
+                    f"{item.record_id}: {finding.claim}"
+                    for item in response.reopen
+                    for finding in item.findings
+                ]
+            task.acceptance = {"outcome": outcome, "caveats": caveats}
+            task.acceptance_log = [*log, entry]
+        project.vault.save(task, overwrite=True)
+        return _next("select", state, "accept_review", response, feedback="")
 
     def triage(state: ResearchState) -> Command[Literal["triage", "select"]]:
         experiment = project.vault.load(state["current"])
@@ -767,12 +1202,13 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             else []
         )
         best = _best_results(state["task"], project) if state.get("task") else []
+        task = _task(state["task"], project) if state.get("task") else None
         return {
             "final": markdown.section("## Done").replace(
                 "{{task}}", state.get("task", "")
             )
             + "\n\n"
-            + _format_summary(tree, best)
+            + _format_summary(tree, best, getattr(task, "acceptance", None))
         }
 
     builder = StateGraph(ResearchState)
@@ -789,6 +1225,11 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
         ("review_design", review_design),
         ("review_code", review_code),
         ("review_result", review_result),
+        ("fix", fix),
+        ("meta_review", meta_review),
+        ("researcher", researcher),
+        ("summarize", summarize),
+        ("accept", accept),
         ("triage", triage),
         ("done", done),
     ):
@@ -806,7 +1247,9 @@ def _ask(
     feedback: str,
     capabilities: list[str],
     approval: str = "",
-) -> BaseModel:
+    role: str = "",
+    agents: dict[str, str] | None = None,
+) -> Any:
     instruction = markdown.section(f"## {title}")
     if approval:
         instruction = f"{instruction}\n\n{approval}"
@@ -822,9 +1265,38 @@ def _ask(
     while True:
         response = interrupt(payload)
         try:
-            return response_model.model_validate(response)
+            parsed = response_model.model_validate(response)
         except PydanticValidationError as exc:
             payload = {**payload, "error": f"Response does not match the schema: {exc}"}
+            continue
+        clash = _role_clash(agents, role, getattr(parsed, "agent", ""))
+        if clash:
+            payload = {**payload, "error": clash}
+            continue
+        return parsed
+
+
+def _role_clash(agents: dict[str, str] | None, role: str, agent: str) -> str:
+    """Reject an agent ID that already acted in another role of this study.
+
+    The ID is self-reported: this catches one conversation doing two jobs by
+    mistake, not a deliberate evasion.
+    """
+    other = (agents or {}).get(agent) if role and agent else None
+    if other and other != role:
+        return (
+            f"Agent ID {agent!r} already acted as {other}; a {role} must be a "
+            "different session."
+        )
+    return ""
+
+
+def _next(
+    goto: str, state: ResearchState, role: str, response: Any, **update: Any
+) -> Command[Any]:
+    agent = getattr(response, "agent", "")
+    agents = {**state.get("agents", {}), **({agent: role} if agent else {})}
+    return Command(update={**update, "agents": agents}, goto=goto)
 
 
 def _setup_problems(project: Project) -> list[str]:
@@ -888,6 +1360,14 @@ def _approval(state: ResearchState) -> str:
     return AUTONOMOUS if _autonomous(state) else APPROVAL
 
 
+def _held(experiment: Record) -> bool:
+    """An experiment that waits for a fix, a meta review or the researcher."""
+    return any(
+        getattr(experiment, field, None)
+        for field in ("fixing", "meta_pending", "researcher")
+    )
+
+
 def _batch(state: ResearchState, project: Project) -> list[Record]:
     """The experiments under review: the current one's unreviewed siblings."""
     current = project.vault.load(state["current"])
@@ -895,41 +1375,405 @@ def _batch(state: ResearchState, project: Project) -> list[Record]:
     return [
         item
         for item in siblings
-        if item.commit is None and getattr(item, "design_review", None) is None
+        if item.commit is None
+        and getattr(item, "design_review", None) is None
+        and not _held(item)
     ] or [current]
 
 
-def _send_back(
-    experiment: Record, kind: str, findings: str, *, to: str, rounds: int
+def _thread(experiment: Record) -> list[dict[str, Any]]:
+    return list(getattr(experiment, "reviews", None) or [])
+
+
+def _log_review(experiment: Record, entry: dict[str, Any]) -> None:
+    experiment.reviews = [*_thread(experiment), entry]
+
+
+def _stage(kind: str) -> str:
+    """The review stage a fix belongs to; an acceptance reopen is a result fix."""
+    return "result" if kind == "acceptance" else kind
+
+
+def _limit(experiment: Record, finding: dict[str, Any], source: str) -> None:
+    experiment.limitations = [
+        *(getattr(experiment, "limitations", None) or []),
+        {"id": finding["id"], "claim": finding["claim"], "source": source},
+    ]
+
+
+def _with_limitations(experiment: Record) -> None:
+    """Write the recorded limitations into the conclusion."""
+    limitations = getattr(experiment, "limitations", None) or []
+    if not limitations or not getattr(experiment, "conclusion", None):
+        return
+    body = str(experiment.conclusion).split("\n\nLimitations:")[0]
+    lines = "\n".join(f"- {item['claim']}" for item in limitations)
+    experiment.conclusion = f"{body}\n\nLimitations:\n{lines}"
+
+
+def _approve(experiment: Record, kind: str, by: str) -> None:
+    stage = _stage(kind)
+    if stage == "design":
+        experiment.design_review = "approved"
+    elif stage == "code":
+        experiment.code_review = experiment.commit
+    else:
+        experiment.result_review = "approved"
+        _with_limitations(experiment)
+    experiment.fixing = experiment.meta_pending = experiment.researcher = None
+    if by != "reviewer":
+        experiment.approved_by = {
+            **(getattr(experiment, "approved_by", None) or {}),
+            stage: by,
+        }
+
+
+def _conclude(
+    experiment: Record, kind: str, why: str, findings: list[dict[str, Any]]
 ) -> None:
-    """Return an experiment to `to` with the findings, or conclude it."""
-    field = f"{kind}_rounds"
-    count = int(getattr(experiment, field, 0) or 0) + 1
-    setattr(experiment, field, count)
-    if count > rounds:
-        experiment.state = "analyzed"
-        experiment.verdict = "inconclusive"
-        experiment.conclusion = (
-            f"Did not pass the {kind} review after {rounds} rounds: {findings}"
+    """End the experiment as inconclusive; one that never ran is not followed up."""
+    stage = _stage(kind)
+    ran = stage == "result"
+    experiment.fixing = experiment.meta_pending = experiment.researcher = None
+    if ran and getattr(experiment, "conclusion", None):
+        experiment.rejected_conclusion = experiment.conclusion
+    claims = "; ".join(item["claim"] for item in findings)
+    head = NOT_RUN.get(stage, "The result did not pass review.")
+    experiment.state = "analyzed"
+    experiment.verdict = "inconclusive"
+    experiment.conclusion = f"{head} {why}: {claims}"
+    experiment.result_review = "not needed"
+    if not ran:
+        experiment.triage = "stop"
+        experiment.triage_reason = "The experiment never ran."
+
+
+def _review(
+    experiment: Record,
+    kind: str,
+    judgement: Judgement,
+    rounds: int,
+    extra: dict[str, Any],
+) -> None:
+    """Record a review and route the experiment on its decision."""
+    disputed = _disputed(experiment, kind)
+    number = 1 + sum(1 for item in _thread(experiment) if item.get("kind") == kind)
+    findings = [
+        {"id": f"{kind}-{number}.{index}", **item.model_dump()}
+        for index, item in enumerate(judgement.findings, start=1)
+    ]
+    _log_review(
+        experiment,
+        {
+            "kind": kind,
+            "round": number,
+            "decision": judgement.decision,
+            "findings": findings,
+            **extra,
+        },
+    )
+    blocking = [item for item in findings if item["severity"] == "blocking"]
+    for item in findings:
+        if item["severity"] == "minor":
+            _limit(experiment, item, "reviewer")
+    if judgement.decision == "approve":
+        _approve(experiment, kind, "reviewer")
+        return
+    unfixable = [item for item in blocking if item["unfixable"]]
+    if unfixable:
+        _conclude(experiment, kind, "No fix can resolve it", unfixable)
+        return
+    outside = [item for item in blocking if item["affects"] in ("task", "setup")]
+    if outside:
+        experiment.researcher = {
+            "stage": kind,
+            "reason": "finding",
+            "findings": blocking,
+            "records": [],
+        }
+        return
+    sent_back = dict(getattr(experiment, "rounds", None) or {})
+    kept = any(item["continues"] in disputed for item in blocking)
+    if kept or sent_back.get(kind, 0) >= rounds:
+        # Author and reviewer do not converge.
+        experiment.meta_pending = {"kind": kind, "findings": blocking}
+        return
+    sent_back[kind] = sent_back.get(kind, 0) + 1
+    experiment.rounds = sent_back
+    experiment.fixing = {"kind": kind, "findings": blocking, "snapshot": None}
+
+
+def _disputed(experiment: Record, kind: str) -> set[str]:
+    """Findings that the author's latest response for this stage disputed."""
+    for entry in reversed(_thread(experiment)):
+        if entry.get("kind") == "response" and entry.get("stage") == kind:
+            return {
+                item["id"] for item in entry["responses"] if item["action"] == "dispute"
+            }
+        if entry.get("kind") == kind:
+            return set()
+    return set()
+
+
+def _rule(
+    experiment: Record,
+    kind: str,
+    pending: dict[str, Any],
+    response: MetaReviewResponse,
+) -> None:
+    """Apply a meta review: one ruling per open finding, final for this stage."""
+    rulings = {item.finding_id: item for item in response.rulings}
+    findings = pending["findings"]
+    last = next(
+        (
+            item
+            for item in reversed(_thread(experiment))
+            if item.get("kind") == "response" and item.get("stage") == kind
+        ),
+        {},
+    )
+    _log_review(
+        experiment,
+        {
+            "kind": "meta",
+            "stage": kind,
+            "rulings": [item.model_dump() for item in response.rulings],
+            "findings": findings,
+            "author_responses": last.get("responses", []),
+            "sources": response.sources,
+            "agent": response.agent,
+        },
+    )
+    experiment.disputed = True
+    sustained = [item for item in findings if rulings[item["id"]].ruling == "sustain"]
+    for item in findings:
+        if rulings[item["id"]].ruling == "limitation":
+            _limit(experiment, item, "meta_review")
+    if sustained:
+        _conclude(experiment, kind, "The meta review sustained", sustained)
+    else:
+        _approve(experiment, kind, "meta_review")
+
+
+def _answer(experiment: Record, response: ResearcherResponse) -> None:
+    """Apply the researcher's answer to a stopped experiment."""
+    question = dict(experiment.researcher)
+    kind = str(question["stage"])
+    findings = question["findings"]
+    _log_review(
+        experiment,
+        {
+            "kind": "researcher",
+            "stage": kind,
+            "answer": response.answer,
+            "note": response.note,
+            "findings": findings,
+        },
+    )
+    experiment.researcher = None
+    if response.answer == "conclude":
+        _conclude(experiment, kind, "The researcher ended it", findings)
+    elif response.answer == "accept_risk":
+        for item in findings:
+            _limit(experiment, item, "researcher")
+        if question["reason"] == "finding":
+            _approve(experiment, kind, "researcher")
+    else:
+        # Resolved: the stage's reviewer reviews again, with the thread kept.
+        experiment.fixing = None
+        setattr(experiment, STAGE_FIELDS[_stage(kind)], None)
+
+
+def _reopen(experiment: Record, round_: int, findings: list[Finding]) -> None:
+    items = [
+        {"id": f"acceptance-{round_}.{index}", **item.model_dump()}
+        for index, item in enumerate(findings, start=1)
+    ]
+    _log_review(
+        experiment,
+        {"kind": "acceptance", "round": round_, "decision": "fix", "findings": items},
+    )
+    experiment.fixing = {"kind": "acceptance", "findings": items, "snapshot": None}
+
+
+def _fingerprint(record: Record) -> str:
+    text = json.dumps(record.model_dump(mode="json", exclude={"path"}), default=str)
+    return hashlib.sha256(text.encode()).hexdigest()[:12]
+
+
+def _scope(project: Project, experiment_id: str) -> dict[str, str]:
+    """What a fix to one experiment must leave alone: the task, the setup, others."""
+    return {
+        item.id: _fingerprint(item)
+        for item in project.vault.list()
+        if item.id != experiment_id
+        and (item.type in ("task", "experiment") or item.id == "project-setup")
+    }
+
+
+def _scope_changes(
+    project: Project, experiment_id: str, before: dict[str, str]
+) -> list[str]:
+    after = _scope(project, experiment_id)
+    return sorted(
+        key for key in before.keys() | after.keys() if before.get(key) != after.get(key)
+    )
+
+
+def _scope_finding(records: list[str]) -> dict[str, Any]:
+    return {
+        "id": "scope-1",
+        "claim": "The fix changed records outside this experiment: "
+        + ", ".join(records),
+        "evidence": "The records differ from before the fix.",
+        "severity": "blocking",
+        "affects": "task",
+        "suggested_fix": "",
+        "unfixable": False,
+        "continues": "",
+    }
+
+
+def _plan_of(experiment: Record) -> dict[str, str]:
+    return {
+        "summary": str(getattr(experiment, "summary", "")),
+        "hypothesis": str(getattr(experiment, "hypothesis", "")),
+        "expected": str(getattr(experiment, "expected", "")),
+        "change": str(experiment.markdown).strip(),
+    }
+
+
+def _snapshot(experiment: Record, project: Project) -> dict[str, Any]:
+    return {
+        "commit": experiment.commit,
+        "plan": _plan_of(experiment),
+        "runs": sorted(run.id for run in _matching_runs(experiment, project)),
+        "scope": _scope(project, experiment.id),
+    }
+
+
+def _apply_fix(
+    project: Project,
+    experiment: Record,
+    kind: str,
+    response: FixResponse,
+    snapshot: dict[str, Any],
+) -> str:
+    """Apply the author's fix and route on what changed; return an error or ''.
+
+    What changed is read from the records and the runs, not from the response.
+    """
+    stage = _stage(kind)
+    changed = False
+    if (
+        stage != "design"
+        and snapshot["runs"]
+        and _plan_of(experiment) != snapshot["plan"]
+    ):
+        plan = snapshot["plan"]
+        experiment.hypothesis = plan["hypothesis"]
+        experiment.expected = plan["expected"]
+        experiment.markdown = plan["change"] + "\n"
+        return (
+            "The hypothesis, the expected outcome and the change are frozen once "
+            "runs exist; they were restored. Open a new experiment for a new idea."
         )
-        experiment.result_review = "not needed"
-        return
-    experiment.review_feedback = findings
-    if to == "analyze":
-        experiment.verdict = None
-        experiment.conclusion = None
-        experiment.state = "launched"
-        return
-    experiment.commit = None
-    experiment.code_review = None
-    experiment.verdict = None
-    experiment.conclusion = None
-    experiment.result_review = None
-    experiment.state = "designed"
+    sha = ""
+    if response.commit:
+        try:
+            sha = GitRepository(project.root).resolve(response.commit)
+        except HirakuError as exc:
+            return str(exc)
+        if not (response.smoke_command.strip() and response.smoke_output.strip()):
+            return "Run a smoke test of the change and send its command and output."
+    if stage == "design":
+        if response.plan:
+            plan = response.plan
+            if plan.record_id != experiment.id:
+                return f"The plan must be for {experiment.id!r}."
+            experiment.summary = plan.summary
+            experiment.hypothesis = plan.hypothesis
+            experiment.expected = plan.expected
+            experiment.markdown = f"## Change\n\n{plan.change.strip()}\n"
+        changed = _plan_of(experiment) != snapshot["plan"]
+    elif stage == "code":
+        if sha and sha != snapshot["commit"]:
+            _set_commit(experiment, sha, response)
+            changed = True
+    else:
+        known = {run.id for run in _all_runs(experiment, project)}
+        unknown = [
+            item.run_id for item in response.excluded_runs if item.run_id not in known
+        ]
+        if unknown:
+            return f"Runs not found for this experiment: {', '.join(unknown)}"
+        if response.excluded_runs:
+            merged = {
+                item["run_id"]: item
+                for item in getattr(experiment, "excluded_runs", None) or []
+            }
+            merged.update(
+                {item.run_id: item.model_dump() for item in response.excluded_runs}
+            )
+            experiment.excluded_runs = list(merged.values())
+        runs = sorted(run.id for run in _matching_runs(experiment, project))
+        reset = _restart if not _children(project).get(experiment.id) else _keep_triage
+        if sha and sha != snapshot["commit"]:
+            _set_commit(experiment, sha, response)
+            experiment.code_review = None
+            reset(experiment)
+            experiment.verdict = experiment.conclusion = None
+            changed = True
+        elif runs != snapshot["runs"]:
+            experiment.state = "launched"
+            reset(experiment)
+            experiment.verdict = experiment.conclusion = None
+            changed = True
+        elif response.verdict and (
+            response.verdict != experiment.verdict
+            or response.conclusion not in (None, experiment.conclusion)
+        ):
+            experiment.verdict = response.verdict
+            experiment.conclusion = response.conclusion or experiment.conclusion
+            changed = True
+        experiment.result_review = None
+    if any(item.action == "done" for item in response.responses) and not changed:
+        return (
+            "You reported a fix as done, but nothing observable changed (no new "
+            "commit, runs, plan or conclusion). Dispute the finding or record a "
+            "limitation instead."
+        )
+    findings = {item["id"]: item for item in experiment.fixing["findings"]}
+    for item in response.responses:
+        if item.action == "limitation":
+            _limit(experiment, findings[item.id], "author")
+    _log_review(
+        experiment,
+        {
+            "kind": "response",
+            "stage": stage,
+            "responses": [item.model_dump() for item in response.responses],
+            "agent": response.agent,
+        },
+    )
+    experiment.fixing = None
+    return ""
 
 
-def _log_review(experiment: Record, review: dict[str, Any]) -> None:
-    experiment.reviews = [*(getattr(experiment, "reviews", None) or []), review]
+def _set_commit(experiment: Record, sha: str, response: FixResponse) -> None:
+    experiment.commit = sha
+    experiment.state = "implemented"
+    experiment.smoke_command = response.smoke_command or None
+    experiment.smoke_output = response.smoke_output[-SMOKE_OUTPUT_LIMIT:] or None
+
+
+def _restart(experiment: Record) -> None:
+    experiment.triage = None
+    experiment.triage_reason = None
+
+
+def _keep_triage(experiment: Record) -> None:
+    """Follow-ups already exist: their parent's triage stays."""
 
 
 def _step_of(
@@ -940,14 +1784,20 @@ def _step_of(
     project: Project,
 ) -> str:
     reviewed = _autonomous(state)
+    if getattr(experiment, "researcher", None):
+        return "researcher"
+    if reviewed and getattr(experiment, "meta_pending", None):
+        return "meta_review"
+    if reviewed and getattr(experiment, "fixing", None):
+        return "fix"
     if getattr(experiment, "verdict", None):
+        if (
+            reviewed
+            and experiment.state == "analyzed"
+            and getattr(experiment, "result_review", None) is None
+        ):
+            return "review_result"
         if getattr(experiment, "triage", None) is None:
-            if (
-                reviewed
-                and experiment.state == "analyzed"
-                and getattr(experiment, "result_review", None) is None
-            ):
-                return "review_result"
             return "triage"
         if (
             experiment.triage == "follow-up"
@@ -974,15 +1824,93 @@ def _step_of(
     return "launch"
 
 
+def _all_runs(experiment: Record, project: Project) -> list[Run]:
+    if not Leaderboard.list(project):
+        return []
+    return list(Leaderboard.load(project).list_runs(project, record_id=experiment.id))
+
+
 def _matching_runs(experiment: Record, project: Project) -> list[Run]:
     if not experiment.commit:
         return []
-    if not Leaderboard.list(project):
-        return []
+    excluded = {
+        item["run_id"] for item in getattr(experiment, "excluded_runs", None) or []
+    }
     return [
         run
-        for run in Leaderboard.load(project).list_runs(project, record_id=experiment.id)
-        if run.commit == experiment.commit
+        for run in _all_runs(experiment, project)
+        if run.commit == experiment.commit and run.id not in excluded
+    ]
+
+
+def _run_data(run: Run, reason: str = "") -> dict[str, Any]:
+    data = {
+        "run_id": run.id,
+        "job_id": run.job_id,
+        "metrics": dict(run.metrics),
+        "params": dict(run.params),
+        "commit": run.commit,
+        "timestamp": run.timestamp.isoformat() if run.timestamp else None,
+        "duration": run.duration,
+        "url": run.url,
+        "raw": dict(run.raw),
+    }
+    return {**data, "reason": reason} if reason else data
+
+
+def _evidence(experiment: Record, project: Project) -> dict[str, Any]:
+    """Every run the tracking source holds for the experiment, raw.
+
+    Runs that the analysis leaves out stay visible with the reason, so that a
+    reviewer can check for selection.
+    """
+    excluded = {
+        item["run_id"]: item["reason"]
+        for item in getattr(experiment, "excluded_runs", None) or []
+    }
+    used, left_out = [], []
+    for run in _all_runs(experiment, project):
+        if run.id in excluded:
+            left_out.append(_run_data(run, excluded[run.id]))
+        elif run.commit != experiment.commit:
+            left_out.append(_run_data(run, "commit differs from the experiment's"))
+        else:
+            used.append(_run_data(run))
+    names = Leaderboard.list(project)
+    return {
+        "leaderboard": {"name": names[0] if len(names) == 1 else names},
+        "runs": used,
+        "excluded_runs": left_out,
+    }
+
+
+def _check_evidence(items: list[Evidence], evidences: list[dict[str, Any]]) -> str:
+    """Check cited run values against the data; return an error or ''."""
+    runs = {
+        run["run_id"]: run
+        for evidence in evidences
+        for run in [*evidence["runs"], *evidence["excluded_runs"]]
+    }
+    if runs and not items:
+        return "Cite the run values your findings rest on in `evidence`."
+    for item in items:
+        run = runs.get(item.run_id)
+        if run is None:
+            return f"Run {item.run_id!r} is not in the data."
+        value = run["metrics"].get(item.metric)
+        if value is None:
+            return f"Run {item.run_id!r} has no metric {item.metric!r}."
+        if not math.isclose(value, item.value, rel_tol=1e-6, abs_tol=1e-9):
+            return f"Run {item.run_id!r} has {item.metric} = {value}, not {item.value}."
+    return ""
+
+
+def _disputed_events(tree: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {"id": item["id"], "rulings": entry["rulings"]}
+        for item in tree
+        for entry in item["reviews"]
+        if entry.get("kind") == "meta"
     ]
 
 
@@ -1013,6 +1941,8 @@ def _tree(
                 "triage": getattr(record, "triage", None),
                 "conclusion": getattr(record, "conclusion", None),
                 "reviews": getattr(record, "reviews", None) or [],
+                "limitations": getattr(record, "limitations", None) or [],
+                "disputed": bool(getattr(record, "disputed", False)),
             }
         )
     return rows
@@ -1036,7 +1966,7 @@ def _record_depth(record: Record, task_id: str, project: Project) -> int:
 
 
 def _describe(record: Record) -> dict[str, Any]:
-    fields = record.model_dump(exclude={"path", "markdown"})
+    fields = record.model_dump(exclude={"path", "markdown", "fixing"})
     fields["markdown"] = str(record.markdown)
     fields["record_id"] = record.id
     return fields
@@ -1097,7 +2027,11 @@ def _best_results(task_id: str, project: Project) -> list[dict[str, Any]]:
     return results
 
 
-def _format_summary(tree: list[dict[str, Any]], best: list[dict[str, Any]]) -> str:
+def _format_summary(
+    tree: list[dict[str, Any]],
+    best: list[dict[str, Any]],
+    acceptance: dict[str, Any] | None = None,
+) -> str:
     lines = ["## Experiments", ""]
     if not tree:
         lines.append("No experiments were recorded.")
@@ -1116,6 +2050,12 @@ def _format_summary(tree: list[dict[str, Any]], best: list[dict[str, Any]]) -> s
         )
     else:
         lines.append("No metric result is available yet.")
+    disputed = [item["id"] for item in tree if item.get("disputed")]
+    if disputed:
+        lines.extend(["", "## Disputed", "", ", ".join(disputed)])
+    if acceptance:
+        lines.extend(["", "## Acceptance", "", f"Outcome: {acceptance['outcome']}."])
+        lines.extend(f"- {caveat}" for caveat in acceptance.get("caveats", []))
     open_items = [item["id"] for item in tree if item["step"] != "done"]
     lines.extend(["", "## Open questions", "", ", ".join(open_items) or "None."])
     return "\n".join(lines)
