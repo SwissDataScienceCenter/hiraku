@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pandas as pd
 import pytest
 
@@ -327,3 +329,38 @@ def test_research_tree_chart_is_clickable_and_empty_without_nodes() -> None:
     assert chart is not None
     assert chart.selections == {}
     assert hc.research_tree(nodes.iloc[0:0], edges.iloc[0:0]) is None
+
+
+def test_research_tree_chart_rings_disputed_experiments() -> None:
+    nodes = pd.DataFrame(
+        [
+            {
+                "id": "t",
+                "x": 0.0,
+                "y": 0,
+                "state": "task",
+                "summary": "",
+                "commit": "",
+                "disputed": False,
+                "note": "Acceptance: accept",
+            },
+            {
+                "id": "a",
+                "x": 0.0,
+                "y": 1,
+                "state": "needs researcher",
+                "summary": "A",
+                "commit": "",
+                "disputed": True,
+                "note": "",
+            },
+        ]
+    )
+    edges = pd.DataFrame([{"x": 0.0, "y": 0, "x2": 0.0, "y2": 1}])
+
+    chart = hc.research_tree(nodes, edges)
+
+    assert chart is not None
+    spec = chart._chart.to_dict()
+    assert "disputed" in json.dumps(spec)
+    assert "needs researcher" in json.dumps(spec)

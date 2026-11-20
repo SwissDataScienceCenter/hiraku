@@ -365,6 +365,10 @@ RESEARCH_STATES = {
     "to launch": "#3b82f6",
     "running": "#eab308",
     "to analyze": "#8b5cf6",
+    "to review": "#14b8a6",
+    "fixing": "#ec4899",
+    "meta review": "#d946ef",
+    "needs researcher": "#f97316",
     "to triage": "#06b6d4",
     "to design follow-ups": "#90ca42",
     "supports": "#10b981",
@@ -381,10 +385,27 @@ def experiment_state(
     This mirrors the research workflow: a verdict and triage decision settle
     finished work, otherwise the commit and the runs at that commit say whether
     the experiment is to be implemented, launched, awaited, or analyzed.
+    An experiment that waits on a review exit (a fix, a meta review, or the
+    researcher) shows that first. A study with reviews on its records is
+    autonomous, so its code and result reviews are known from the record; a design
+    review cannot be told apart from a person's approval before it starts.
     ``runs`` are rows of the run table for this record.
     """
+    if getattr(record, "researcher", None):
+        return "needs researcher"
+    reviewed = bool(getattr(record, "reviews", None))
+    if reviewed and getattr(record, "meta_pending", None):
+        return "meta review"
+    if reviewed and getattr(record, "fixing", None):
+        return "fixing"
     verdict = getattr(record, "verdict", None)
     if verdict:
+        if (
+            reviewed
+            and record.state == "analyzed"
+            and getattr(record, "result_review", None) is None
+        ):
+            return "to review"
         triage = getattr(record, "triage", None)
         if triage is None:
             return "to triage"
@@ -393,6 +414,12 @@ def experiment_state(
         return verdict if verdict in RESEARCH_STATES else "inconclusive"
     if not record.commit:
         return "to implement"
+    if (
+        reviewed
+        and record.state == "implemented"
+        and getattr(record, "code_review", None) != record.commit
+    ):
+        return "to review"
     attributed = [run for run in runs if run.get("commit") == record.commit]
     if any(_has_metrics(run) for run in attributed):
         return "to analyze"
@@ -420,9 +447,11 @@ def research_tree(
     The task sits at the top and each record below its parent. Leaves get
     consecutive ``x`` positions in tree order and a parent sits above the middle
     of its children. Nodes carry ``id``, ``x``, ``y``, ``state`` and
-    ``summary``; edges carry the coordinates of both ends.
+    ``summary``, ``commit``, ``disputed`` (a meta review ruled on it) and a
+    ``note`` (the acceptance outcome of the task, or an experiment's limitations);
+    edges carry the coordinates of both ends.
     """
-    node_columns = ["id", "x", "y", "state", "summary", "commit"]
+    node_columns = ["id", "x", "y", "state", "summary", "commit", "disputed", "note"]
     edge_columns = ["x", "y", "x2", "y2"]
     by_id = {record.id: record for record in records}
     if task_id not in by_id:
@@ -478,6 +507,8 @@ def research_tree(
                 "state": state,
                 "summary": str(getattr(record, "summary", None) or record.title or ""),
                 "commit": (record.commit or "")[:7],
+                "disputed": bool(getattr(record, "disputed", False)),
+                "note": _research_note(record),
             }
         )
         if record.parent_id in position and record_id != task_id:
@@ -486,6 +517,14 @@ def research_tree(
     return pd.DataFrame(nodes, columns=node_columns), pd.DataFrame(
         edges, columns=edge_columns
     )
+
+
+def _research_note(record: Record) -> str:
+    acceptance = getattr(record, "acceptance", None)
+    if record.type == "task":
+        return f"Acceptance: {acceptance['outcome']}" if acceptance else ""
+    limitations = getattr(record, "limitations", None) or []
+    return f"{len(limitations)} limitation(s)" if limitations else ""
 
 
 def _records(frame: pd.DataFrame) -> list[dict[str, Any]]:

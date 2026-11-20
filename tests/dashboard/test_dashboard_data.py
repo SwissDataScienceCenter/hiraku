@@ -391,6 +391,85 @@ def test_research_tree_states_follow_the_evidence_on_records(
     }
 
 
+def test_research_tree_shows_review_exits_disputes_and_acceptance(
+    tmp_path: Path,
+) -> None:
+    project = Project.create(tmp_path, install_skill=False)
+    vault = project.vault
+    vault.create(
+        "t",
+        type="task",
+        acceptance={"outcome": "accept_with_caveats", "caveats": ["one seed"]},
+    )
+    reviews = [{"kind": "design"}]
+
+    def experiment(record_id: str, sequence: int, **fields: object) -> None:
+        vault.create(
+            record_id,
+            type="experiment",
+            parent_id="t",
+            sequence=sequence,
+            reviews=reviews,
+            **fields,
+        )
+
+    experiment("fix", 1, fixing={"kind": "code", "findings": []})
+    experiment("meta", 2, meta_pending={"kind": "result", "findings": []})
+    experiment("ask", 3, researcher={"stage": "design", "reason": "finding"})
+    experiment("code", 4, commit="c" * 40, state="implemented")
+    experiment(
+        "approved", 5, commit="a" * 40, state="implemented", code_review="a" * 40
+    )
+    experiment("result", 6, verdict="supports", state="analyzed", commit="9" * 40)
+    experiment(
+        "ruled",
+        7,
+        verdict="inconclusive",
+        state="analyzed",
+        result_review="not needed",
+        triage="stop",
+        disputed=True,
+        limitations=[{"id": "result-1.1", "claim": "One seed."}],
+    )
+
+    nodes, _edges = research_tree(vault.list(), arrow_frame([], RUN_COLUMNS), "t")
+
+    rows = nodes.set_index("id")
+    assert rows["state"].to_dict() == {
+        "t": "task",
+        "fix": "fixing",
+        "meta": "meta review",
+        "ask": "needs researcher",
+        "code": "to review",
+        "approved": "to launch",
+        "result": "to review",
+        "ruled": "inconclusive",
+    }
+    assert rows.loc["ruled", "disputed"]
+    assert not rows.loc["fix", "disputed"]
+    assert rows.loc["ruled", "note"] == "1 limitation(s)"
+    assert rows.loc["t", "note"] == "Acceptance: accept_with_caveats"
+
+
+def test_research_tree_ignores_review_fields_without_reviews(tmp_path: Path) -> None:
+    # A person's study has no reviews on its records: nothing is "to review".
+    project = Project.create(tmp_path, install_skill=False)
+    project.vault.create("t", type="task")
+    project.vault.create(
+        "a",
+        type="experiment",
+        parent_id="t",
+        commit="a" * 40,
+        state="implemented",
+    )
+
+    nodes, _edges = research_tree(
+        project.vault.list(), arrow_frame([], RUN_COLUMNS), "t"
+    )
+
+    assert dict(zip(nodes["id"], nodes["state"], strict=True))["a"] == "to launch"
+
+
 def test_research_tree_layout_places_parents_above_their_children(
     tmp_path: Path,
 ) -> None:
