@@ -431,6 +431,16 @@ def test_research_tree_shows_review_exits_disputes_and_acceptance(
         disputed=True,
         limitations=[{"id": "result-1.1", "claim": "One seed."}],
     )
+    experiment(
+        "provisional",
+        8,
+        verdict="supports",
+        state="analyzed",
+        commit="8" * 40,
+        result_review="failed",
+        triage="stop",
+        review_failed={"stage": "result", "reason": "x", "findings": []},
+    )
 
     nodes, _edges = research_tree(vault.list(), arrow_frame([], RUN_COLUMNS), "t")
 
@@ -444,11 +454,44 @@ def test_research_tree_shows_review_exits_disputes_and_acceptance(
         "approved": "to launch",
         "result": "to review",
         "ruled": "inconclusive",
+        "provisional": "supports",
     }
     assert rows.loc["ruled", "disputed"]
     assert not rows.loc["fix", "disputed"]
     assert rows.loc["ruled", "note"] == "1 limitation(s)"
+    assert rows.loc["provisional", "note"] == "Review failed (result)"
     assert rows.loc["t", "note"] == "Acceptance: accept_with_caveats"
+
+
+def test_research_tree_shows_only_the_reviews_a_study_runs(tmp_path: Path) -> None:
+    project = Project.create(tmp_path, install_skill=False)
+    project.vault.create("t", type="task")
+    for record_id, stages in (("result_only", ["result"]), ("with_code", ["code"])):
+        project.vault.create(
+            record_id,
+            type="experiment",
+            parent_id="t",
+            commit="a" * 40,
+            state="implemented",
+            review_stages=stages,
+        )
+    project.vault.create(
+        "analyzed",
+        type="experiment",
+        parent_id="t",
+        verdict="supports",
+        state="analyzed",
+        review_stages=["code"],
+    )
+
+    nodes, _edges = research_tree(
+        project.vault.list(), arrow_frame([], RUN_COLUMNS), "t"
+    )
+
+    states = dict(zip(nodes["id"], nodes["state"], strict=True))
+    assert states["result_only"] == "to launch"
+    assert states["with_code"] == "to review"
+    assert states["analyzed"] == "to triage"
 
 
 def test_research_tree_ignores_review_fields_without_reviews(tmp_path: Path) -> None:

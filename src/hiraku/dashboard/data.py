@@ -386,22 +386,28 @@ def experiment_state(
     finished work, otherwise the commit and the runs at that commit say whether
     the experiment is to be implemented, launched, awaited, or analyzed.
     An experiment that waits on a review exit (a fix, a meta review, or the
-    researcher) shows that first. A study with reviews on its records is
-    autonomous, so its code and result reviews are known from the record; a design
-    review cannot be told apart from a person's approval before it starts.
+    researcher) shows that first. Which code and result reviews are due comes from
+    ``review_stages`` on the record; a design review is not shown, because it
+    cannot be told apart from a person's approval before it starts.
     ``runs`` are rows of the run table for this record.
     """
     if getattr(record, "researcher", None):
         return "needs researcher"
-    reviewed = bool(getattr(record, "reviews", None))
-    if reviewed and getattr(record, "meta_pending", None):
+    # The reviews the experiment was designed under; records from before this
+    # field existed are taken as reviewed in every stage once a review ran.
+    stages = getattr(record, "review_stages", None)
+    if stages is None:
+        stages = (
+            ["design", "code", "result"] if getattr(record, "reviews", None) else []
+        )
+    if getattr(record, "meta_pending", None):
         return "meta review"
-    if reviewed and getattr(record, "fixing", None):
+    if getattr(record, "fixing", None):
         return "fixing"
     verdict = getattr(record, "verdict", None)
     if verdict:
         if (
-            reviewed
+            "result" in stages
             and record.state == "analyzed"
             and getattr(record, "result_review", None) is None
         ):
@@ -415,7 +421,7 @@ def experiment_state(
     if not record.commit:
         return "to implement"
     if (
-        reviewed
+        "code" in stages
         and record.state == "implemented"
         and getattr(record, "code_review", None) != record.commit
     ):
@@ -448,7 +454,8 @@ def research_tree(
     consecutive ``x`` positions in tree order and a parent sits above the middle
     of its children. Nodes carry ``id``, ``x``, ``y``, ``state`` and
     ``summary``, ``commit``, ``disputed`` (a meta review ruled on it) and a
-    ``note`` (the acceptance outcome of the task, or an experiment's limitations);
+    ``note`` (the acceptance outcome of the task, or a failed review and the
+    limitations of an experiment);
     edges carry the coordinates of both ends.
     """
     node_columns = ["id", "x", "y", "state", "summary", "commit", "disputed", "note"]
@@ -523,8 +530,14 @@ def _research_note(record: Record) -> str:
     acceptance = getattr(record, "acceptance", None)
     if record.type == "task":
         return f"Acceptance: {acceptance['outcome']}" if acceptance else ""
+    notes = []
+    failed = getattr(record, "review_failed", None)
+    if failed:
+        notes.append(f"Review failed ({failed['stage']})")
     limitations = getattr(record, "limitations", None) or []
-    return f"{len(limitations)} limitation(s)" if limitations else ""
+    if limitations:
+        notes.append(f"{len(limitations)} limitation(s)")
+    return "; ".join(notes)
 
 
 def _records(frame: pd.DataFrame) -> list[dict[str, Any]]:
