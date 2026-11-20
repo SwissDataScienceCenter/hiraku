@@ -7,7 +7,7 @@ import json
 import math
 import shlex
 import shutil
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Annotated, Any, Literal, TypedDict
 
@@ -28,6 +28,7 @@ from hiraku.tracking import Run
 from hiraku.tracking.leaderboard import Leaderboard
 
 Verdict = Literal["supports", "refutes", "inconclusive"]
+ReviewStage = Literal["design", "code", "result", "acceptance"]
 Affects = Literal["analysis", "runs", "code", "design", "setup", "task", "unknown"]
 TriageDecision = Literal["follow-up", "stop"]
 # Compute comes first, so jobs run while the agent analyzes and designs; reviews
@@ -68,6 +69,9 @@ FIX_CAPABILITIES = [
     "experiment.launch",
     "tracking.run.read",
 ]
+# The reviews on by default: the result and the study as a whole. The design and
+# the code are checked by the smoke test and by the result review that follows.
+DEFAULT_REVIEWS: tuple[ReviewStage, ...] = ("result", "acceptance")
 # Where each review kind keeps its approval; an acceptance reopen is a result fix.
 STAGE_FIELDS = {
     "design": "design_review",
@@ -99,6 +103,7 @@ class ResearchState(TypedDict, total=False):
     max_depth: int
     max_repairs: int
     autonomous: bool
+    reviews: list[str]
     review_rounds: int
     current: str
     acceptance_rounds: int
@@ -127,8 +132,14 @@ class ResearchInput(BaseModel):
     max_repairs: int = Field(default=2, ge=0, le=5)
     autonomous: bool = Field(
         default=False,
-        description="No person approves anything; independent reviews of the "
-        "design, the code, and the result take that role.",
+        description="No person approves anything; the independent reviews in "
+        "`reviews` take that role.",
+    )
+    reviews: list[ReviewStage] = Field(
+        default_factory=lambda: list(DEFAULT_REVIEWS),
+        description="The independent reviews that run when `autonomous` is set: "
+        "`design`, `code`, `result`, and `acceptance` (the summary and the review "
+        "of the whole study). Each costs a fresh session per use.",
     )
     review_rounds: int = Field(
         default=2,
@@ -427,6 +438,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
                 "max_depth": arguments.max_depth,
                 "max_repairs": arguments.max_repairs,
                 "autonomous": arguments.autonomous,
+                "reviews": list(dict.fromkeys(arguments.reviews)),
                 "review_rounds": arguments.review_rounds,
                 "acceptance_rounds": arguments.acceptance_rounds,
                 "agents": {},
@@ -466,7 +478,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             return Command(update={"task": "", "step": "draft"}, goto="draft")
 
         _task(task_id, project)
-        tree = _tree(task_id, project, state["max_depth"], _autonomous(state))
+        tree = _tree(task_id, project, state["max_depth"], _reviews(state))
         if len(tree) > state["max_experiments"]:
             # Existing studies are never hidden or truncated by a new session.
             remaining = 0
@@ -509,7 +521,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             )
         if waiting:
             return Command(update={"step": "wait", "current": ""}, goto="wait")
-        if tree and _autonomous(state):
+        if tree and _review_on(state, "acceptance"):
             task = _task(task_id, project)
             if not getattr(task, "report", None):
                 return Command(update={"step": "summarize"}, goto="summarize")
@@ -559,7 +571,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
 
     def design(state: ResearchState) -> Command[Literal["design", "select"]]:
         parent = project.vault.load(state["current"])
-        tree = _tree(state["task"], project, state["max_depth"], _autonomous(state))
+        tree = _tree(state["task"], project, state["max_depth"], _reviews(state))
         remaining = max(state["max_experiments"] - len(tree), 0)
         depth = _record_depth(parent, state["task"], project)
         data = {
@@ -605,6 +617,9 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
                     expected=plan.expected,
                     sequence=sequence + index,
                     markdown=f"## Change\n\n{plan.change.strip()}\n",
+                    **(
+                        {"review_stages": _reviews(state)} if _autonomous(state) else {}
+                    ),
                 )
         except HirakuError as exc:
             return retry(str(exc))
@@ -685,7 +700,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
         waiting = [
             item
             for item in _tree(
-                state["task"], project, state["max_depth"], _autonomous(state)
+                state["task"], project, state["max_depth"], _reviews(state)
             )
             if item["step"] == "waiting"
         ]
@@ -710,7 +725,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
                 )
             _failed(response.record_id, response.reason, state, project)
             return Command(update={"feedback": ""}, goto="select")
-        fresh = _tree(state["task"], project, state["max_depth"], _autonomous(state))
+        fresh = _tree(state["task"], project, state["max_depth"], _reviews(state))
         if any(item["step"] == "waiting" for item in fresh) and not any(
             item["step"] in WORK_PRIORITIES for item in fresh
         ):
@@ -780,7 +795,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             "metrics": _metrics(task),
             "parent": _describe(parent),
             "experiments": [_describe(item) for item in batch],
-            "tree": _tree(state["task"], project, state["max_depth"], True),
+            "tree": _tree(state["task"], project, state["max_depth"], _reviews(state)),
         }
         response = _ask(
             markdown,
@@ -931,7 +946,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             "findings": fixing["findings"],
             "thread": _thread(experiment),
             "command": state["command"],
-            "tree": _tree(state["task"], project, state["max_depth"], True),
+            "tree": _tree(state["task"], project, state["max_depth"], _reviews(state)),
         }
         if kind in ("result", "acceptance"):
             data.update(_evidence(experiment, project))
@@ -989,7 +1004,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             "task": _describe(task),
             "metrics": _metrics(task),
             "project_setup": str(project.vault.load("project-setup").markdown),
-            "tree": _tree(state["task"], project, state["max_depth"], True),
+            "tree": _tree(state["task"], project, state["max_depth"], _reviews(state)),
             "parent": _describe(parent),
             "experiment": _describe(experiment),
             "open_findings": pending["findings"],
@@ -1043,7 +1058,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             "experiment": _describe(experiment),
             "question": experiment.researcher,
             "thread": _thread(experiment),
-            "tree": _tree(state["task"], project, state["max_depth"], True),
+            "tree": _tree(state["task"], project, state["max_depth"], _reviews(state)),
         }
         response = _ask(
             markdown,
@@ -1061,13 +1076,14 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
 
     def summarize(state: ResearchState) -> Command[Literal["summarize", "select"]]:
         task = _task(state["task"], project)
-        tree = _tree(state["task"], project, state["max_depth"], True)
+        tree = _tree(state["task"], project, state["max_depth"], _reviews(state))
         data = {
             "task": _describe(task),
             "metrics": _metrics(task),
             "tree": tree,
             "best_results": _best_results(state["task"], project),
             "disputed": _disputed_events(tree),
+            "provisional": _provisional(tree),
             "reopened": int(getattr(task, "acceptance_rounds", 0) or 0),
             "acceptance_feedback": getattr(task, "acceptance_log", None) or [],
         }
@@ -1088,7 +1104,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
 
     def accept(state: ResearchState) -> Command[Literal["accept", "select"]]:
         task = _task(state["task"], project)
-        tree = _tree(state["task"], project, state["max_depth"], True)
+        tree = _tree(state["task"], project, state["max_depth"], _reviews(state))
         experiments = [project.vault.load(item["id"]) for item in tree]
         evidence = {
             item.id: _evidence(item, project) for item in experiments if item.commit
@@ -1100,6 +1116,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             "tree": tree,
             "evidence": evidence,
             "disputed": _disputed_events(tree),
+            "provisional": _provisional(tree),
             "command": state["command"],
             "reopen_allowed": int(getattr(task, "acceptance_rounds", 0) or 0)
             < state["acceptance_rounds"],
@@ -1164,7 +1181,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
 
     def triage(state: ResearchState) -> Command[Literal["triage", "select"]]:
         experiment = project.vault.load(state["current"])
-        tree = _tree(state["task"], project, state["max_depth"], _autonomous(state))
+        tree = _tree(state["task"], project, state["max_depth"], _reviews(state))
         depth = _record_depth(experiment, state["task"], project)
         remaining = max(state["max_experiments"] - len(tree), 0)
         can_follow_up = depth < state["max_depth"] and remaining > 0
@@ -1197,7 +1214,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
 
     def done(state: ResearchState) -> dict[str, str]:
         tree = (
-            _tree(state["task"], project, state["max_depth"], _autonomous(state))
+            _tree(state["task"], project, state["max_depth"], _reviews(state))
             if state.get("task")
             else []
         )
@@ -1356,6 +1373,15 @@ def _autonomous(state: ResearchState) -> bool:
     return bool(state.get("autonomous", False))
 
 
+def _reviews(state: ResearchState) -> list[str]:
+    """The review stages that are on: none unless the study is autonomous."""
+    return list(state.get("reviews", [])) if _autonomous(state) else []
+
+
+def _review_on(state: ResearchState, stage: str) -> bool:
+    return stage in _reviews(state)
+
+
 def _approval(state: ResearchState) -> str:
     return AUTONOMOUS if _autonomous(state) else APPROVAL
 
@@ -1421,6 +1447,8 @@ def _approve(experiment: Record, kind: str, by: str) -> None:
         experiment.result_review = "approved"
         _with_limitations(experiment)
     experiment.fixing = experiment.meta_pending = experiment.researcher = None
+    if getattr(experiment, "review_failed", None):
+        experiment.review_failed = None
     if by != "reviewer":
         experiment.approved_by = {
             **(getattr(experiment, "approved_by", None) or {}),
@@ -1431,18 +1459,28 @@ def _approve(experiment: Record, kind: str, by: str) -> None:
 def _conclude(
     experiment: Record, kind: str, why: str, findings: list[dict[str, Any]]
 ) -> None:
-    """End the experiment as inconclusive; one that never ran is not followed up."""
+    """End an experiment whose review did not pass, marked in `review_failed`.
+
+    One that ran keeps its analysis as a provisional result, so triage can still
+    follow it up; one that never ran has no result, is inconclusive, and stops.
+    """
     stage = _stage(kind)
     ran = stage == "result"
     experiment.fixing = experiment.meta_pending = experiment.researcher = None
-    if ran and getattr(experiment, "conclusion", None):
-        experiment.rejected_conclusion = experiment.conclusion
+    experiment.review_failed = {
+        "stage": stage,
+        "reason": why,
+        "findings": [{"id": item["id"], "claim": item["claim"]} for item in findings],
+    }
+    experiment.state = "analyzed"
+    experiment.result_review = "failed" if ran else "not needed"
+    if ran and getattr(experiment, "verdict", None):
+        _with_limitations(experiment)
+        return
     claims = "; ".join(item["claim"] for item in findings)
     head = NOT_RUN.get(stage, "The result did not pass review.")
-    experiment.state = "analyzed"
     experiment.verdict = "inconclusive"
     experiment.conclusion = f"{head} {why}: {claims}"
-    experiment.result_review = "not needed"
     if not ran:
         experiment.triage = "stop"
         experiment.triage_reason = "The experiment never ran."
@@ -1783,16 +1821,16 @@ def _step_of(
     children: dict[str, list[Record]],
     project: Project,
 ) -> str:
-    reviewed = _autonomous(state)
+    # An experiment that waits on a review exit exists only if a review ran.
     if getattr(experiment, "researcher", None):
         return "researcher"
-    if reviewed and getattr(experiment, "meta_pending", None):
+    if getattr(experiment, "meta_pending", None):
         return "meta_review"
-    if reviewed and getattr(experiment, "fixing", None):
+    if getattr(experiment, "fixing", None):
         return "fix"
     if getattr(experiment, "verdict", None):
         if (
-            reviewed
+            _review_on(state, "result")
             and experiment.state == "analyzed"
             and getattr(experiment, "result_review", None) is None
         ):
@@ -1807,11 +1845,14 @@ def _step_of(
             return "design"
         return "done"
     if not experiment.commit:
-        if reviewed and getattr(experiment, "design_review", None) is None:
+        if (
+            _review_on(state, "design")
+            and getattr(experiment, "design_review", None) is None
+        ):
             return "review_design"
         return "implement"
     if (
-        reviewed
+        _review_on(state, "code")
         and experiment.state == "implemented"
         and getattr(experiment, "code_review", None) != experiment.commit
     ):
@@ -1914,17 +1955,27 @@ def _disputed_events(tree: list[dict[str, Any]]) -> list[dict[str, Any]]:
     ]
 
 
+def _provisional(tree: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Experiments that ran but whose result did not pass review."""
+    return [
+        {"id": item["id"], "verdict": item["verdict"], **item["review_failed"]}
+        for item in tree
+        if item["review_failed"] and item["review_failed"]["stage"] == "result"
+    ]
+
+
 def _tree(
     task_id: str,
     project: Project,
     max_depth: int = 10,
-    autonomous: bool = False,
+    reviews: Sequence[str] = (),
 ) -> list[dict[str, Any]]:
     children = _children(project)
     state: ResearchState = {
         "task": task_id,
         "max_depth": max_depth,
-        "autonomous": autonomous,
+        "autonomous": bool(reviews),
+        "reviews": list(reviews),
     }
     rows = []
     for record, depth in _ordered(task_id, children):
@@ -1943,6 +1994,7 @@ def _tree(
                 "reviews": getattr(record, "reviews", None) or [],
                 "limitations": getattr(record, "limitations", None) or [],
                 "disputed": bool(getattr(record, "disputed", False)),
+                "review_failed": getattr(record, "review_failed", None),
             }
         )
     return rows
@@ -2022,6 +2074,7 @@ def _best_results(task_id: str, project: Project) -> list[dict[str, Any]]:
                 "run_id": run.id,
                 "metric": metric["name"],
                 "value": numeric,
+                "provisional": bool(getattr(record, "review_failed", None)),
             }
         )
     return results
