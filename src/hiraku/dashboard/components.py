@@ -303,12 +303,14 @@ def research_tree(nodes: pd.DataFrame, edges: pd.DataFrame) -> Any:
     )
     dots = (
         alt.Chart(nodes)
-        .mark_circle(
-            size=700, opacity=1, stroke="#ffffff", strokeWidth=2, cursor="pointer"
-        )
+        .mark_circle(size=700, opacity=1, cursor="pointer")
         .encode(
             x=x,
             y=y,
+            stroke=alt.condition(
+                alt.datum.disputed, alt.value("#1f2937"), alt.value("#ffffff")
+            ),
+            strokeWidth=alt.condition(alt.datum.disputed, alt.value(4), alt.value(2)),
             color=alt.Color(
                 "state:N",
                 scale=alt.Scale(
@@ -321,6 +323,8 @@ def research_tree(nodes: pd.DataFrame, edges: pd.DataFrame) -> Any:
                 alt.Tooltip("state:N", title="State"),
                 alt.Tooltip("summary:N", title="Summary"),
                 alt.Tooltip("commit:N", title="Commit"),
+                alt.Tooltip("disputed:N", title="Meta-reviewed"),
+                alt.Tooltip("note:N", title="Note"),
             ],
         )
         .add_params(pick)
