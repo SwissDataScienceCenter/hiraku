@@ -38,7 +38,9 @@ relationships separate from its metadata fields.
 For agent-launched commands, prefer submitting through the connected `job_submit`
 MCP tool. Submit the command as an argv list and include explicit record
 attribution. Submission defaults to background execution with `local-detached`
-and returns an ID; monitor it with `job_status` or `job_list`.
+and returns an ID; read command output with `job_logs` and check execution
+state with `job_status` or `job_list`. Stop a running job with `job_cancel`;
+from the CLI, use `hiraku job cancel JOB_ID`.
 
 Omitting `record_id` submits an unattributed job.
 Submission is not completion. If submission reports a history-write failure,

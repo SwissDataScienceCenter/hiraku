@@ -659,7 +659,7 @@ def workflow_resume_command(
 
 @main.group("job")
 def job_group() -> None:
-    """Submit commands and retrieve native PSI/J status."""
+    """Submit, inspect, and cancel PSI/J jobs."""
 
 
 def _exit_job(status: JobStatus) -> None:
@@ -770,6 +770,36 @@ def job_status(state: CLIContext, job_id: str, json_output: bool) -> None:
     entry = Submission.from_prefix(state.project, job_id)
     entry.sync()
     entry.save(state.project)
+    _show_submission(entry.model_dump(mode="json"), json_output)
+
+
+@job_group.command("logs")
+@click.argument("job_id")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_obj
+def job_logs(state: CLIContext, job_id: str, json_output: bool) -> None:
+    """Read stdout and stderr by full job ID or unique nonempty prefix."""
+    entry = Submission.from_prefix(state.project, job_id)
+    streams = entry.logs(state.project)
+    if json_output:
+        _emit_json(streams)
+        return
+    for name, contents in streams.items():
+        click.echo(f"--- {name} ---")
+        if contents is None:
+            click.echo("(not available)")
+        elif contents:
+            click.echo(contents, nl=not contents.endswith("\n"))
+
+
+@job_group.command("cancel")
+@click.argument("job_id")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_obj
+def job_cancel(state: CLIContext, job_id: str, json_output: bool) -> None:
+    """Cancel a job by full ID or unique nonempty prefix."""
+    entry = Submission.from_prefix(state.project, job_id)
+    entry.cancel(state.project)
     _show_submission(entry.model_dump(mode="json"), json_output)
 
 

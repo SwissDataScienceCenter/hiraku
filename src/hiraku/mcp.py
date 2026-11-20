@@ -46,9 +46,11 @@ logger = logging.getLogger(__name__)
 
 INSTRUCTIONS = """\
 Hiraku documents research in records (goals, hypotheses, experiments, findings),
-attributes tracked runs to them, submits commands with job_submit, and runs LangGraph
-workflows. For agent-launched commands, prefer job_submit and use job_status or
-job_list to monitor them. Use workflow_start, workflow_status, and workflow_resume
+attributes tracked runs to them, submits commands with job_submit, and runs
+LangGraph workflows. For agent-launched commands, prefer job_submit and use
+job_logs to read command output and job_cancel to stop a running job. Use
+job_status or job_list when execution state is needed. Use workflow_start,
+workflow_status, and workflow_resume
 to operate a workflow. When an interrupt requests approval, workflow_approval opens
 a structured MCP elicitation and waits for the user's answer.
 """
@@ -114,7 +116,8 @@ def register_tools(server: MCPServer, project: Project) -> None:
     """Register the project, record, execution, and tracking capabilities.
 
     Tools: project_info, leaderboard_list, record_list, record_show, record_create,
-    record_update, record_delete, job_submit, job_list, job_status, and runs.
+    record_update, record_delete, job_submit, job_list, job_status, job_logs,
+    job_cancel, and runs.
     Also registers the record
     catalog and record resources, and the propose_implementation prompt.
     """
@@ -140,8 +143,11 @@ def register_tools(server: MCPServer, project: Project) -> None:
         annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
     )
     def record_list() -> list[dict[str, Any]]:
-        """List research records in the selected project."""
-        return [item.model_dump(mode="json") for item in project.vault.list()]
+        """List research record metadata without Markdown content."""
+        return [
+            item.model_dump(mode="json", exclude={"markdown"})
+            for item in project.vault.list()
+        ]
 
     @server.tool(
         title="Show research record",
@@ -162,10 +168,13 @@ def register_tools(server: MCPServer, project: Project) -> None:
             open_world_hint=False,
         ),
     )
-    def record_create(record: Record) -> dict[str, Any]:
-        """Create a research record."""
+    def record_create(record: Record) -> dict[str, str | list[str]]:
+        """Create a research record and acknowledge its ID and supplied fields."""
         project.vault.save(record)
-        return record.model_dump(mode="json")
+        return {
+            "id": record.id,
+            "fields": sorted(record.model_fields_set - {"id"}),
+        }
 
     @server.tool(
         title="Update research record",
@@ -179,11 +188,11 @@ def register_tools(server: MCPServer, project: Project) -> None:
     def record_update(
         record_id: Annotated[str, Field(description="The ID of the record to update")],
         patch: RecordUpdate,
-    ) -> dict[str, Any]:
-        """Partially update an existing research record by ID."""
+    ) -> dict[str, str | list[str]]:
+        """Update a record and acknowledge its ID and patched fields."""
         record = project.vault.load(record_id)
-        updated = project.vault.update(record, patch)
-        return updated.model_dump(mode="json")
+        project.vault.update(record, patch)
+        return {"id": record_id, "fields": sorted(patch.model_fields_set)}
 
     @server.tool(
         title="Delete research record",
@@ -210,7 +219,7 @@ def register_tools(server: MCPServer, project: Project) -> None:
             open_world_hint=True,
         ),
     )
-    def job_submit(request: JobRequest) -> dict[str, Any]:
+    def job_submit(request: JobRequest) -> dict[str, str | None]:
         """Submit an argv command through PSI/J and record its job history."""
         if request.executor == "local":
             raise ValidationError(
@@ -244,7 +253,12 @@ def register_tools(server: MCPServer, project: Project) -> None:
             raise ExecutionError(str(exc)) from exc
         entry = Submission.from_psi_job(job)
         entry.save(project)
-        return entry.model_dump(mode="json")
+        return {
+            "id": entry.id,
+            "record_id": entry.record_id,
+            "executor": entry.executor,
+            "state": entry.status.state,
+        }
 
     @server.tool(
         annotations=ToolAnnotations(read_only_hint=False, open_world_hint=True)
@@ -259,7 +273,47 @@ def register_tools(server: MCPServer, project: Project) -> None:
         entry = Submission.from_prefix(project, job_id)
         entry.sync()
         entry.save(project)
-        return entry.model_dump(mode="json")
+        return entry.model_dump(
+            mode="json",
+            include={
+                "id": True,
+                "status": {"state": True, "exit_code": True, "message": True},
+            },
+        )
+
+    @server.tool(
+        title="Read job logs",
+        annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False),
+    )
+    def job_logs(
+        job_id: Annotated[
+            str,
+            Field(min_length=1, description="Full job ID or unique nonempty prefix."),
+        ],
+    ) -> dict[str, str | None]:
+        """Read available stdout and stderr by full ID or unique nonempty prefix."""
+        entry = Submission.from_prefix(project, job_id)
+        return entry.logs(project)
+
+    @server.tool(
+        title="Cancel job",
+        annotations=ToolAnnotations(
+            read_only_hint=False,
+            destructive_hint=True,
+            idempotent_hint=True,
+            open_world_hint=True,
+        ),
+    )
+    def job_cancel(
+        job_id: Annotated[
+            str,
+            Field(min_length=1, description="Full job ID or unique nonempty prefix."),
+        ],
+    ) -> dict[str, str]:
+        """Cancel a job and return its ID and resulting state."""
+        entry = Submission.from_prefix(project, job_id)
+        entry.cancel(project)
+        return {"job_id": entry.id, "state": entry.status.state}
 
     @server.tool(
         annotations=ToolAnnotations(read_only_hint=False, open_world_hint=True)
@@ -270,7 +324,7 @@ def register_tools(server: MCPServer, project: Project) -> None:
             Field(description="Filter to jobs attributed to this record ID."),
         ] = None,
     ) -> list[dict[str, Any]]:
-        """List jobs and status, refreshing and saving nonfinal submissions."""
+        """List job summaries, refreshing and saving nonfinal submissions."""
         entries = Submission.list(project, record_id=record_id)
         results = [observe_submission(entry, project) for entry in entries]
         for result in results:
@@ -278,7 +332,15 @@ def register_tools(server: MCPServer, project: Project) -> None:
                 logger.warning(
                     "Cannot sync job %s: %s", result["id"], result["observation_error"]
                 )
-        return results
+        return [
+            {
+                "id": result["id"],
+                "record_id": result["record_id"],
+                "executor": result["executor"],
+                "state": result["status"]["state"],
+            }
+            for result in results
+        ]
 
     @server.tool(
         title="List tracked runs",
@@ -302,12 +364,13 @@ def register_tools(server: MCPServer, project: Project) -> None:
             Field(description="Sort direction; defaults to the metric declaration."),
         ] = None,
         limit: Annotated[
-            int | None, Field(ge=0, description="Maximum number of runs to return.")
-        ] = None,
+            int, Field(ge=0, description="Maximum number of runs to return.")
+        ] = 100,
     ) -> list[dict[str, Any]]:
         """List attributed runs in a leaderboard, optionally filtered by record ID.
 
         Set include_unattributed to include runs without a record ID.
+        Results are limited to 100 by default; set limit to choose another cap.
 
         Sorting uses plain metric names and their declared direction.
         """

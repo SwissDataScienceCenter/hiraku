@@ -3,10 +3,12 @@
 import logging
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
 import weakref
+from contextlib import suppress
 from pathlib import Path
 from threading import Thread
 from urllib.parse import unquote, urlsplit
@@ -34,6 +36,7 @@ class _Result(BaseModel):
     exit_code: int | None = Field(strict=True)
     finished_at: AwareDatetime
     message: str | None = None
+    canceled: bool = False
 
 
 class _Supervisor(BaseModel):
@@ -93,7 +96,18 @@ class LocalDetachedJobExecutor(JobExecutor):
                 cwd=spec.directory,
                 env=environment,
             )
+            identity = _Supervisor(
+                pid=process.pid,
+                create_time=psutil.Process(process.pid).create_time(),
+            )
+            temporary = path.with_name("supervisor.parent.tmp")
+            temporary.write_text(identity.model_dump_json(), encoding="utf-8")
+            temporary.replace(path.with_name("supervisor.json"))
         except Exception as exc:
+            if "process" in locals() and process.poll() is None:
+                with suppress(ProcessLookupError):
+                    os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
             job.executor = None
             if isinstance(exc, InvalidJobException | SubmitException):
                 raise
@@ -118,8 +132,15 @@ class LocalDetachedJobExecutor(JobExecutor):
             result = _Result.model_validate_json(path.read_text(encoding="utf-8"))
         except FileNotFoundError:
             return None
+        state = (
+            JobState.CANCELED
+            if result.canceled
+            else JobState.COMPLETED
+            if result.exit_code == 0
+            else JobState.FAILED
+        )
         return JobStatus(
-            JobState.COMPLETED if result.exit_code == 0 else JobState.FAILED,
+            state,
             time=result.finished_at.timestamp(),
             exit_code=result.exit_code,
             message=result.message,
@@ -220,7 +241,84 @@ class LocalDetachedJobExecutor(JobExecutor):
                 process.wait()
 
     def cancel(self, job: Job) -> None:
-        raise SubmitException("Detached cancellation is not supported")
+        if job.status.final:
+            return
+        path = self._result_path(job.native_id)
+        result = self._read_result(path)
+        if result is not None:
+            self._set_job_status(job, result)
+            return
+        try:
+            identity_path = path.with_name("supervisor.json")
+            identity = _Supervisor.model_validate_json(
+                identity_path.read_text(encoding="utf-8")
+            )
+            process = psutil.Process(identity.pid)
+            if process.create_time() != identity.create_time:
+                raise SubmitException("Detached supervisor identity has changed")
+        except FileNotFoundError as exc:
+            raise SubmitException("Detached supervisor is not ready to cancel") from exc
+        except psutil.NoSuchProcess:
+            result = self._read_result(path)
+            if result is not None:
+                self._set_job_status(job, result)
+                return
+            raise SubmitException("Detached supervisor is no longer running") from None
+        except (OSError, ValueError) as exc:
+            raise SubmitException(
+                "Cannot identify detached supervisor", exception=exc
+            ) from exc
+
+        try:
+            os.killpg(identity.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            result = self._read_result(path)
+            if result is not None:
+                self._set_job_status(job, result)
+                return
+            raise SubmitException(
+                "Detached job process group is no longer running"
+            ) from None
+        except OSError as exc:
+            raise SubmitException("Cannot cancel detached job", exception=exc) from exc
+
+        try:
+            process.wait(timeout=10)
+        except psutil.TimeoutExpired as exc:
+            raise SubmitException(
+                "Detached supervisor did not stop after cancellation"
+            ) from exc
+        try:
+            os.killpg(identity.pid, 0)
+        except ProcessLookupError:
+            pass
+        else:
+            try:
+                os.killpg(identity.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except OSError as exc:
+                raise SubmitException(
+                    "Cannot stop remaining detached job processes", exception=exc
+                ) from exc
+
+        result = self._read_result(path)
+        if result is None:
+            temporary = path.with_suffix(".tmp")
+            temporary.write_text(
+                _Result(
+                    exit_code=None,
+                    finished_at=time.time(),
+                    message="Canceled by request",
+                    canceled=True,
+                ).model_dump_json(),
+                encoding="utf-8",
+            )
+            temporary.replace(path)
+            result = self._read_result(path)
+        if result is None:
+            raise SubmitException("Canceled job outcome could not be recorded")
+        self._set_job_status(job, result)
 
 
 class QuotedSingleLauncher(ScriptBasedLauncher):
