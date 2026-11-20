@@ -40,7 +40,7 @@ under `src/psij-descriptors/`.
 Core responsibilities:
 
 - **`Project`** (`project.py`) — Project discovery, settings, and managed paths.
-- **`Record` and `Vault`** (`record.py`) — Local document models and filesystem-backed bundle operations.
+- **`Record` and `Vault`** (`record.py`) — Local document models and filesystem-backed operations.
 - **`Run`** (`tracking/base.py`) — Normalized tracking traces with metrics and attribution.
 - **Execution** (`job.py`) — Prepare native PSI/J jobs, stream foreground output, and keep submission history keyed by PSI/J job ID. Executors own execution and status; history retains observed final outcomes.
 - **Tracking** (`tracking/`) — Backend adapters implementing `TrackingBackend`; `Leaderboard` validates source settings and creates adapters.
