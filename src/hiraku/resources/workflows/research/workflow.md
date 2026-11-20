@@ -113,7 +113,9 @@ and `affects` (`analysis`, `runs`, `code`, `design`, `setup`, `task`, or
 `unknown`). Use `task` or `setup` when the problem is in the task record or the
 `project-setup` context: no fix to the experiment helps, and the researcher
 decides. Set `unfixable` when no fix to this experiment can resolve a finding
-that stays within its scope; the experiment then concludes as inconclusive.
+that stays within its scope; the experiment then ends with its review failed:
+one that ran keeps its result as provisional, one that never ran is
+inconclusive.
 `thread` holds the earlier findings and the author's answers. When a finding
 stays open after the author disputed it, send it again with `continues` set to
 its ID; a meta review then rules on it.
@@ -143,7 +145,9 @@ and `affects` (`analysis`, `runs`, `code`, `design`, `setup`, `task`, or
 `unknown`). Use `task` or `setup` when the problem is in the task record or the
 `project-setup` context: no fix to the experiment helps, and the researcher
 decides. Set `unfixable` when no fix to this experiment can resolve a finding
-that stays within its scope; the experiment then concludes as inconclusive.
+that stays within its scope; the experiment then ends with its review failed:
+one that ran keeps its result as provisional, one that never ran is
+inconclusive.
 `thread` holds the earlier findings and the author's answers. When a finding
 stays open after the author disputed it, send it again with `continues` set to
 its ID; a meta review then rules on it.
@@ -176,7 +180,9 @@ and `affects` (`analysis`, `runs`, `code`, `design`, `setup`, `task`, or
 `unknown`). Use `task` or `setup` when the problem is in the task record or the
 `project-setup` context: no fix to the experiment helps, and the researcher
 decides. Set `unfixable` when no fix to this experiment can resolve a finding
-that stays within its scope; the experiment then concludes as inconclusive.
+that stays within its scope; the experiment then ends with its review failed:
+one that ran keeps its result as provisional, one that never ran is
+inconclusive.
 `thread` holds the earlier findings and the author's answers. When a finding
 stays open after the author disputed it, send it again with `continues` set to
 its ID; a meta review then rules on it.
@@ -215,7 +221,8 @@ saw (the runs, or the diff). Form your own view of each finding from that
 evidence before you read the arguments. Rule once on each open finding:
 `overrule` (the finding is dropped and the author's position stands),
 `limitation` (valid, but it does not block; it is written into the conclusion),
-or `sustain` (valid and unresolved: the experiment concludes as inconclusive).
+or `sustain` (valid and unresolved: the experiment ends with its review failed,
+its result kept as provisional if it ran, or inconclusive if it never ran).
 The ruling is final and is recorded. Give a reason for each, list your
 `sources`, send the run values you rely on in `evidence`, and send your own
 session or agent ID in `agent`.
@@ -226,28 +233,33 @@ A problem is outside what one experiment can fix: `question` names the finding
 or the records that changed. Ask the researcher and wait for their answer; do
 not answer for them. Send `resolved` when they changed the task or the setup (the
 stage's reviewer then reviews again), `accept_risk` to continue with the finding
-recorded as a limitation, or `conclude` to end this experiment as inconclusive.
+recorded as a limitation, or `conclude` to end this experiment with its review
+failed (a result it already has is kept as provisional).
 Other experiments keep running; only this one waits.
 
 ## Summarize
 
 Write the study report from the tree and the runs: each experiment with its
 parent, verdict, and conclusion, the best result on the task's metrics, the
-limitations, every experiment with a meta-review ruling (`disputed`), and the
-open questions. Every number must come from a run. If `acceptance_feedback` is
-set, an earlier report was reopened: address it. Send the text in `report`.
+limitations, every experiment with a meta-review ruling (`disputed`), every
+result that did not pass review (`provisional`, with the reason), and the open
+questions. Report a provisional result as provisional wherever it appears. Every
+number must come from a run. If `acceptance_feedback` is set, an earlier report
+was reopened: address it. Send the text in `report`.
 
 ## Acceptance review
 
 Review the finished study as an independent reviewer who has seen none of its
 discussions. Check every number in `report` against the raw runs in `evidence`,
-and look for problems that no review of a single experiment can see: the best
-of many experiments reported alone, multiple comparisons, a conclusion that the
-tree does not support. Check that inconclusive experiments, limitations, and every
-`disputed` ruling are disclosed, and that the commit and `command` allow a
-rerun. Send `accept`, `accept_with_caveats` with the `caveats`, or `reopen` with
-the experiments to reopen and their findings (only when `reopen_allowed`). Send
-the run values you rely on in `evidence` and your session or agent ID in `agent`.
+and look for problems that no review of a single experiment can see: the best of
+many experiments reported alone, multiple comparisons, a conclusion that the
+tree does not support. Check that inconclusive experiments, limitations, every
+`disputed` ruling, and every `provisional` result are disclosed, that no
+provisional result is reported as established, and that the commit and `command`
+allow a rerun. Send `accept`, `accept_with_caveats` with the `caveats`, or
+`reopen` with the experiments to reopen and their findings (only when
+`reopen_allowed`). Send the run values you rely on in `evidence` and your
+session or agent ID in `agent`.
 
 ## Triage
 
@@ -256,8 +268,9 @@ experiments as its children, designed in the next step; `stop` closes this
 branch. Follow up only when the result raises a question worth testing;
 `can_follow_up` says whether the depth and experiment limits still allow it.
 Send `triaged` with the decision and a one-sentence reason. An experiment that
-ran can be followed up even when its result review found a problem that could not
-be fixed; one that never ran cannot.
+ran can be followed up even when its review failed: its verdict is then
+provisional (`review_failed` says why), so say in the reason how the follow-up
+depends on it. One that never ran cannot be followed up.
 
 ## Done
 

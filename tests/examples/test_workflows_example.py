@@ -331,6 +331,7 @@ def _autonomous_study(**options: Any) -> tuple[Project, str, dict[str, Any]]:
             "task": task.id,
             "command": ["python", "train.py"],
             "autonomous": True,
+            "reviews": ["design", "code", "result", "acceptance"],
             **options,
         },
         project=project,
@@ -478,6 +479,85 @@ def _dispute_until_meta(project: Project, session: str) -> dict[str, Any]:
     )
 
 
+def test_only_the_result_and_the_study_are_reviewed_by_default(
+    runner: CliRunner,
+) -> None:
+    project, session, started = _autonomous_study(reviews=["result", "acceptance"])
+    assert _step(started) == "design"
+    # No design review: straight to implementation, and no review stage in the way.
+    implementing = _design(project, session)
+    assert _step(implementing) == "implement"
+    launch, sha = _implement(project, session, "baseline")
+    assert _step(launch) == "launch"
+    assert project.vault.load("baseline").review_stages == ["result", "acceptance"]
+    resume_workflow(session, {"event": "launched"}, project=project)
+    _write_runs(project, f"run-1,baseline,{sha},0.5")
+    resume_workflow(session, {"event": "checked"}, project=project)
+    result = resume_workflow(
+        session,
+        {"verdict": "supports", "conclusion": "run-1: loss 0.5"},
+        project=project,
+    )
+    assert _step(result) == "review_result"
+    assert _step(_result_review(project, session)) == "triage"
+    resume_workflow(session, {"decision": "stop", "reason": "Done"}, project=project)
+    accepting = resume_workflow(session, {"report": "baseline: 0.5"}, project=project)
+    assert _step(accepting) == "acceptance_review"
+    experiment = project.vault.load("baseline")
+    assert [item["kind"] for item in experiment.reviews] == ["result"]
+
+
+def test_reviews_option_defaults_and_validation(runner: CliRunner) -> None:
+    from hiraku.resources.workflows.research.workflow import ResearchInput
+
+    assert ResearchInput(command=["x"]).reviews == ["result", "acceptance"]
+    with pytest.raises(ValueError):
+        ResearchInput(command=["x"], reviews=["style"])
+
+
+def test_an_autonomous_study_without_reviews_runs_straight_through(
+    runner: CliRunner,
+) -> None:
+    project, session, _ = _autonomous_study(reviews=[])
+    _design(project, session)
+    _, sha = _implement(project, session, "baseline")
+    resume_workflow(session, {"event": "launched"}, project=project)
+    _write_runs(project, f"run-1,baseline,{sha},0.5")
+    resume_workflow(session, {"event": "checked"}, project=project)
+    triage = resume_workflow(
+        session,
+        {"verdict": "supports", "conclusion": "run-1: loss 0.5"},
+        project=project,
+    )
+    assert _step(triage) == "triage"
+    done = resume_workflow(
+        session, {"decision": "stop", "reason": "Done"}, project=project
+    )
+    # No acceptance review, so no summary step either.
+    assert done["status"] == "completed"
+
+
+def test_the_study_ends_after_the_result_review_without_acceptance(
+    runner: CliRunner,
+) -> None:
+    project, session, _ = _autonomous_study(reviews=["result"])
+    _design(project, session)
+    _, sha = _implement(project, session, "baseline")
+    resume_workflow(session, {"event": "launched"}, project=project)
+    _write_runs(project, f"run-1,baseline,{sha},0.5")
+    resume_workflow(session, {"event": "checked"}, project=project)
+    resume_workflow(
+        session,
+        {"verdict": "supports", "conclusion": "run-1: loss 0.5"},
+        project=project,
+    )
+    assert _step(_result_review(project, session)) == "triage"
+    done = resume_workflow(
+        session, {"decision": "stop", "reason": "Done"}, project=project
+    )
+    assert done["status"] == "completed"
+
+
 def test_autonomous_study_reviews_design_code_and_result(runner: CliRunner) -> None:
     project, session, started = _autonomous_study()
     assert _step(started) == "design"
@@ -599,6 +679,8 @@ def test_unfixable_design_finding_concludes_without_running(runner: CliRunner) -
     assert experiment.verdict == "inconclusive"
     assert experiment.conclusion.startswith("Not run: design did not pass review.")
     assert experiment.triage == "stop"
+    assert experiment.review_failed["stage"] == "design"
+    assert experiment.review_failed["findings"][0]["claim"] == "Untestable."
 
 
 def test_meta_review_rules_when_author_and_reviewer_do_not_converge(
@@ -692,13 +774,73 @@ def test_unfixable_result_finding_still_allows_a_follow_up(runner: CliRunner) ->
     )
     assert _step(triage) == "triage"
     assert _value(triage)["data"]["can_follow_up"] is True
+    assert _value(triage)["data"]["experiment"]["review_failed"]["stage"] == "result"
     experiment = project.vault.load("baseline")
-    assert experiment.verdict == "inconclusive"
-    assert experiment.rejected_conclusion == "run-1: loss 0.5"
+    # The analysis stands as a provisional result, marked for a person to check.
+    assert experiment.verdict == "supports"
+    assert experiment.conclusion == "run-1: loss 0.5"
+    assert experiment.result_review == "failed"
+    assert experiment.review_failed == {
+        "stage": "result",
+        "reason": "No fix can resolve it",
+        "findings": [{"id": "result-1.1", "claim": "One seed cannot settle it."}],
+    }
     follow_up = resume_workflow(
         session, {"decision": "follow-up", "reason": "Add seeds"}, project=project
     )
     assert _step(follow_up) == "design"
+
+
+def test_provisional_result_is_disclosed_to_summary_and_acceptance(
+    runner: CliRunner,
+) -> None:
+    project, session, _ = _autonomous_study()
+    _to_result_review(project, session)
+    _result_review(
+        project,
+        session,
+        "fix",
+        _finding("One seed cannot settle it.", unfixable=True, affects="runs"),
+    )
+    summarizing = resume_workflow(
+        session, {"decision": "stop", "reason": "Enough"}, project=project
+    )
+    assert _step(summarizing) == "summarize"
+    data = _value(summarizing)["data"]
+    assert data["provisional"] == [
+        {
+            "id": "baseline",
+            "verdict": "supports",
+            "stage": "result",
+            "reason": "No fix can resolve it",
+            "findings": [{"id": "result-1.1", "claim": "One seed cannot settle it."}],
+        }
+    ]
+    assert data["best_results"][0]["provisional"] is True
+    assert data["tree"][0]["review_failed"]["stage"] == "result"
+
+
+def test_approval_after_a_reopen_clears_a_failed_review() -> None:
+    import importlib.util
+
+    import hiraku
+    from hiraku.record import Record
+
+    path = Path(hiraku.__file__).parent / "resources/workflows/research/workflow.py"
+    spec = importlib.util.spec_from_file_location("research_workflow", path)
+    assert spec and spec.loader
+    workflow = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(workflow)
+    experiment = Record(
+        id="baseline",
+        type="experiment",
+        verdict="supports",
+        conclusion="run-1: loss 0.5",
+        review_failed={"stage": "result", "reason": "x", "findings": []},
+    )
+    workflow._approve(experiment, "result", "reviewer")
+    assert experiment.review_failed is None
+    assert experiment.result_review == "approved"
 
 
 def test_result_review_cites_values_that_the_data_confirms(runner: CliRunner) -> None:
@@ -820,7 +962,8 @@ def test_disputed_result_finding_that_stays_open_goes_to_meta_review(
     triage = _rule(project, session, "result-2.1", "sustain", LOSS)
     assert _step(triage) == "triage"
     experiment = project.vault.load("baseline")
-    assert experiment.verdict == "inconclusive"
+    assert experiment.verdict == "supports"
+    assert experiment.review_failed["reason"] == "The meta review sustained"
     assert experiment.disputed is True
 
 
@@ -920,6 +1063,7 @@ def test_researcher_answers_accept_the_risk_or_conclude(
         assert experiment.limitations[0]["source"] == "researcher"
     else:
         assert experiment.triage == "stop"
+        assert experiment.review_failed["stage"] == "design"
 
 
 def test_one_agent_cannot_act_in_two_roles(runner: CliRunner) -> None:
