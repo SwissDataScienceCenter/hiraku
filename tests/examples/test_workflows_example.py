@@ -303,11 +303,19 @@ def _value(response: dict[str, Any]) -> dict[str, Any]:
     return response["interrupts"][0]["value"]
 
 
+def _step(response: dict[str, Any]) -> str:
+    return _value(response)["step"]
+
+
 def _commit(message: str) -> str:
     subprocess.run(["git", "config", "user.name", "Test"], check=True)
     subprocess.run(["git", "config", "user.email", "test@example.invalid"], check=True)
     subprocess.run(["git", "commit", "--allow-empty", "-m", message], check=True)
     return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+
+
+SOURCES = ["model knowledge"]
+LOSS = {"run_id": "run-1", "metric": "loss", "value": 0.5}
 
 
 def _autonomous_study(**options: Any) -> tuple[Project, str, dict[str, Any]]:
@@ -330,31 +338,43 @@ def _autonomous_study(**options: Any) -> tuple[Project, str, dict[str, Any]]:
     return project, started["workflow_session_id"], started
 
 
-def _design(project: Project, session: str) -> dict[str, Any]:
+def _plan(record_id: str = "baseline") -> dict[str, str]:
+    return {
+        "record_id": record_id,
+        "summary": record_id.title(),
+        "hypothesis": "Loss falls",
+        "expected": "Lower loss",
+        "change": "Train a model",
+    }
+
+
+def _design(project: Project, session: str, *names: str) -> dict[str, Any]:
     return resume_workflow(
         session,
-        {
-            "experiments": [
-                {
-                    "record_id": "baseline",
-                    "summary": "Baseline",
-                    "hypothesis": "Loss falls",
-                    "expected": "Lower loss",
-                    "change": "Train a model",
-                }
-            ]
-        },
+        {"experiments": [_plan(name) for name in names or ("baseline",)]},
         project=project,
+    )
+
+
+def _finding(claim: str = "No control.", **fields: Any) -> dict[str, Any]:
+    return {"claim": claim, "evidence": "See the plan.", **fields}
+
+
+def _verdict(record_id: str, decision: str = "approve", *findings: dict[str, Any]):
+    return {"record_id": record_id, "decision": decision, "findings": list(findings)}
+
+
+def _design_review(
+    project: Project, session: str, *verdicts: dict[str, Any]
+) -> dict[str, Any]:
+    return resume_workflow(
+        session, {"verdicts": list(verdicts), "sources": SOURCES}, project=project
     )
 
 
 def _approve_design(project: Project, session: str) -> dict[str, Any]:
     _design(project, session)
-    return resume_workflow(
-        session,
-        {"decision": "approve", "findings": "Sound.", "sources": ["model knowledge"]},
-        project=project,
-    )
+    return _design_review(project, session, _verdict("baseline"))
 
 
 def _implement(
@@ -378,80 +398,133 @@ def _to_code_review(project: Project, session: str) -> tuple[dict[str, Any], str
     return _implement(project, session, "baseline")
 
 
+def _approve_code(project: Project, session: str) -> dict[str, Any]:
+    return resume_workflow(session, {"decision": "approve"}, project=project)
+
+
+def _write_runs(project: Project, *rows: str) -> None:
+    (project.root / "runs.csv").write_text(
+        "id,record_id,commit,metric.loss\n" + "".join(f"{row}\n" for row in rows)
+    )
+
+
 def _to_result_review(project: Project, session: str) -> str:
     response, sha = _to_code_review(project, session)
-    assert _value(response)["step"] == "review_code"
-    resume_workflow(
-        session, {"decision": "approve", "findings": "Fine."}, project=project
-    )
+    assert _step(response) == "review_code"
+    _approve_code(project, session)
     resume_workflow(session, {"event": "launched"}, project=project)
-    (project.root / "runs.csv").write_text(
-        f"id,record_id,commit,metric.loss\nrun-1,baseline,{sha},0.5\n"
-    )
+    _write_runs(project, f"run-1,baseline,{sha},0.5")
     resume_workflow(session, {"event": "checked"}, project=project)
     analyzed = resume_workflow(
         session,
         {"verdict": "supports", "conclusion": "run-1: loss 0.5"},
         project=project,
     )
-    assert _value(analyzed)["step"] == "review_result"
+    assert _step(analyzed) == "review_result"
     return sha
+
+
+def _result_review(
+    project: Project, session: str, decision: str = "approve", *findings: dict[str, Any]
+) -> dict[str, Any]:
+    return resume_workflow(
+        session,
+        {
+            "own_verdict": "supports",
+            "decision": decision,
+            "findings": list(findings),
+            "sources": SOURCES,
+            "evidence": [LOSS],
+        },
+        project=project,
+    )
+
+
+def _answer(
+    project: Project, session: str, id_: str, action: str, **fields: Any
+) -> dict[str, Any]:
+    return resume_workflow(
+        session,
+        {"responses": [{"id": id_, "action": action, "note": "Because."}], **fields},
+        project=project,
+    )
+
+
+def _rule(
+    project: Project, session: str, id_: str, ruling: str, *evidence: dict[str, Any]
+) -> dict[str, Any]:
+    return resume_workflow(
+        session,
+        {
+            "rulings": [{"finding_id": id_, "ruling": ruling, "reason": "Weighed."}],
+            "sources": SOURCES,
+            "evidence": list(evidence),
+        },
+        project=project,
+    )
+
+
+def _dispute_until_meta(project: Project, session: str) -> dict[str, Any]:
+    """Design review, a disputed answer, and a reviewer that keeps the finding."""
+    _design(project, session)
+    fixing = _design_review(project, session, _verdict("baseline", "fix", _finding()))
+    assert _step(fixing) == "fix"
+    again = _answer(project, session, "design-1.1", "dispute")
+    assert _step(again) == "review_design"
+    return _design_review(
+        project,
+        session,
+        _verdict("baseline", "fix", _finding(continues="design-1.1")),
+    )
 
 
 def test_autonomous_study_reviews_design_code_and_result(runner: CliRunner) -> None:
     project, session, started = _autonomous_study()
-    assert _value(started)["step"] == "design"
+    assert _step(started) == "design"
     assert "do not wait for the user" in _value(started)["instruction"]
 
     reviewing = _design(project, session)
-    assert _value(reviewing)["step"] == "review_design"
-    implementing = resume_workflow(
-        session,
-        {"decision": "approve", "findings": "Sound.", "sources": ["model knowledge"]},
-        project=project,
-    )
-    assert _value(implementing)["step"] == "implement"
+    assert _step(reviewing) == "review_design"
+    assert "tracking.run.read" in _value(reviewing)["required_capabilities"]
+    implementing = _design_review(project, session, _verdict("baseline"))
+    assert _step(implementing) == "implement"
     assert _value(implementing)["data"]["smoke_test_required"] is True
 
     sha = _commit("baseline")
     missing = resume_workflow(session, {"commit": sha}, project=project)
-    assert _value(missing)["step"] == "implement"
+    assert _step(missing) == "implement"
     assert "smoke test" in _value(missing)["feedback"]
     code = resume_workflow(
         session,
         {"commit": sha, "smoke_command": "python train.py", "smoke_output": "ok"},
         project=project,
     )
-    assert _value(code)["step"] == "review_code"
+    assert _step(code) == "review_code"
     assert _value(code)["data"]["diff"].endswith(f"{sha}")
-    launch = resume_workflow(
-        session, {"decision": "approve", "findings": "Fine."}, project=project
-    )
-    assert _value(launch)["step"] == "launch"
+    assert _step(_approve_code(project, session)) == "launch"
     resume_workflow(session, {"event": "launched"}, project=project)
-    (project.root / "runs.csv").write_text(
-        f"id,record_id,commit,metric.loss\nrun-1,baseline,{sha},0.5\n"
-    )
+    _write_runs(project, f"run-1,baseline,{sha},0.5")
     resume_workflow(session, {"event": "checked"}, project=project)
     result = resume_workflow(
         session,
         {"verdict": "supports", "conclusion": "run-1: loss 0.5"},
         project=project,
     )
-    assert _value(result)["step"] == "review_result"
-    triage = resume_workflow(
-        session,
-        {
-            "own_verdict": "supports",
-            "decision": "approve",
-            "findings": "Holds.",
-            "sources": ["model knowledge"],
-        },
-        project=project,
-    )
-    assert _value(triage)["step"] == "triage"
-    completed = resume_workflow(
+    assert _step(result) == "review_result"
+    data = _value(result)["data"]
+    assert data["runs"][0]["commit"] == sha
+    assert {"job_id", "timestamp", "duration", "url", "raw"} <= set(data["runs"][0])
+    assert _step(_result_review(project, session)) == "triage"
+    summarizing = resume_workflow(
         session, {"decision": "stop", "reason": "Done"}, project=project
+    )
+    assert _step(summarizing) == "summarize"
+    accepting = resume_workflow(session, {"report": "baseline: 0.5"}, project=project)
+    assert _step(accepting) == "acceptance_review"
+    completed = resume_workflow(
+        session,
+        {"outcome": "accept", "sources": SOURCES, "evidence": [LOSS]},
+        project=project,
     )
     assert completed["status"] == "completed"
     experiment = project.vault.load("baseline")
@@ -460,88 +533,477 @@ def test_autonomous_study_reviews_design_code_and_result(runner: CliRunner) -> N
         "code",
         "result",
     ]
+    task = project.vault.load("task")
+    assert task.report == "baseline: 0.5"
+    assert task.acceptance == {"outcome": "accept", "caveats": []}
 
 
-def test_rejected_design_is_redesigned_then_kept_after_the_limit(
+def test_design_review_revises_in_place_and_keeps_approved_siblings(
     runner: CliRunner,
 ) -> None:
-    project, session, _ = _autonomous_study(review_rounds=1)
+    project, session, _ = _autonomous_study()
+    _design(project, session, "a", "b")
+    fixing = _design_review(
+        project,
+        session,
+        _verdict("a"),
+        _verdict("b", "fix", _finding(affects="design")),
+    )
+    assert _step(fixing) == "fix"
+    assert {"a", "b"} <= {record.id for record in project.vault.list()}
+    assert project.vault.load("a").design_review == "approved"
+    assert _value(fixing)["data"]["findings"][0]["id"] == "design-1.1"
+
+    unchanged = _answer(project, session, "design-1.1", "done")
+    assert _step(unchanged) == "fix"
+    assert "nothing observable changed" in _value(unchanged)["feedback"]
+
+    amended = {**_plan("b"), "change": "Train a model with a control"}
+    reviewing = _answer(project, session, "design-1.1", "done", plan=amended)
+    assert _step(reviewing) == "review_design"
+    assert [item["id"] for item in _value(reviewing)["data"]["experiments"]] == ["b"]
+    assert "control" in str(project.vault.load("b").markdown)
+    # The rejected round stays on the record.
+    assert [item["kind"] for item in project.vault.load("b").reviews] == [
+        "design",
+        "response",
+    ]
+
+
+def test_review_findings_need_a_blocking_one_to_fix(runner: CliRunner) -> None:
+    project, session, _ = _autonomous_study()
     _design(project, session)
-    revise = {"decision": "revise", "findings": "No control.", "sources": ["paper"]}
-    redesign = resume_workflow(session, revise, project=project)
-    assert _value(redesign)["step"] == "design"
-    assert _value(redesign)["data"]["review_feedback"] == "No control."
-    assert "baseline" not in {record.id for record in project.vault.list()}
+    bare = _design_review(project, session, _verdict("baseline", "fix"))
+    assert _step(bare) == "review_design"
+    assert "blocking finding" in _value(bare)["error"]
+    minor = _design_review(
+        project,
+        session,
+        _verdict("baseline", "approve", _finding("Name is vague.", severity="minor")),
+    )
+    assert _step(minor) == "implement"
+    assert project.vault.load("baseline").limitations[0]["claim"] == "Name is vague."
 
+
+def test_unfixable_design_finding_concludes_without_running(runner: CliRunner) -> None:
+    project, session, _ = _autonomous_study()
     _design(project, session)
-    implementing = resume_workflow(session, revise, project=project)
-    assert _value(implementing)["step"] == "implement"
-    assert project.vault.load("baseline").design_review == "unresolved"
-
-
-def test_code_review_sends_back_then_concludes_after_the_limit(
-    runner: CliRunner,
-) -> None:
-    project, session, _ = _autonomous_study(review_rounds=1)
-    code, _ = _to_code_review(project, session)
-    assert _value(code)["step"] == "review_code"
-    fix = {"decision": "fix", "findings": "Leaks evaluation data."}
-    implementing = resume_workflow(session, fix, project=project)
-    assert _value(implementing)["step"] == "implement"
-    assert _value(implementing)["data"]["review_feedback"] == "Leaks evaluation data."
-    assert project.vault.load("baseline").commit is None
-
-    code, _ = _implement(project, session, "baseline again")
-    assert _value(code)["step"] == "review_code"
-    triage = resume_workflow(session, fix, project=project)
-    assert _value(triage)["step"] == "triage"
+    summarizing = _design_review(
+        project,
+        session,
+        _verdict("baseline", "fix", _finding("Untestable.", unfixable=True)),
+    )
+    # Nothing ran: no triage, and the study moves to its summary.
+    assert _step(summarizing) == "summarize"
     experiment = project.vault.load("baseline")
     assert experiment.verdict == "inconclusive"
-    assert experiment.conclusion.startswith("Did not pass the code review")
+    assert experiment.conclusion.startswith("Not run: design did not pass review.")
+    assert experiment.triage == "stop"
 
 
-def test_result_review_reanalyzes_or_sends_code_back(runner: CliRunner) -> None:
+def test_meta_review_rules_when_author_and_reviewer_do_not_converge(
+    runner: CliRunner,
+) -> None:
+    project, session, _ = _autonomous_study()
+    meta = _dispute_until_meta(project, session)
+    assert _step(meta) == "meta_review"
+    data = _value(meta)["data"]
+    assert data["open_findings"][0]["continues"] == "design-1.1"
+    assert data["task"]["id"] == "task"
+    assert data["tree"][0]["id"] == "baseline"
+    assert "project_setup" in data
+
+    wrong = _rule(project, session, "design-9.9", "overrule")
+    assert _step(wrong) == "meta_review"
+    implementing = _rule(project, session, "design-2.1", "overrule")
+    assert _step(implementing) == "implement"
+    experiment = project.vault.load("baseline")
+    assert experiment.design_review == "approved"
+    assert experiment.approved_by == {"design": "meta_review"}
+    assert experiment.disputed is True
+    assert [item["kind"] for item in experiment.reviews][-1] == "meta"
+
+
+def test_meta_review_sustained_finding_concludes_the_experiment(
+    runner: CliRunner,
+) -> None:
+    project, session, _ = _autonomous_study()
+    _dispute_until_meta(project, session)
+    summarizing = _rule(project, session, "design-2.1", "sustain")
+    assert _step(summarizing) == "summarize"
+    experiment = project.vault.load("baseline")
+    assert experiment.conclusion.startswith("Not run: design did not pass review.")
+    assert experiment.triage == "stop"
+
+
+def test_exhausted_rounds_go_to_meta_review(runner: CliRunner) -> None:
+    project, session, _ = _autonomous_study(review_rounds=1)
+    _design(project, session)
+    _design_review(project, session, _verdict("baseline", "fix", _finding()))
+    amended = {**_plan(), "change": "Add a control"}
+    _answer(project, session, "design-1.1", "done", plan=amended)
+    meta = _design_review(project, session, _verdict("baseline", "fix", _finding()))
+    assert _step(meta) == "meta_review"
+    limited = _rule(project, session, "design-2.1", "limitation")
+    assert _step(limited) == "implement"
+    assert project.vault.load("baseline").limitations[0]["source"] == "meta_review"
+
+
+def test_code_review_fix_returns_to_review_with_a_new_commit(
+    runner: CliRunner,
+) -> None:
+    project, session, _ = _autonomous_study()
+    code, _ = _to_code_review(project, session)
+    assert _step(code) == "review_code"
+    fixing = resume_workflow(
+        session,
+        {
+            "decision": "fix",
+            "findings": [_finding("Leaks evaluation data.", affects="code")],
+        },
+        project=project,
+    )
+    assert _step(fixing) == "fix"
+    assert _value(fixing)["data"]["diff"].startswith("git diff")
+    sha = _commit("baseline fixed")
+    missing = _answer(project, session, "code-1.1", "done", commit=sha)
+    assert "smoke test" in _value(missing)["feedback"]
+    again = _answer(
+        project,
+        session,
+        "code-1.1",
+        "done",
+        commit=sha,
+        smoke_command="python train.py",
+        smoke_output="ok",
+    )
+    assert _step(again) == "review_code"
+    assert project.vault.load("baseline").commit == sha
+
+
+def test_unfixable_result_finding_still_allows_a_follow_up(runner: CliRunner) -> None:
     project, session, _ = _autonomous_study()
     _to_result_review(project, session)
-    review = {
-        "own_verdict": "inconclusive",
-        "findings": "The conclusion overreaches.",
-        "sources": ["model knowledge"],
-    }
-    reanalysis = resume_workflow(
-        session, {**review, "decision": "reanalyze"}, project=project
+    triage = _result_review(
+        project,
+        session,
+        "fix",
+        _finding("One seed cannot settle it.", unfixable=True, affects="runs"),
     )
-    assert _value(reanalysis)["step"] == "analyze"
-    assert _value(reanalysis)["data"]["review_feedback"] == review["findings"]
+    assert _step(triage) == "triage"
+    assert _value(triage)["data"]["can_follow_up"] is True
+    experiment = project.vault.load("baseline")
+    assert experiment.verdict == "inconclusive"
+    assert experiment.rejected_conclusion == "run-1: loss 0.5"
+    follow_up = resume_workflow(
+        session, {"decision": "follow-up", "reason": "Add seeds"}, project=project
+    )
+    assert _step(follow_up) == "design"
 
+
+def test_result_review_cites_values_that_the_data_confirms(runner: CliRunner) -> None:
+    project, session, _ = _autonomous_study()
+    _to_result_review(project, session)
+    wrong = resume_workflow(
+        session,
+        {
+            "own_verdict": "supports",
+            "decision": "approve",
+            "sources": SOURCES,
+            "evidence": [{**LOSS, "value": 0.1}],
+        },
+        project=project,
+    )
+    assert _step(wrong) == "review_result"
+    assert "not 0.1" in _value(wrong)["feedback"]
+    none = resume_workflow(
+        session,
+        {"own_verdict": "supports", "decision": "approve", "sources": SOURCES},
+        project=project,
+    )
+    assert "Cite the run values" in _value(none)["feedback"]
+    assert _step(_result_review(project, session)) == "triage"
+
+
+def test_result_fix_routes_on_what_changed(runner: CliRunner) -> None:
+    project, session, _ = _autonomous_study(review_rounds=3)
+    sha = _to_result_review(project, session)
+    finding = _finding("The conclusion overreaches.", affects="analysis")
+    _result_review(project, session, "fix", finding)
+
+    # A revised conclusion goes back to the result review.
+    revised = _answer(
+        project,
+        session,
+        "result-1.1",
+        "done",
+        verdict="inconclusive",
+        conclusion="run-1: loss 0.5, one run",
+    )
+    assert _step(revised) == "review_result"
+    assert _value(revised)["data"]["analysis"]["verdict"] == "inconclusive"
+
+    # A new run for the same commit restarts the analysis.
+    _result_review(project, session, "fix", {**finding, "affects": "runs"})
+    _write_runs(project, f"run-1,baseline,{sha},0.5", f"run-2,baseline,{sha},0.6")
+    analyzing = _answer(project, session, "result-2.1", "done")
+    assert _step(analyzing) == "analyze"
+    assert len(_value(analyzing)["data"]["runs"]) == 2
+
+    # A run that is declared invalid is dropped, with its reason kept.
+    reviewing = resume_workflow(
+        session, {"verdict": "supports", "conclusion": "two runs"}, project=project
+    )
+    assert _step(reviewing) == "review_result"
     resume_workflow(
         session,
-        {"verdict": "inconclusive", "conclusion": "run-1: loss 0.5, one run"},
+        {
+            "own_verdict": "supports",
+            "decision": "fix",
+            "findings": [_finding("run-2 diverged.", affects="runs")],
+            "sources": SOURCES,
+            "evidence": [{"run_id": "run-2", "metric": "loss", "value": 0.6}],
+        },
         project=project,
     )
+    analyzing = _answer(
+        project,
+        session,
+        "result-3.1",
+        "done",
+        excluded_runs=[{"run_id": "run-2", "reason": "Diverged at step 3"}],
+    )
+    assert _step(analyzing) == "analyze"
+    assert [item["run_id"] for item in _value(analyzing)["data"]["runs"]] == ["run-1"]
+    resume_workflow(
+        session, {"verdict": "supports", "conclusion": "run-1 only"}, project=project
+    )
+    visible = _result_review(project, session)
+    assert _step(visible) == "triage"
+
+
+def test_excluded_runs_stay_visible_to_the_result_review(runner: CliRunner) -> None:
+    project, session, _ = _autonomous_study()
+    sha = _to_result_review(project, session)
+    _write_runs(project, f"run-1,baseline,{sha},0.5", "run-old,baseline,deadbeef,0.1")
+    resume_workflow(
+        session,
+        {
+            "own_verdict": "supports",
+            "decision": "fix",
+            "findings": [_finding("Check the other run.", affects="runs")],
+            "sources": SOURCES,
+            "evidence": [LOSS],
+        },
+        project=project,
+    )
+    reviewing = _answer(project, session, "result-1.1", "dispute")
+    data = _value(reviewing)["data"]
+    assert [item["run_id"] for item in data["excluded_runs"]] == ["run-old"]
+    assert data["excluded_runs"][0]["reason"].startswith("commit differs")
+
+
+def test_disputed_result_finding_that_stays_open_goes_to_meta_review(
+    runner: CliRunner,
+) -> None:
+    project, session, _ = _autonomous_study()
+    _to_result_review(project, session)
+    finding = _finding("The metric looks broken.", affects="code")
+    _result_review(project, session, "fix", finding)
+    again = _answer(project, session, "result-1.1", "dispute")
+    assert _step(again) == "review_result"
+    meta = _result_review(
+        project, session, "fix", {**finding, "continues": "result-1.1"}
+    )
+    assert _step(meta) == "meta_review"
+    assert _value(meta)["data"]["runs"][0]["run_id"] == "run-1"
+    triage = _rule(project, session, "result-2.1", "sustain", LOSS)
+    assert _step(triage) == "triage"
+    experiment = project.vault.load("baseline")
+    assert experiment.verdict == "inconclusive"
+    assert experiment.disputed is True
+
+
+def test_frozen_fields_and_scope_guard_during_a_fix(runner: CliRunner) -> None:
+    project, session, _ = _autonomous_study()
+    _to_result_review(project, session)
+    _result_review(project, session, "fix", _finding("Weak.", affects="analysis"))
+
+    experiment = project.vault.load("baseline")
+    experiment.hypothesis = "Loss falls faster"
+    project.vault.save(experiment, overwrite=True)
+    frozen = _answer(project, session, "result-1.1", "dispute")
+    assert _step(frozen) == "fix"
+    assert "frozen" in _value(frozen)["feedback"]
+    assert project.vault.load("baseline").hypothesis == "Loss falls"
+
+    task = project.vault.load("task")
+    task.metrics = [{"name": "loss", "direction": "maximize"}]
+    project.vault.save(task, overwrite=True)
+    asked = _answer(project, session, "result-1.1", "dispute")
+    assert _step(asked) == "researcher"
+    assert _value(asked)["data"]["question"]["records"] == ["task"]
+    assert _value(asked)["data"]["question"]["reason"] == "scope"
+
+
+def test_out_of_scope_finding_waits_for_the_researcher_alone(
+    runner: CliRunner,
+) -> None:
+    project, session, _ = _autonomous_study()
+    _design(project, session, "a", "b")
+    implementing = _design_review(
+        project,
+        session,
+        _verdict("a", "fix", _finding("The metric is wrong.", affects="task")),
+        _verdict("b"),
+    )
+    # `b` is not held back by `a`'s open question.
+    assert _step(implementing) == "implement"
+    assert _value(implementing)["data"]["experiment"]["record_id"] == "b"
+    sha = _commit("b")
+    asked = resume_workflow(
+        session,
+        {"commit": sha, "smoke_command": "x", "smoke_output": "y"},
+        project=project,
+    )
+    assert _step(asked) == "review_code"
+    resume_workflow(session, {"decision": "approve"}, project=project)
+    resume_workflow(session, {"event": "launched"}, project=project)
+    _write_runs(project, f"run-b,b,{sha},0.5")
+    resume_workflow(session, {"event": "checked"}, project=project)
+    resume_workflow(
+        session, {"verdict": "supports", "conclusion": "run-b: 0.5"}, project=project
+    )
+    resume_workflow(
+        session,
+        {
+            "own_verdict": "supports",
+            "decision": "approve",
+            "sources": SOURCES,
+            "evidence": [{"run_id": "run-b", "metric": "loss", "value": 0.5}],
+        },
+        project=project,
+    )
+    ask = resume_workflow(
+        session, {"decision": "stop", "reason": "Done"}, project=project
+    )
+    assert _step(ask) == "researcher"
+    assert "wait for their answer" in _value(ask)["instruction"]
+    assert _value(ask)["data"]["experiment"]["record_id"] == "a"
+
+    review = resume_workflow(
+        session, {"answer": "resolved", "note": "Metric fixed"}, project=project
+    )
+    assert _step(review) == "review_design"
+    assert [item["id"] for item in _value(review)["data"]["experiments"]] == ["a"]
+
+
+@pytest.mark.parametrize(
+    ("answer", "after"), [("accept_risk", "implement"), ("conclude", "summarize")]
+)
+def test_researcher_answers_accept_the_risk_or_conclude(
+    runner: CliRunner, answer: str, after: str
+) -> None:
+    project, session, _ = _autonomous_study()
+    _design(project, session)
+    asked = _design_review(
+        project,
+        session,
+        _verdict("baseline", "fix", _finding("Wrong metric.", affects="setup")),
+    )
+    assert _step(asked) == "researcher"
+    response = resume_workflow(session, {"answer": answer}, project=project)
+    assert _step(response) == after
+    experiment = project.vault.load("baseline")
+    if answer == "accept_risk":
+        assert experiment.approved_by == {"design": "researcher"}
+        assert experiment.limitations[0]["source"] == "researcher"
+    else:
+        assert experiment.triage == "stop"
+
+
+def test_one_agent_cannot_act_in_two_roles(runner: CliRunner) -> None:
+    project, session, _ = _autonomous_study()
+    resume_workflow(
+        session,
+        {"experiments": [_plan()], "agent": "session-1"},
+        project=project,
+    )
+    clash = resume_workflow(
+        session,
+        {"verdicts": [_verdict("baseline")], "sources": SOURCES, "agent": "session-1"},
+        project=project,
+    )
+    assert _step(clash) == "review_design"
+    assert "already acted as author" in _value(clash)["error"]
     implementing = resume_workflow(
         session,
-        {**review, "decision": "fix_code", "findings": "The metric looks broken."},
+        {"verdicts": [_verdict("baseline")], "sources": SOURCES, "agent": "session-2"},
         project=project,
     )
-    assert _value(implementing)["step"] == "implement"
-    experiment = project.vault.load("baseline")
-    assert experiment.commit is None
-    assert getattr(experiment, "verdict", None) is None
+    assert _step(implementing) == "implement"
+
+
+def test_acceptance_review_reopens_an_experiment_once(runner: CliRunner) -> None:
+    project, session, _ = _autonomous_study()
+    _to_result_review(project, session)
+    _result_review(project, session)
+    resume_workflow(session, {"decision": "stop", "reason": "Done"}, project=project)
+    resume_workflow(session, {"report": "baseline wins"}, project=project)
+    reopen = {
+        "outcome": "reopen",
+        "sources": SOURCES,
+        "evidence": [LOSS],
+        "reopen": [
+            {
+                "record_id": "baseline",
+                "findings": [_finding("One seed.", affects="runs")],
+            }
+        ],
+    }
+    fixing = resume_workflow(session, reopen, project=project)
+    assert _step(fixing) == "fix"
+    assert _value(fixing)["data"]["kind"] == "acceptance"
+    assert project.vault.load("task").report is None
+
+    reviewing = _answer(
+        project,
+        session,
+        "acceptance-1.1",
+        "done",
+        verdict="inconclusive",
+        conclusion="One seed only",
+    )
+    assert _step(reviewing) == "review_result"
+    resume_workflow(
+        session,
+        {
+            "own_verdict": "inconclusive",
+            "decision": "approve",
+            "sources": SOURCES,
+            "evidence": [LOSS],
+        },
+        project=project,
+    )
+    resume_workflow(session, {"report": "baseline: one seed"}, project=project)
+    # The reopen budget is spent: the outcome records what stays open.
+    done = resume_workflow(session, reopen, project=project)
+    assert done["status"] == "completed"
+    acceptance = project.vault.load("task").acceptance
+    assert acceptance["outcome"] == "not_accepted"
+    assert acceptance["caveats"] == ["baseline: One seed."]
 
 
 def test_code_review_must_not_change_the_commit(runner: CliRunner) -> None:
     project, session, _ = _autonomous_study()
     code, _ = _to_code_review(project, session)
-    assert _value(code)["step"] == "review_code"
+    assert _step(code) == "review_code"
     experiment = project.vault.load("baseline")
     experiment.commit = _commit("changed during the review")
     project.vault.save(experiment, overwrite=True)
 
-    rejected = resume_workflow(
-        session, {"decision": "approve", "findings": "Fine."}, project=project
-    )
-    assert _value(rejected)["step"] == "review_code"
+    rejected = _approve_code(project, session)
+    assert _step(rejected) == "review_code"
     assert "must not change code" in _value(rejected)["feedback"]
 
 
