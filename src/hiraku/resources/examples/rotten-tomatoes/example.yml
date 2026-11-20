@@ -1,0 +1,2 @@
+id: rotten-tomatoes
+description: Compare logistic regression and random forest sentiment classifiers with MLflow tracking.

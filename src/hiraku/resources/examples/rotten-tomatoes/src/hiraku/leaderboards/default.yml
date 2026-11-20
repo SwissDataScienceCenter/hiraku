@@ -1,0 +1,9 @@
+source:
+  type: mlflow
+metrics:
+- name: val/loss
+  direction: minimize
+- name: val/accuracy
+  direction: maximize
+- name: train/duration_seconds
+  direction: minimize
