@@ -132,7 +132,6 @@ footnotes = {}
 md_in_html = {}
 toc.permalink = true
 toc.toc_depth = 3
-"mkdocs-click" = {}
 pymdownx.arithmatex.generic = true
 pymdownx.betterem = {}
 pymdownx.caret = {}
