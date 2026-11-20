@@ -13,10 +13,10 @@ dev_addr = "localhost:8000"
 nav = [
   { "Introduction" = [
       { "Hiraku" = "index.md" },
+      { "Installation" = "installation.md" },
       { "Essential concepts" = "concepts.md" },
   ] },
-  { "Installation" = "installation.md" },
-  { "First experiment" = "examples/minimal/README.md" },
+  { "First experiment" = "first_experiment.md" },
   { "User guide" = [
       { "Overview" = "guides/index.md" },
       { "Record code provenance" = "guides/experiment-branches.md" },
@@ -31,6 +31,7 @@ nav = [
       { "MCP server" = "guides/mcp.md" },
       { "Workflows" = "guides/workflows.md" },
   ] },
+  { "Examples" = "examples/index.md" },
   { "API reference" = [
       { "Overview" = "api/index.md" },
       { "Project" = "api/python/project.md" },
@@ -38,7 +39,12 @@ nav = [
       { "Tracking" = "api/python/tracking.md" },
       { "Workflows" = "api/python/workflows.md" },
   ] },
-  { "Authors" = "authors.md" },
+  { "About" = [
+      { "Authors" = "about/authors.md" },
+      { "Contributing" = "about/contributing.md" },
+      { "Changelog" = "about/changelog.md" },
+      { "License" = "about/license.md" },
+  ]},
 ]
 
 extra_css = ["stylesheets/extra.css"]
@@ -167,7 +173,6 @@ minify_html = true
 [project.plugins.redirects.redirect_maps]
 "api/cli.md" = "api/index.md"
 "api/python/index.md" = "api/index.md"
-"examples/index.md" = "examples/minimal/README.md"
 "workflow.md" = "guides/workflows.md"
 "examples/autoresearch/README.md" = "https://github.com/SwissDataScienceCenter/hiraku/blob/main/src/hiraku/resources/examples/autoresearch/README.md"
 "examples/digits-mlflow/README.md" = "https://github.com/SwissDataScienceCenter/hiraku/blob/main/src/hiraku/resources/examples/digits-mlflow/README.md"
