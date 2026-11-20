@@ -86,7 +86,7 @@ def test_start_wraps_workflow_import_errors(tmp_path: Path) -> None:
 
 
 def test_workflow_status_rejects_unknown_session(tmp_path: Path) -> None:
-    config = Project.create(tmp_path, example="workflows", install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
 
     with pytest.raises(ValidationError, match="was not found"):
         workflow_status(f"unknown:{'0' * 32}", project=config)

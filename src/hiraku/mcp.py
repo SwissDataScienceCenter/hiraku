@@ -54,10 +54,21 @@ a structured MCP elicitation and waits for the user's answer.
 """
 
 
+def _workflow_approval_schema(schema: dict[str, Any]) -> None:
+    schema.pop("title", None)
+    schema["description"] = "Structured user response to a workflow approval."
+
+
 class WorkflowApproval(BaseModel):
-    model_config = ConfigDict(
-        json_schema_extra=lambda schema: schema.pop("title", None)
-    )
+    """Structured user response to a workflow approval request.
+
+    Examples:
+        >>> decision = WorkflowApproval(decision="revise", feedback="Add a test")
+        >>> decision.model_dump(exclude_defaults=True)
+        {'decision': 'revise', 'feedback': 'Add a test'}
+    """
+
+    model_config = ConfigDict(json_schema_extra=_workflow_approval_schema)
 
     decision: Literal["approve", "revise", "stop"] = Field(
         description="Whether to approve, request a revision, or stop."
@@ -95,6 +106,22 @@ def create_server(project: Project | None = None) -> ProjectMCP:
 
     The MCP SDK is a regular Hiraku dependency. Resources are read afresh on
     each request so external edits and tool mutations remain visible.
+
+    Args:
+        project: Project to serve. If omitted, discover it from the current path.
+
+    Returns:
+        An MCP server with record, run, job, and workflow tools registered.
+
+    Examples:
+        >>> from tempfile import TemporaryDirectory
+        >>> with TemporaryDirectory() as directory:
+        ...     project = Project.create(
+        ...         directory, install_skill=False, install_mcp=False
+        ...     )
+        ...     server = create_server(project)
+        ...     server.name
+        'Hiraku'
     """
     project = project or Project.discover()
 
@@ -117,6 +144,19 @@ def register_tools(server: MCPServer, project: Project) -> None:
     record_update, record_delete, job_submit, job_list, job_status, and runs.
     Also registers the record
     catalog and record resources, and the propose_implementation prompt.
+
+    Args:
+        server: MCP server that will receive the project tools.
+        project: Project whose records, jobs, and tracking data they expose.
+
+    Examples:
+        >>> from tempfile import TemporaryDirectory
+        >>> with TemporaryDirectory() as directory:
+        ...     project = Project(directory)
+        ...     server = ProjectMCP(name="Hiraku", version="1")
+        ...     register_tools(server, project)
+        ...     "record_create" in server._tool_manager._tools
+        True
     """
 
     @server.tool(
@@ -355,6 +395,19 @@ def register_workflow_tools(server: MCPServer, project: Project) -> None:
 
     Tools: workflow_list, workflow_start, workflow_status, workflow_resume, and
     workflow_approval. Also registers workflow definition and graph resources.
+
+    Args:
+        server: MCP server that will receive the workflow tools.
+        project: Project providing workflow files and session storage.
+
+    Examples:
+        >>> from tempfile import TemporaryDirectory
+        >>> with TemporaryDirectory() as directory:
+        ...     project = Project(directory)
+        ...     server = ProjectMCP(name="Hiraku", version="1")
+        ...     register_workflow_tools(server, project)
+        ...     "workflow_start" in server._tool_manager._tools
+        True
     """
     path = project.path
 
@@ -519,5 +572,19 @@ def register_workflow_tools(server: MCPServer, project: Project) -> None:
 
 
 def _research_content(identifier: str, project: Project) -> str:
-    """Read the same live representation for resources and tool attachments."""
+    """Read the live JSON representation used for resources and attachments.
+
+    Args:
+        identifier: Bundle-relative record ID.
+        project: Project containing the record.
+
+    Examples:
+        >>> from tempfile import TemporaryDirectory
+        >>> with TemporaryDirectory() as directory:
+        ...     project = Project(directory)
+        ...     _ = project.vault.create("study", type="task")
+        ...     content = json.loads(_research_content("study", project))
+        ...     content["id"], content["type"]
+        ('study', 'task')
+    """
     return json.dumps(project.vault.load(identifier).model_dump(mode="json"))

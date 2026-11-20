@@ -2,19 +2,52 @@
 
 Instructions for AI coding agents working on `SwissDataScienceCenter/hiraku`.
 
-Hiraku is a Python library and CLI for documenting research records, launching commands, and tracking runs. Keep changes small, focused, and consistent with the existing public API.
+Hiraku is a Python library and CLI for documenting research records, launching commands, managing workflows, and tracking research runs.
+
+**Primary goal:** Make the smallest correct change while preserving existing behavior, public APIs, data formats, and architectural boundaries.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contributor workflows.
 
-## Development
+## 1. Working principles
 
-Use Python 3.11+ and `uv` for environments, dependencies, and commands.
+Before making changes:
+
+1. Understand the request and inspect the relevant implementation, tests, and documentation.
+2. Follow existing patterns before introducing new abstractions.
+3. Identify affected public interfaces, persistence formats, and dependent modules.
+4. Check related issues or pull requests before substantial changes.
+5. Keep the implementation and tests focused on the requested behavior.
+
+When modifying code:
+
+- Prefer simple, explicit solutions over unnecessary abstraction.
+- Fix the underlying issue rather than adding workarounds.
+- Preserve backward compatibility unless a breaking change is explicitly requested.
+- Do not refactor unrelated code or introduce unrelated formatting changes.
+- Do not overwrite or discard existing user modifications.
+- Do not add dependencies unless necessary.
+- Avoid speculative features and unnecessary complexity.
+- Keep the change easy to review.
+
+For complex changes, briefly identify the affected components and validation approach before editing.
+
+## 2. Development environment
+
+Use Python 3.11+ and `uv` for dependency management and commands.
+
+Install the development environment:
 
 ```bash
 uv sync --all-extras
 ```
 
-Run focused tests during development:
+Run Python commands through `uv run` rather than relying on globally installed packages.
+
+Do not manually edit `uv.lock`. Update dependencies through `uv` and include the resulting lockfile changes when necessary.
+
+### Validation during development
+
+Run focused checks while iterating:
 
 ```bash
 uv run pytest tests/test_records.py
@@ -22,7 +55,11 @@ uv run pytest tests/test_cli.py::test_name
 uv run ruff check src tests
 ```
 
-Before finishing a code change, run:
+Choose the most relevant test module or individual test for the code being modified.
+
+### Validation before completion
+
+For code changes, run:
 
 ```bash
 uv run pytest
@@ -30,91 +67,269 @@ uv run ruff check .
 uv run zensical build --clean --strict
 ```
 
-Report any checks that fail or cannot be run. Do not claim validation that was not performed.
+For packaging changes, also run:
 
-## Architecture
+```bash
+uv build
+```
 
-Hiraku's public Python API lives under `src/hiraku/`. Custom PSI/J executors live
-under `src/psij-descriptors/`.
+If a command fails or cannot be executed, report that explicitly.
 
-Core responsibilities:
+**Never claim that tests, linting, or builds passed unless they were actually executed successfully.**
 
-- **`Project`** (`project.py`) — Project discovery, settings, and managed paths.
-- **`Record` and `Vault`** (`record.py`) — Local document models and filesystem-backed operations.
-- **`Run`** (`tracking/base.py`) — Normalized tracking traces with metrics and attribution.
-- **Execution** (`job.py`) — Prepare native PSI/J jobs, stream foreground output, and keep submission history keyed by PSI/J job ID. Executors own execution and status; history retains observed final outcomes.
-- **Tracking** (`tracking/`) — Backend adapters implementing `TrackingBackend`; `Leaderboard` validates source settings and creates adapters.
-- **Workflows** (`workflows/`) — LangGraph workflow discovery, execution, session history, and checkpoints.
-- **CLI and MCP** (`cli.py`, `mcp.py`) — User-facing interfaces to the underlying APIs.
+## 3. Architecture
 
-Respect these boundaries:
+The public Python API lives under `src/hiraku/`.
 
-- Keep persistence and validation in their owning modules, not in CLI or MCP handlers.
-- Methods requiring project context accept `project: Project`. Use `config` only for settings data.
-- `Record.id` is its OKF bundle-relative path without `.md`, never persisted in front matter. `Record` retains only document data; `Vault` owns the root and all filesystem access.
-- Record fields are local. Consumers needing ancestor information must explicitly traverse declared relationships.
-- `Vault.save()` validates one record and its destination without scanning the collection. Replacing a file requires `overwrite=True`. Use explicit vault validation for cross-record integrity; ordinary I/O tolerates incomplete or cyclic graphs.
+Custom PSI/J executors live under `src/psij-descriptors/`.
+
+### Component responsibilities
+
+| Component | Location | Responsibility |
+|---|---|---|
+| Project | `project.py` | Project discovery, configuration, and managed paths |
+| Record / Vault | `record.py` | Research document models and filesystem operations |
+| Run | `tracking/base.py` | Normalized tracking traces, metrics, and attribution |
+| Execution | `job.py` | PSI/J job preparation, execution integration, and submission history |
+| Tracking | `tracking/` | Tracking backends and leaderboard configuration |
+| Workflows | `workflows/` | LangGraph workflows, execution, sessions, and checkpoints |
+| CLI | `cli.py` | Command-line interface |
+| MCP | `mcp.py` | Model Context Protocol interface |
+
+### Architectural boundaries
+
+Respect the responsibilities of the owning modules.
+
+**Project and configuration**
+
+- Methods requiring project context accept `project: Project`.
+- Use `config` only for settings data.
+- Keep project discovery and managed path logic in `Project`.
+
+**Records and persistence**
+
+- `Record` owns document data; `Vault` owns filesystem access.
+- `Record.id` is its OKF bundle-relative path without `.md`.
+- Never persist `Record.id` in front matter.
+- Record fields are local. Traverse declared relationships explicitly when ancestor information is needed.
+- `Vault.save()` validates one record and its destination without scanning the collection.
+- Replacing an existing file requires `overwrite=True`.
+- Ordinary I/O must tolerate incomplete or cyclic graphs.
+- Use explicit vault validation for cross-record integrity.
+- Preserve discovery of existing nested records, enforce filesystem-friendly names, and reject filename collisions.
+
+**Execution and tracking**
+
+- Use PSI/J executors for job execution and status.
+- Keep submission history keyed by PSI/J job ID.
+- Preserve observed final outcomes in history.
 - Tracking adapters return normalized `Run` objects.
-- Leaderboards live in `hiraku/leaderboards/<name>.yml`; records do not configure metrics or sources. Record-scoped operations receive explicit record IDs.
-- Records use filesystem-friendly names for Markdown files in the records directory; reject filename collisions and preserve discovery of existing nested records.
-- Import workflow APIs from their defining modules. Do not add eager imports or re-exports to `workflows/__init__.py`.
+- Keep backend-specific behavior inside `tracking/`.
+- Leaderboards live under `hiraku/leaderboards/<name>.yml`.
+- Records do not configure tracking metrics or sources.
+- Record-scoped operations receive explicit record IDs.
+
+**Workflows**
+
+- Keep workflow discovery, execution, session history, and checkpoints in their owning modules.
+- Import workflow APIs from their defining modules.
+- Do not introduce eager imports or re-exports in `workflows/__init__.py`.
+- Preserve established workflow contracts.
+
+See [docs/guides/workflows.md](docs/guides/workflows.md).
+
+**CLI and MCP**
+
+- CLI and MCP handlers should delegate validation and persistence to the domain APIs.
+- Do not duplicate business logic in interface layers.
+- Keep equivalent CLI and MCP operations behaviorally consistent.
 - Keep MCP SDK imports in `mcp.py`.
-- Keep CLI and MCP behavior consistent when they expose the same functionality.
 
-`hiraku init` installs bundled collaboration resources and skills. Changes under `src/hiraku/resources/` can affect newly initialized projects and require appropriate test coverage.
+**Bundled resources**
 
-See [docs/guides/workflows.md](docs/guides/workflows.md) for workflow contracts.
+`hiraku init` installs collaboration resources and skills from `src/hiraku/resources/`.
 
-## Coding conventions
+Changes to these resources may affect newly initialized projects. Include appropriate tests and documentation updates.
 
-- Follow the existing Ruff configuration: 88-character lines and Python 3.11 syntax.
-- Prefer small, typed functions and explicit validation.
-- Use domain-specific exceptions from `errors.py` where appropriate.
-- Preserve public imports, CLI behavior, and persisted formats unless explicitly changing them.
-- Use `pathlib.Path` and subprocess argument lists for cross-platform compatibility.
-- Avoid shell-dependent commands in Python scripts.
-- Keep comments concise and explain non-obvious decisions rather than narrating code.
-- Use `apply_patch` for source edits.
-- Avoid unrelated refactoring, formatting changes, new dependencies, and generated artifacts.
-- Never commit credentials, machine-specific paths, or files under `site/`.
+## 4. Coding conventions
 
-Follow existing patterns before introducing new abstractions.
+Follow the existing Ruff configuration:
 
-## Testing
+- Python 3.11 syntax.
+- Maximum line length of 88 characters.
+- Existing import ordering and lint rules.
 
-Add or update regression tests for behavior changes and bug fixes.
+Prefer:
 
-- Use pytest functions, not `unittest.TestCase`.
-- Keep tests deterministic and independent of network access or external credentials.
-- Use Click's `CliRunner` to test CLI output, errors, and exit codes.
-- Test valid and invalid inputs when changing serialization, configuration, execution, or tracking.
+- Small, typed functions with clear responsibilities.
+- Explicit inputs, outputs, and validation.
+- Domain-specific exceptions from `errors.py` where appropriate.
+- `pathlib.Path` for filesystem operations.
+- Subprocess argument lists rather than shell-dependent commands.
+- Clear naming that expresses intent.
+- Comments explaining non-obvious decisions.
+
+Avoid:
+
+- Unnecessary abstractions or generic frameworks.
+- Broad exception handling that hides failures.
+- Duplicated business logic.
+- Unrelated formatting or refactoring.
+- Unnecessary imports and hidden side effects.
+- Comments that simply repeat what the code does.
+
+Use `apply_patch` for source edits when available.
+
+Preserve public imports, CLI behavior, and persisted formats unless explicitly changing their contracts.
+
+## 5. Testing guidelines
+
+Use `pytest` and maintain deterministic, isolated tests.
+
+### Test organization
+
+Organize tests by **feature or responsibility**, not by implementation chronology.
+
+- Keep related tests together in the appropriate module.
 - Keep tracking adapter tests under `tests/tracking/`.
-- Put end-to-end example coverage under `tests/examples/`.
+- Keep end-to-end example tests under `tests/examples/`.
+- Use descriptive names such as `test_record_create_rejects_invalid_id`.
+- Avoid large test functions that verify unrelated behaviors.
+- Preserve intentional end-to-end tests that validate complete user workflows.
+
+Follow existing repository structure before creating new directories or modules.
+
+### Fixtures and test utilities
+
+- Use pytest fixtures for reusable setup and teardown.
+- Place fixtures shared across modules in an appropriate `conftest.py`.
+- Keep feature-specific fixtures close to the tests that use them.
+- Request fixtures by name; do not import them directly from `conftest.py`.
+- Prefer `tmp_path` and `monkeypatch` for filesystem and environment isolation.
+- Use ordinary helper functions for reusable logic that does not require fixture lifecycle management.
+- Avoid duplicating complex setup across tests.
+
+### Test design
+
+Each test should verify a clearly defined behavior.
+
+Use the Arrange–Act–Assert pattern:
+
+1. **Arrange:** Create only the required state and inputs.
+2. **Act:** Execute the behavior being tested.
+3. **Assert:** Verify the expected result and relevant side effects.
+
+Guidelines:
+
+- Test observable behavior rather than private implementation details.
+- Test valid and invalid inputs when changing serialization, configuration, execution, or tracking.
+- Include meaningful assertions for exit codes, output, errors, and persistence where appropriate.
+- Use `pytest.mark.parametrize` for variations of the same behavior.
+- Prefer explicit parameter case IDs when they improve failure reporting.
+- Avoid redundant tests that cover the same behavior without providing additional confidence.
+- Keep tests independent of execution order and shared mutable state.
+- Avoid mocks when inexpensive, deterministic tests can exercise the real behavior.
+
+### CLI testing
+
+Use Click's `CliRunner` to test user-facing commands.
+
+Verify relevant aspects of:
+
+- Exit codes.
+- Command output.
+- Validation errors.
+- Filesystem changes.
+- State changes and persistence.
+
+Use temporary project directories to avoid modifying real user data.
+
+### Integration testing
+
+- Keep ordinary tests independent of network access and external credentials.
 - Mark tests requiring external services or optional integrations with `pytest.mark.integration`.
-- Do not weaken or remove existing tests to make a change pass. Verify first if a test is still valid, then update it to reflect the new behavior.
+- Do not require external infrastructure for the default test suite.
+- Keep integration scenarios focused on realistic user workflows.
 
-Prefer focused tests while iterating, then run the full validation commands before finishing.
+### Regression coverage
 
-## Documentation
+For bug fixes:
 
-Update documentation when changing:
+1. Reproduce the incorrect behavior with a test.
+2. Implement the smallest appropriate fix.
+3. Verify that the regression test passes.
+4. Run related existing tests.
+
+For behavior changes, update existing tests and add new tests where the current coverage is insufficient.
+
+**Never weaken or remove a valid test solely to make the suite pass.** First determine whether its expected behavior remains correct.
+
+Do not reorganize the entire test suite unless test restructuring is part of the requested task.
+
+## 6. Documentation
+
+Update documentation when modifying:
 
 - Public Python APIs or CLI behavior.
-- Configuration, record formats, or persistence.
-- Bundled skills, examples, or initialization behavior.
-- Workflow contracts or user-facing functionality.
+- Configuration or persistence formats.
+- Record structure and validation rules.
+- Bundled resources, examples, or initialization.
+- Workflow contracts.
+- User-facing features.
 
-Keep documentation consistent with the implementation. Do not modify generated documentation in `site/`.
+Keep documentation consistent with actual behavior.
 
-## Git and releases
+Prefer updating existing documentation over creating redundant pages.
 
-- Work on a focused branch; do not push ordinary changes directly to `main`.
-- Check for related issues or pull requests before substantial changes.
-- Review the complete diff and remove unrelated modifications.
-- Prefer Conventional Commit prefixes (`feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`).
-- Include user-visible changes and validation results in pull request descriptions.
-- Do not create release tags manually or invoke release commands unless explicitly requested by a maintainer.
+Do not manually modify generated files under `site/`.
+
+## 7. Git and pull requests
+
+Keep changes focused and reviewable.
+
+- Work on a focused branch.
+- Do not commit unrelated modifications.
+- Never discard changes belonging to other contributors.
+- Review the complete diff before completion.
+- Do not commit credentials, secrets, machine-specific paths, or generated artifacts.
+- Do not push directly to `main` during ordinary development.
+
+Prefer Conventional Commit prefixes:
+
+- `feat:` — new functionality
+- `fix:` — bug fixes
+- `test:` — test coverage
+- `refactor:` — internal restructuring without behavior changes
+- `docs:` — documentation
+- `chore:` — maintenance
+
+Pull request descriptions should include the user-visible change, relevant compatibility considerations, and validation performed.
+
+Do not create release tags or invoke release commands unless explicitly requested by a maintainer.
 
 Release procedures are maintained in `scripts/release.py`.
+
+## 8. Completion checklist
+
+Before reporting a task as complete:
+
+- [ ] The implementation addresses the requested behavior.
+- [ ] The change respects architectural boundaries.
+- [ ] Existing public behavior and formats are preserved unless intentionally modified.
+- [ ] Relevant tests were added or updated where needed.
+- [ ] Focused tests pass.
+- [ ] Full validation commands were executed, or limitations were recorded.
+- [ ] Documentation is updated where required.
+- [ ] The diff contains no unrelated changes or generated artifacts.
+
+### Final response format
+
+Summarize:
+
+1. **Changes:** What was modified and why.
+2. **Validation:** Commands executed and their results.
+3. **Limitations:** Failed checks, unverified behavior, or remaining issues.
+
+Do not claim unperformed validation or conceal known failures.
 
 The human contributor remains responsible for reviewing and approving AI-assisted changes.

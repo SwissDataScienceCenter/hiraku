@@ -87,7 +87,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-x -n auto --tb=no"
+addopts = "--import-mode=importlib --doctest-modules -x -n auto --tb=no"
 markers = ["integration: tests requiring external services or optional integrations"]
 
 [tool.bumpversion]

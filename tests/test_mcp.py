@@ -25,7 +25,7 @@ from mcp.server.elicitation import render_elicitation_schema  # noqa: E402
 from mcp.server.mcpserver.exceptions import ResourceError, ToolError  # noqa: E402
 
 from hiraku.cli import main  # noqa: E402
-from hiraku.errors import ObservationError, ValidationError  # noqa: E402
+from hiraku.errors import ObservationError  # noqa: E402
 from hiraku.job import Submission  # noqa: E402
 from hiraku.mcp import (  # noqa: E402
     WorkflowApproval,
@@ -37,7 +37,6 @@ from hiraku.project import Project  # noqa: E402
 from hiraku.workflows.langgraph import resume_workflow as _resume_workflow  # noqa: E402
 from hiraku.workflows.langgraph import (  # noqa: E402
     start_workflow,
-    workflow_mermaid,
     workflow_status,
 )
 
@@ -761,21 +760,6 @@ def test_cli_serves_project(tmp_path, monkeypatch, args):
     factory.return_value.run.assert_called_once_with(transport="stdio")
 
 
-def test_workflow_mcp_uses_generic_langgraph_controls(tmp_path) -> None:
-    config = Project.create(tmp_path, example="workflows", install_skill=False)
-    server = create_server(config)
-
-    tools = asyncio.run(server.list_tools())
-    names = {tool.name for tool in tools}
-    assert {
-        "workflow_list",
-        "workflow_start",
-        "workflow_status",
-        "workflow_resume",
-        "workflow_approval",
-    } <= names
-
-
 def resume_workflow(session_id, response, *, project):
     status = workflow_status(session_id, project=project)
     return _resume_workflow(
@@ -799,115 +783,20 @@ def _interrupt(result: dict[str, Any]) -> dict[str, Any]:
 
 def test_workflow_approval_schema_omits_codex_unsupported_root_title() -> None:
     schema = render_elicitation_schema(WorkflowApproval)
-    assert set(schema) <= {"type", "properties", "required", "$schema"}
+    assert set(schema) <= {
+        "type",
+        "properties",
+        "required",
+        "$schema",
+        "description",
+    }
+    assert schema["description"]
     assert schema["properties"]["decision"]["enum"] == [
         "approve",
         "revise",
         "stop",
     ]
     assert set(schema["properties"]) == {"decision", "feedback"}
-
-
-def test_count_steps_mcp_tools_and_graph_loop(tmp_path) -> None:
-    config = _project(tmp_path)
-    server = create_server(config)
-    assert {"workflow_start", "workflow_status", "workflow_resume"}.issubset(
-        _tool_names(server)
-    )
-    assert "workflow_approval" in _tool_names(server)
-
-    started = start_workflow("count-steps", {"count": 2}, project=config)
-    first = _interrupt(started)
-    assert "Step 1/2: token" in first["instruction"]
-    assert first["data"]["step"] == 1
-    assert first["response_schema"]["type"] == "object"
-    assert first["response_schema"]["additionalProperties"] is False
-    assert first["response_schema"]["properties"]["decision"]["enum"] == [
-        "continue",
-        "finish",
-    ]
-
-    wrong = resume_workflow(
-        started["workflow_session_id"],
-        {"token": "wrong", "decision": "continue"},
-        project=config,
-    )
-    retry = _interrupt(wrong)
-    assert retry["data"] == first["data"]
-    assert "does not match" in retry["error"]
-
-    invalid_decision = resume_workflow(
-        started["workflow_session_id"],
-        {"token": first["data"]["token"], "decision": "skip"},
-        project=config,
-    )
-    retry = _interrupt(invalid_decision)
-    assert retry["data"] == first["data"]
-    assert "continue" in retry["error"] and "finish" in retry["error"]
-
-    next_step = resume_workflow(
-        started["workflow_session_id"],
-        {"token": first["data"]["token"], "decision": "continue"},
-        project=config,
-    )
-    second = _interrupt(next_step)
-    assert "Step 2/2: token" in second["instruction"]
-    assert second["data"]["token"] != first["data"]["token"]
-
-    done = resume_workflow(
-        started["workflow_session_id"],
-        {"token": second["data"]["token"], "decision": "continue"},
-        project=config,
-    )
-    assert done["status"] == "completed"
-    assert "Finished after 2 of 2 steps." in done["result"]
-    assert workflow_status(started["workflow_session_id"], project=config) == done
-
-
-def test_count_steps_can_finish_early_and_resume_after_server_restart(tmp_path) -> None:
-    config = _project(tmp_path)
-    server = create_server(config)
-    assert "workflow_resume" in _tool_names(server)
-
-    started = start_workflow("count-steps", {}, project=config)
-    first = _interrupt(started)
-    assert first["data"]["count"] == 5
-
-    # Recreate the server to verify that the run lives in LangGraph's SQLite state.
-    server = create_server(config)
-    assert "workflow_status" in _tool_names(server)
-    completed = resume_workflow(
-        started["workflow_session_id"],
-        {"token": first["data"]["token"], "decision": "finish"},
-        project=config,
-    )
-    assert completed["status"] == "completed"
-    assert "Finished after 1 of 5 steps." in completed["result"]
-
-
-def test_count_steps_rejects_invalid_arguments(tmp_path) -> None:
-    config = _project(tmp_path)
-    with pytest.raises(ValidationError, match="positive integer"):
-        start_workflow("count-steps", {"count": 0}, project=config)
-
-
-def test_workflow_graph_is_available_from_cli_and_mcp(tmp_path, monkeypatch) -> None:
-    config = _project(tmp_path)
-    server = create_server(config)
-
-    monkeypatch.chdir(tmp_path)
-    cli_result = CliRunner().invoke(main, ["workflow", "graph", "count-steps"])
-    assert cli_result.exit_code == 0, cli_result.output
-    assert "graph TD" in cli_result.output
-    assert "harness_step" in cli_result.output
-
-    templates = anyio.run(server.list_resource_templates)
-    assert "hiraku://workflows/{workflow_id}/graph" in {
-        template.uri_template for template in templates
-    }
-    mermaid = workflow_mermaid("count-steps", project=config)
-    assert "graph TD" in mermaid
-    assert "harness_step" in mermaid
 
 
 def test_collaborative_workflow_is_a_checkpointed_langgraph(tmp_path) -> None:

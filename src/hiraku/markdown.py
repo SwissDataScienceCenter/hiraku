@@ -29,6 +29,11 @@ class Heading:
         start: Index of the heading's first line.
         end: Index of the first line after the section; the section includes
             its subsections.
+
+    Examples:
+        >>> heading = Heading(level=2, title="Step", start=2, end=4)
+        >>> str(heading)
+        '## Step'
     """
 
     level: int
@@ -47,9 +52,12 @@ class Markdown(str):
     lists, and block quotes do not start sections. Sections are returned as
     written in the source.
 
-    Example:
-        ``Markdown("# Intro\\n\\n## Step\\nDo it.").section("## Step")``
-        returns ``"## Step\\nDo it."``.
+    Examples:
+        >>> markdown = Markdown("# Intro\\n\\n## Step\\nDo it.")
+        >>> markdown.section("## Step")
+        '## Step\\nDo it.'
+        >>> [(heading.level, heading.title) for heading in markdown.headings]
+        [(1, 'Intro'), (2, 'Step')]
     """
 
     @classmethod
@@ -70,7 +78,12 @@ class Markdown(str):
 
     @cached_property
     def headings(self) -> tuple[Heading, ...]:
-        """Return the headings that start sections, in document order."""
+        """Return the headings that start sections, in document order.
+
+        Examples:
+            >>> Markdown("# Intro\\n\\n## Step").headings[1].title
+            'Step'
+        """
         tokens = _PARSER.parse(str(self))
         found: list[tuple[int, str, int]] = []
         for index, token in enumerate(tokens):
@@ -106,6 +119,15 @@ class Markdown(str):
             hiraku.errors.ValidationError: If ``heading`` is not a ``#`` line or
                 several sections have that heading.
             hiraku.errors.SectionNotFoundError: If no section has that heading.
+
+        Examples:
+            >>> Markdown("# Intro\\n\\n## Step\\nDo it.").section("## Step")
+            '## Step\\nDo it.'
+            >>> markdown = Markdown("# Intro\\n\\n## Step")
+            >>> markdown.section("## Missing")  # doctest: +ELLIPSIS
+            Traceback (most recent call last):
+            ...
+            hiraku.errors.SectionNotFoundError: Section '## Missing' not found; ...
         """
         match = _SELECTOR.match(heading.strip()) if isinstance(heading, str) else None
         if match is None:
@@ -132,7 +154,15 @@ _PLACEHOLDER = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
 
 
 def placeholders(markdown: str) -> set[str]:
-    """Return the names of the ``{{name}}`` placeholders in a Markdown text."""
+    """Return the names of the ``{{name}}`` placeholders in Markdown text.
+
+    Args:
+        markdown: Text to scan for placeholders.
+
+    Examples:
+        >>> sorted(placeholders("Hello {{name}}, score {{ score }}"))
+        ['name', 'score']
+    """
     return set(_PLACEHOLDER.findall(markdown))
 
 
@@ -144,6 +174,18 @@ def render(markdown: str, values: Mapping[str, Any]) -> str:
 
     Raises:
         hiraku.errors.ValidationError: If a placeholder has no value.
+
+    Args:
+        markdown: Text containing placeholders to replace.
+        values: Values keyed by placeholder name.
+
+    Examples:
+        >>> render("Hello {{name}}. Score: {{score}}.", {"name": "Ada", "score": 4})
+        'Hello Ada. Score: 4.'
+        >>> render("{{enabled}} {{missing}}", {"enabled": True})
+        Traceback (most recent call last):
+        ...
+        hiraku.errors.ValidationError: No value for placeholders: missing
     """
     missing = sorted(placeholders(markdown) - set(values))
     if missing:

@@ -32,6 +32,19 @@ _YAML_HANDLER = YAMLHandler()
 
 
 def validate_identifier(identifier: str, *, label: str = "record ID") -> None:
+    """Validate one filesystem-friendly path component.
+
+    Args:
+        identifier: Component to validate.
+        label: Name used in validation errors.
+
+    Examples:
+        >>> validate_identifier("model-a")
+        >>> validate_identifier("model/a", label="record ID")
+        Traceback (most recent call last):
+        ...
+        hiraku.errors.ValidationError: Invalid record ID: 'model/a'
+    """
     if (
         not isinstance(identifier, str)
         or not identifier
@@ -60,6 +73,11 @@ class Record(BaseModel):
         state: Optional workflow-defined research progress.
         decision: Optional record decision.
         branch: Optional record branch.
+
+    Examples:
+        >>> record = Record(id="study/experiment", type="experiment", title="Study")
+        >>> record.id, record.title, str(record.markdown)
+        ('study/experiment', 'Study', '')
     """
 
     model_config = ConfigDict(extra="allow", validate_assignment=True)
@@ -170,7 +188,13 @@ class Record(BaseModel):
 
     @property
     def metadata(self) -> dict[str, Any]:
-        """Return the record's serialized metadata, excluding its Markdown body."""
+        """Return serialized metadata without the ID or Markdown body.
+
+        Examples:
+            >>> record = Record(id="study", type="task", markdown="Notes")
+            >>> record.metadata["type"], "markdown" in record.metadata
+            ('task', False)
+        """
         try:
             return self.model_dump(
                 mode="json",
@@ -182,7 +206,13 @@ class Record(BaseModel):
 
 
 class RecordUpdate(BaseModel):
-    """Partial update payload for an existing research record."""
+    """Partial update payload for an existing research record.
+
+    Examples:
+        >>> patch = RecordUpdate(title="Updated", tags=["baseline"])
+        >>> patch.model_dump(exclude_unset=True)
+        {'title': 'Updated', 'tags': ['baseline']}
+    """
 
     # Updates may include producer-defined front matter fields.
     model_config = ConfigDict(extra="allow")
@@ -225,13 +255,30 @@ class RecordUpdate(BaseModel):
 
 
 class Vault:
-    """A Markdown bundle that owns filesystem access and workspace operations."""
+    """A Markdown bundle that owns filesystem access and workspace operations.
+
+    Examples:
+        >>> from tempfile import TemporaryDirectory
+        >>> with TemporaryDirectory() as directory:
+        ...     vault = Vault(root=Path(directory))
+        ...     record = vault.create("study/task", type="task", title="Study")
+        ...     vault.load(record.id).title
+        'Study'
+    """
 
     def __init__(self, *, root: Path) -> None:
         self.root = Path(root).absolute()
 
     def file_path(self, record_id: str) -> Path:
-        """Return the contained absolute filename for a concept ID."""
+        """Return the contained absolute filename for a concept ID.
+
+        Args:
+            record_id: Bundle-relative ID without the Markdown suffix.
+
+        Examples:
+            >>> Vault(root=Path("/tmp/hiraku/records")).file_path("study/task")
+            PosixPath('/tmp/hiraku/records/study/task.md')
+        """
         if not isinstance(record_id, str):
             raise ValidationError("Record ID must be a string")
         try:
@@ -245,7 +292,19 @@ class Vault:
         return target
 
     def load(self, record_id: str) -> Record:
-        """Read one document by its bundle-relative ID, without indexing the vault."""
+        """Read one document by its bundle-relative ID without indexing the vault.
+
+        Args:
+            record_id: Bundle-relative ID without the Markdown suffix.
+
+        Examples:
+            >>> from tempfile import TemporaryDirectory
+            >>> with TemporaryDirectory() as directory:
+            ...     vault = Vault(root=Path(directory))
+            ...     _ = vault.create("study", type="task")
+            ...     vault.load("study").type
+            'task'
+        """
         target = self.file_path(record_id)
         if not target.is_file():
             raise RecordNotFoundError(f"Record {record_id!r} not found")
@@ -253,12 +312,37 @@ class Vault:
         return Record.model_validate({**data, "id": record_id, "markdown": markdown})
 
     def create(self, id: str, **fields: Any) -> Record:
-        """Construct and save a document at an explicit concept ID."""
+        """Construct and save a document at an explicit concept ID.
+
+        Args:
+            id: Bundle-relative ID without the Markdown suffix.
+            **fields: Record fields such as ``type``, ``title``, or ``markdown``.
+
+        Examples:
+            >>> from tempfile import TemporaryDirectory
+            >>> with TemporaryDirectory() as directory:
+            ...     record = Vault(root=Path(directory)).create(
+            ...         "study", type="task", markdown="Question"
+            ...     )
+            ...     str(record.markdown)
+            'Question'
+        """
         record = Record(id=id, **fields)
         self.save(record)
         return record
 
     def list(self) -> builtins.list[Record]:
+        """Load all Markdown records in deterministic path order.
+
+        Examples:
+            >>> from tempfile import TemporaryDirectory
+            >>> with TemporaryDirectory() as directory:
+            ...     vault = Vault(root=Path(directory))
+            ...     _ = vault.create("b", type="task")
+            ...     _ = vault.create("a", type="task")
+            ...     [record.id for record in vault.list()]
+            ['a', 'b']
+        """
         return [
             self.load(path.relative_to(self.root).with_suffix("").as_posix())
             for path in sorted(self.root.rglob("*.md"))
@@ -285,7 +369,20 @@ class Vault:
         return sorted(result, key=lambda record: record.id)
 
     def save(self, record: Record, *, overwrite: bool = False) -> Path:
-        """Validate and atomically write one record, without collection checks."""
+        """Validate and atomically write one record without collection checks.
+
+        Args:
+            record: Record to save.
+            overwrite: Whether to replace an existing Markdown file.
+
+        Examples:
+            >>> from tempfile import TemporaryDirectory
+            >>> with TemporaryDirectory() as directory:
+            ...     vault = Vault(root=Path(directory))
+            ...     path = vault.save(Record(id="study", type="task"))
+            ...     path.is_file()
+            True
+        """
         try:
             keys = (
                 record.model_fields_set
@@ -314,7 +411,21 @@ class Vault:
         record: Record,
         patch: RecordUpdate,
     ) -> Record:
-        """Apply local field changes and explicitly overwrite the document."""
+        """Apply local field changes and explicitly overwrite the document.
+
+        Args:
+            record: Existing record to update.
+            patch: Fields to change.
+
+        Examples:
+            >>> from tempfile import TemporaryDirectory
+            >>> with TemporaryDirectory() as directory:
+            ...     vault = Vault(root=Path(directory))
+            ...     record = vault.create("study", type="task", title="Draft")
+            ...     updated = vault.update(record, RecordUpdate(title="Final"))
+            ...     updated.title
+            'Final'
+        """
         changes = patch.model_dump(exclude_unset=True)
         markdown = changes.pop("markdown", None)
         fields = changes

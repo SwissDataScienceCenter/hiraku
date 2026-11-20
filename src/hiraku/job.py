@@ -36,7 +36,32 @@ if TYPE_CHECKING:
 
 
 class JobRequest(BaseModel):
-    """Typed parameters for submitting a project job."""
+    """
+    Typed parameters for submitting a project job.
+
+    Arguments:
+        command: Command as an argv list; each item is one literal argument.
+        executor: Registered PSI/J executor name.
+        record_id: Record ID to attribute this job to; omit for no attribution.
+        executor_url: Optional URL for the selected executor.
+        custom_attributes: Optional executor-specific string attributes.
+        directory: Optional working directory for the command.
+        launcher: Optional registered PSI/J launcher name.
+
+    Raises:
+        ValidationError: If any field is invalid.
+
+    Examples:
+        >>> _ = JobRequest(
+        ...     command=["uv", "run", "my_script.py", "--option", "value"],
+        ...     executor="local-detached",
+        ...     record_id="12345678-1234-5678-1234-567812345678",
+        ...     executor_url=None,
+        ...     custom_attributes={"foo": "bar"},
+        ...     directory="/tmp",
+        ...     launcher="quoted-single",
+        ... )
+    """
 
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -86,7 +111,21 @@ class JobRequest(BaseModel):
 def get_executor(
     name: str, *, work_directory: Path, url: str | None = None
 ) -> psij.JobExecutor:
-    """Create an executor with an explicit auxiliary storage directory."""
+    """Create an executor with an explicit auxiliary storage directory.
+
+    Args:
+        name: Registered PSI/J executor name.
+        work_directory: Directory for executor state and auxiliary files.
+        url: Optional executor-specific URL.
+
+    Examples:
+        >>> from tempfile import TemporaryDirectory
+        >>> from hiraku.project import Project
+        >>> with TemporaryDirectory() as directory:
+        ...     executor = get_executor("local", work_directory=Path(directory))
+        ...     executor.name
+        'local'
+    """
     return psij.JobExecutor.get_instance(
         name,
         url=url,
@@ -95,7 +134,18 @@ def get_executor(
 
 
 def validate_command(value: Any) -> list[str] | None:
-    """Validate command configuration as a literal argv sequence."""
+    """Validate command configuration as a literal argv sequence.
+
+    Examples:
+        >>> validate_command(["python", "script.py", "--flag"])
+        ['python', 'script.py', '--flag']
+        >>> validate_command(None) is None
+        True
+        >>> validate_command("python script.py")
+        Traceback (most recent call last):
+        ...
+        hiraku.errors.ValidationError: command must be an argv sequence
+    """
     if value is None:
         return None
     if isinstance(value, str | bytes) or not isinstance(value, list | tuple):
@@ -123,6 +173,27 @@ def prepare_job(
 
     Does not submit or write project history.
     Paths and resource requests describe the execution environment.
+
+    Args:
+        command: Executable and literal arguments.
+        project: Project providing record validation and executor paths.
+        record_id: Optional record ID to attach to the job.
+        env: Additional environment variables.
+        attributes: Optional PSI/J job attributes.
+        resources: Optional PSI/J resource request.
+        directory: Optional working directory.
+        launcher: Optional PSI/J launcher name.
+
+    Examples:
+        >>> from tempfile import TemporaryDirectory
+        >>> from hiraku.project import Project
+        >>> with TemporaryDirectory() as directory:
+        ...     project = Project.create(
+        ...         directory, install_skill=False, install_mcp=False
+        ...     )
+        ...     job = prepare_job(["python", "-c", "pass"], project=project)
+        ...     job.spec.executable, job.spec.arguments
+        ('python', ['-c', 'pass'])
     """
     argv = validate_command(command)
     if argv is None:
@@ -164,6 +235,21 @@ def run_local(job: psij.Job, *, project: Project) -> psij.JobStatus:
 
     Output uses temporary files unless the caller supplied output paths.
     Records the submission and its final native status in the project.
+
+    Args:
+        job: New native PSI/J job to submit.
+        project: Project for executor state and submission history.
+
+    Examples:
+        >>> from tempfile import TemporaryDirectory
+        >>> from hiraku.project import Project
+        >>> with TemporaryDirectory() as directory:
+        ...     project = Project.create(
+        ...         directory, install_skill=False, install_mcp=False
+        ...     )
+        ...     job = prepare_job(["python", "-c", "pass"], project=project)
+        ...     run_local(job, project=project).state.name
+        'COMPLETED'
     """
     if job.status.state != psij.JobState.NEW or job.executor is not None:
         raise psij.InvalidJobException("Job must be new and unbound")
@@ -205,7 +291,16 @@ def run_local(job: psij.Job, *, project: Project) -> psij.JobStatus:
 
 
 class Status(BaseModel):
-    """Validated status data for observations and saved submission outcomes."""
+    """Validated status data for observations and saved submission outcomes.
+
+    Examples:
+        >>> status = Status(
+        ...     state="COMPLETED", time=1.25, exit_code=0,
+        ...     message=None, metadata=None,
+        ... )
+        >>> status.state, status.exit_code
+        ('COMPLETED', 0)
+    """
 
     model_config = ConfigDict(strict=True, extra="forbid")
 
@@ -228,7 +323,28 @@ class Status(BaseModel):
 
 
 class Submission(BaseModel):
-    """Validated submission metadata persisted independently of execution."""
+    """Validated submission metadata persisted independently of execution.
+
+    Examples:
+        >>> status = Status(
+        ...     state="QUEUED", time=None, exit_code=None,
+        ...     message=None, metadata=None,
+        ... )
+        >>> entry = Submission(
+        ...     id="12345678-1234-5678-1234-567812345678",
+        ...     record_id=None,
+        ...     submitted_at=datetime.now(UTC),
+        ...     observed_at=datetime.now(UTC),
+        ...     executor="slurm",
+        ...     executor_url=None,
+        ...     executor_work_directory="/tmp/psij",
+        ...     native_id="123",
+        ...     spec={"executable": "python", "arguments": []},
+        ...     status=status,
+        ... )
+        >>> entry.executor, entry.native_id
+        ('slurm', '123')
+    """
 
     model_config = ConfigDict(strict=True, extra="forbid", validate_assignment=True)
 

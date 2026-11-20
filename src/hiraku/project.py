@@ -34,6 +34,16 @@ class Project(BaseModel):
     Args:
         root: Project directory containing the settings file and managed data.
         **data: Persisted project settings to validate and load.
+
+    Examples:
+        >>> from tempfile import TemporaryDirectory
+        >>> with TemporaryDirectory() as directory:
+        ...     project = Project(directory, hiraku_dir="research")
+        ...     (
+        ...         project.hiraku_dir == Path(directory) / "research",
+        ...         project.to_dict(),
+        ...     )
+        (True, {'hiraku_dir': 'research'})
     """
 
     model_config = ConfigDict(
@@ -57,6 +67,10 @@ class Project(BaseModel):
         Args:
             root: Project directory.
             **data: Project settings validated by Pydantic.
+
+        Examples:
+            >>> Project(".", hiraku_dir="research").hiraku_dir_name
+            'research'
         """
         super().__init__(root=root, **data)
 
@@ -95,6 +109,14 @@ class Project(BaseModel):
 
         Raises:
             hiraku.errors.ValidationError: If the file or its settings are invalid.
+
+        Examples:
+            >>> from tempfile import TemporaryDirectory
+            >>> with TemporaryDirectory() as directory:
+            ...     project = Project(directory)
+            ...     project.save()
+            ...     Project.load(project.path).root == project.root
+            True
         """
         marker = Path(path).expanduser().resolve()
         data = load_yaml_mapping(marker)
@@ -120,6 +142,14 @@ class Project(BaseModel):
 
         Raises:
             hiraku.errors.ProjectNotFoundError: If no project is found.
+
+        Examples:
+            >>> from tempfile import TemporaryDirectory
+            >>> with TemporaryDirectory() as directory:
+            ...     project = Project(directory)
+            ...     project.save()
+            ...     Project.discover(directory).root == project.root
+            True
         """
         candidate = Path.cwd() if start is None else Path(start)
         candidate = candidate.expanduser().absolute()
@@ -135,7 +165,12 @@ class Project(BaseModel):
 
     @property
     def hiraku_dir(self) -> Path:
-        """Return the resolved directory for Hiraku-managed project data."""
+        """Return the resolved directory for Hiraku-managed project data.
+
+        Examples:
+            >>> Project("/tmp/demo").hiraku_dir
+            PosixPath('/tmp/demo/hiraku')
+        """
         raw = Path(self.hiraku_dir_name)
         if raw.is_absolute():
             return raw.expanduser().resolve(strict=False)
@@ -150,12 +185,22 @@ class Project(BaseModel):
 
     @property
     def path(self) -> Path:
-        """Return the path to the project's root-level ``hiraku.yml`` file."""
+        """Return the path to the project's root-level ``hiraku.yml`` file.
+
+        Examples:
+            >>> Project("/tmp/demo").path
+            PosixPath('/tmp/demo/hiraku.yml')
+        """
         return self.root / "hiraku.yml"
 
     @property
     def records_dir(self) -> Path:
-        """Return the directory containing research record files."""
+        """Return the directory containing research record files.
+
+        Examples:
+            >>> Project("/tmp/demo").records_dir
+            PosixPath('/tmp/demo/hiraku/records')
+        """
         return self.hiraku_dir / "records"
 
     @property
@@ -196,6 +241,14 @@ class Project(BaseModel):
 
         Raises:
             hiraku.errors.ValidationError: If the configuration cannot be written.
+
+        Examples:
+            >>> from tempfile import TemporaryDirectory
+            >>> with TemporaryDirectory() as directory:
+            ...     project = Project(directory)
+            ...     project.save()
+            ...     project.path.is_file()
+            True
         """
         try:
             atomic_write(self.path, dump_yaml(self.to_dict()))
@@ -233,6 +286,17 @@ class Project(BaseModel):
         Raises:
             hiraku.errors.ProjectExistsError: If ``root`` already has a project.
             hiraku.errors.ValidationError: If settings or resources are invalid.
+
+        Examples:
+            >>> from tempfile import TemporaryDirectory
+            >>> with TemporaryDirectory() as directory:
+            ...     project = Project.create(
+            ...         Path(directory) / "demo",
+            ...         install_skill=False,
+            ...         install_mcp=False,
+            ...     )
+            ...     project.path.is_file(), project.records_dir.is_dir()
+            (True, True)
         """
         root = Path(root).expanduser().resolve()
         if (root / "hiraku.yml").exists():
@@ -350,6 +414,15 @@ class Project(BaseModel):
 
         Claude, Pi, and Codex configuration files are merged while preserving
         other configured MCP servers.
+
+        Examples:
+            >>> from tempfile import TemporaryDirectory
+            >>> with TemporaryDirectory() as directory:
+            ...     project = Project(directory)
+            ...     project.install_mcp()
+            ...     config = json.loads((project.root / ".mcp.json").read_text())
+            ...     config["mcpServers"]["hiraku"]["args"]
+            ['mcp', 'serve']
         """
         root = self.root
         command = "uv" if (root / "uv.lock").is_file() else "hiraku"

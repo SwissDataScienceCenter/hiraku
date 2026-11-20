@@ -344,35 +344,11 @@ def test_init_leaves_inline_codex_mcp_servers_unchanged(tmp_path: Path) -> None:
     assert codex.read_text() == original
 
 
-def test_base_example_has_no_results(tmp_path: Path):
-    config = Project.create(tmp_path, example="heart-disease", install_skill=False)
-    assert (tmp_path / "train.py").is_file()
-    assert not (tmp_path / "runs.csv").exists()
-    assert not list(config.records_dir.rglob("*.md"))
-
-
 @pytest.mark.parametrize("example", [None, "minimal"])
 def test_unavailable_results_leave_no_project(tmp_path: Path, example):
     with pytest.raises(ValidationError, match="requires|no results"):
         Project.create(tmp_path, example=example, results=True)
     assert not (tmp_path / "hiraku.yml").exists()
-
-
-def test_results_include_leaderboard_configuration(tmp_path: Path):
-    config = Project.create(
-        tmp_path,
-        example="digits-mlflow",
-        results=True,
-        install_skill=False,
-    )
-    assert Leaderboard.load(config).source.model_dump(
-        mode="json", exclude_none=True
-    ) == {
-        "type": "mlflow",
-        "database": "mlflow.db",
-        "experiment_name": "hiraku-digits",
-    }
-    assert config.vault.load("digit-classification").id == "digit-classification"
 
 
 def test_results_override_base_files(tmp_path: Path, monkeypatch):
