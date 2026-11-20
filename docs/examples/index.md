@@ -1,3 +1,3 @@
 # Examples
 
-- [Minimal](minimal/README.md): Run a baseline twice and compare the results in a leaderboard.
+- [Rotten Tomatoes](rotten-tomatoes.md): Compare logistic regression and random forest classifiers with MLflow tracking.
