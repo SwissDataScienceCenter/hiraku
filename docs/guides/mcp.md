@@ -61,10 +61,11 @@ The host must be able to find the installed `hiraku` command. Claude Code asks
 for approval before using a project MCP server. Codex loads project config only
 for trusted projects. The MCP tools are exposed directly by the host, so no
 extra `AGENTS.md` or Claude skill instructions are needed to register them.
-For agent-launched commands, prefer the `job_submit` MCP tool and monitor the
-returned ID with `job_status` or `job_list`. The bundled Hiraku skill gives the
-same guidance and describes CLI fallback when MCP tools are unavailable or the
-user asks for CLI commands.
+For agent-launched commands, prefer the `job_submit` MCP tool. Read command
+output with `job_logs`; call `job_status` or `job_list` when execution state is
+needed. Use `job_cancel` to stop a running job. The bundled Hiraku skill gives
+the same guidance and describes CLI fallback when MCP tools are unavailable or
+the user asks for CLI commands.
 
 ## Tools
 
@@ -72,12 +73,16 @@ user asks for CLI commands.
 | --- | --- |
 | `project_info` | Read the current project settings. |
 | `leaderboard_list` | List leaderboard names without loading definitions, like `hiraku leaderboard list --json`. |
-| `record_list`, `record_show` | Read local record fields and Markdown. |
-| `record_create`, `record_update`, `record_delete` | Persist research records using the same validation and relationship checks as the Python API. |
-| `job_submit` | Submit through PSI/J, record history, and return the original PSI/J job `id`. |
-| `job_list` | List jobs and status, refreshing and saving nonfinal jobs; optionally filter by `record_id`.  |
-| `job_status` | Attach through PSI/J, save, and return the current status using its original `job_id`. |
-| `runs` | List attributed runs from a named `leaderboard`, optionally filtered by `record_id`. Set `include_unattributed` to include all source runs; metric sorting follows leaderboard declarations. |
+| `record_list` | List every matching record's metadata, without Markdown content. Use `record_show` for local fields and Markdown. |
+| `record_show` | Read one record's local fields and Markdown. |
+| `record_create`, `record_update` | Persist a record and return its ID plus the supplied or patched field names, without echoing field values or Markdown. |
+| `record_delete` | Delete a record using the same relationship checks as the Python API. |
+| `job_submit` | Submit through PSI/J, record full history, and return a compact receipt with the original job `id`, record ID, executor, and initial state. |
+| `job_list` | List every matching job as a summary (`id`, `record_id`, `executor`, and `state`), refreshing and saving nonfinal jobs; optionally filter by `record_id`. Use `job_status` for exit code and message, and `job_logs` for output. |
+| `job_status` | Attach through PSI/J, save, and return the job ID plus state, exit code, and message. |
+| `job_logs` | Read available stdout and stderr using the full job ID or a unique nonempty prefix, without refreshing status. |
+| `job_cancel` | Cancel a job using the full job ID or a unique nonempty prefix and return its resolved ID and resulting state. |
+| `runs` | List runs from a named `leaderboard`, optionally filtered by `record_id`. Results are capped at 100 by default; set `limit` to choose another cap. Set `include_unattributed` to include runs without a record ID; metric sorting follows leaderboard declarations. |
 
 
 ## Resources and evidence

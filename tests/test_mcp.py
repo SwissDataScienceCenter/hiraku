@@ -187,7 +187,7 @@ def test_tools_and_validation(tmp_path: Path, monkeypatch) -> None:
         )
         assert config.vault.load("root/child/child").unknown_field == "producer update"
         await call("record_delete", record_id="root/child/child")
-        await call(
+        created = await call(
             "record_create",
             record={
                 "type": "context",
@@ -196,19 +196,29 @@ def test_tools_and_validation(tmp_path: Path, monkeypatch) -> None:
                 "id": "sources/sources",
             },
         )
+        assert created.structured_content == {
+            "id": "sources/sources",
+            "fields": ["markdown", "title", "type"],
+        }
         with pytest.raises(ToolError):
             await call(
                 "record_create",
                 record={"type": "task", "title": "  ", "id": "  "},
             )
-        await call(
+        updated_ack = await call(
             "record_update",
             record_id="sources/sources",
             patch={"markdown": "Updated"},
         )
+        assert updated_ack.structured_content == {
+            "id": "sources/sources",
+            "fields": ["markdown"],
+        }
         assert config.vault.load("sources/sources").markdown == "Updated"
-        await call("record_show", record_id="sources/sources")
-        await call("record_list")
+        shown = await call("record_show", record_id="sources/sources")
+        listed = await call("record_list")
+        assert "markdown" in shown.structured_content
+        assert all("markdown" not in row for row in listed.structured_content["result"])
         await call("record_show", record_id="root/root")
         await call("record_list")
         await call("record_delete", record_id="sources/sources")
@@ -262,7 +272,10 @@ def test_record_update_uses_vault_validation(
                 "patch": {"related_to": [other.id], "markdown": "After"},
             },
         )
-        assert result.structured_content["title"] == "original"
+        assert result.structured_content == {
+            "id": record.id,
+            "fields": ["markdown", "related_to"],
+        }
         updated = project.vault.load(record.id)
         assert updated.id == "original/original"
         assert updated.state == "new"
@@ -277,7 +290,10 @@ def test_record_update_uses_vault_validation(
         result = await server.call_tool(
             "record_update", {"record_id": record.id, "patch": {"title": None}}
         )
-        assert result.structured_content["title"] is None
+        assert result.structured_content == {
+            "id": record.id,
+            "fields": ["title"],
+        }
         assert project.vault.load(record.id).title is None
         assert project.vault.load(record.id).related_to == [other.id]
 
@@ -398,13 +414,20 @@ def test_job_list_refreshes_only_nonfinal_jobs(
         expected = "COMPLETED" if state == "ACTIVE" and not unavailable else state
         listed = result.structured_content["result"][0]
         if state == "ACTIVE" and unavailable:
-            assert listed["status"]["state"] == "UNKNOWN"
-            assert listed["observation_error"] == "backend unavailable"
-            assert listed["observed_at"] == entry.model_dump(mode="json")["observed_at"]
+            assert listed == {
+                "id": job.id,
+                "record_id": None,
+                "executor": "local-detached",
+                "state": "UNKNOWN",
+            }
             assert path.read_bytes() == before
         else:
-            assert listed["status"]["state"] == expected
-            assert "observation_error" not in listed
+            assert listed == {
+                "id": job.id,
+                "record_id": None,
+                "executor": "local-detached",
+                "state": expected,
+            }
         assert Submission.load(project, job.id).status.state == expected
 
     asyncio.run(exercise())
@@ -473,9 +496,12 @@ def test_submit_and_status_use_native_executor(
                 }
             },
         )
-        job = dict(result.structured_content)
-        assert "observation_error" not in job
-        assert job["executor"] == "local-detached"
+        receipt = dict(result.structured_content)
+        assert set(receipt) == {"id", "record_id", "executor", "state"}
+        assert receipt["record_id"] == "demo/demo"
+        assert receipt["executor"] == "local-detached"
+        assert receipt["state"] in {"ACTIVE", "QUEUED"}
+        job = Submission.load(config, receipt["id"]).model_dump(mode="json")
         expected = (
             tmp_path / "backend" if custom_url else tmp_path / ".hiraku/psij/detached"
         )
@@ -500,12 +526,19 @@ def test_submit_and_status_use_native_executor(
             "example": "value"
         }
         listed = await server.call_tool("job_list", {"record_id": "demo/demo"})
-        assert listed.structured_content["result"] == [history]
+        assert listed.structured_content["result"] == [
+            {
+                "id": history["id"],
+                "record_id": history["record_id"],
+                "executor": history["executor"],
+                "state": history["status"]["state"],
+            }
+        ]
         cli = CliRunner().invoke(
             main, ["job", "list", "--record", "demo/demo", "--json"]
         )
         assert cli.exit_code == 0, cli.output
-        assert json.loads(cli.output) == listed.structured_content["result"]
+        assert json.loads(cli.output) != listed.structured_content["result"]
         with pytest.raises(ToolError):
             await server.call_tool(
                 "job_submit",
@@ -542,16 +575,15 @@ def test_submit_and_status_use_native_executor(
         )
         completed = await completed_job(submitted.structured_content)
         assert completed.structured_content["status"]["exit_code"] == 0
-        assert completed.structured_content["record_id"] is None
-        assert (
-            completed.structured_content["spec"]["environment"]["HIRAKU_RECORD_ID"]
-            == ""
-        )
+        saved = Submission.load(config, completed.structured_content["id"])
+        assert saved.record_id is None
+        assert saved.spec["environment"]["HIRAKU_RECORD_ID"] == ""
 
         def unavailable(self):
             raise ObservationError("backend unavailable")
 
         cached = completed.structured_content
+        cached_entry = Submission.load(config, cached["id"])
         path = config.root / ".hiraku/jobs" / f"{cached['id']}.json"
         before = path.read_bytes()
         monkeypatch.setattr("hiraku.job.Submission.get_psi_job", unavailable)
@@ -559,11 +591,12 @@ def test_submit_and_status_use_native_executor(
             await server.call_tool("job_status", {"job_id": cached["id"]})
         assert path.read_bytes() == before
         listed = await server.call_tool("job_list", {})
-        assert json.loads(before) in listed.structured_content["result"]
-        assert all(
-            "observation_error" not in entry
-            for entry in listed.structured_content["result"]
-        )
+        assert {
+            "id": cached["id"],
+            "record_id": cached_entry.record_id,
+            "executor": cached_entry.executor,
+            "state": cached["status"]["state"],
+        } in listed.structured_content["result"]
         assert path.read_bytes() == before
 
     asyncio.run(exercise())

@@ -8,9 +8,10 @@ history. Job execution is built on the [PSI/J library](https://exaworks.org/psij
 ## Run locally
 
 For agent-launched commands, prefer `job_submit` through MCP when available;
-it submits in the background and returns an ID to monitor. Use `hiraku run` to
-run a command locally in the foreground when streaming output and the command's
-exit code are needed:
+it submits in the background and returns an ID. Use `job_logs` in MCP or
+`hiraku job logs` in the CLI to read output, and `job_cancel` or
+`hiraku job cancel` to stop a running job. Use `hiraku run` to run a command
+locally in the foreground when streaming output and the command's exit code are needed:
 
 ```bash
 hiraku run --record baseline -- python train.py
@@ -53,13 +54,17 @@ submission uses the `local-detached` executor, which runs the command in a detac
 hiraku job submit --record baseline -- python train.py
 ```
 
-Submission returns JSON with `id` (the original PSI/J job ID), plus its command
-specification, record, executor target, and native ID of the backend.
-Use that `id` to query the status of the submission:
+The CLI returns JSON with `id` (the original PSI/J job ID), command
+specification, record, executor target, and backend native ID. MCP returns a
+compact receipt with the ID, record ID, executor, and initial state. Use the ID
+to inspect or cancel the submission:
 
 ```bash
 hiraku job status JOB_ID
 hiraku job status JOB_ID --json
+hiraku job logs JOB_ID
+hiraku job logs JOB_ID --json
+hiraku job cancel JOB_ID
 ```
 
 ## Submission history
@@ -160,6 +165,17 @@ submission.sync(attached)
 submission.save(project)
 ```
 
-MCP exposes `job_submit`, `job_list(record_id=...)`, and mutating
-`job_status(job_id=...)`, which syncs, saves, and returns the updated submission.
-These use the same history and original PSI/J IDs as the CLI.
+MCP exposes `job_submit`, `job_list(record_id=...)`, `job_status(job_id=...)`,
+`job_logs(job_id=...)`, and `job_cancel(job_id=...)`. Cancellation saves the
+updated status and returns only the resolved job ID and resulting state. These
+use the same history and original PSI/J IDs as the CLI. The default
+`local-detached` executor stops the job's process
+group; other executors use their PSI/J cancellation support.
+The MCP `job_list` result includes every matching job as a summary with its ID,
+record ID, executor, and state. Use `job_status` for the exit code and message,
+and `job_logs` for command output. Record listings similarly return all matching
+record metadata without Markdown; use `record_show` to read a record's Markdown.
+The MCP `job_status` result includes only the job ID and the status state, exit
+code, and message; the CLI retains its detailed output. MCP `job_submit` returns
+a compact receipt with the ID, record ID, executor, and initial state; the full
+submission remains saved in project history.

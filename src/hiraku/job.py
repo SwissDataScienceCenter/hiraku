@@ -353,6 +353,51 @@ class Submission(BaseModel):
                 "The job was submitted; do not resubmit automatically."
             ) from exc
 
+    def logs(self, project: Project) -> dict[str, str | None]:
+        """Read available stdout and stderr files without observing the job."""
+        spec = self.spec
+        directory = Path(spec.get("directory") or project.root)
+        streams: dict[str, str | None] = {}
+        for name in ("stdout", "stderr"):
+            value = spec.get(f"{name}_path")
+            if value is None:
+                streams[name] = None
+                continue
+            if not isinstance(value, str):
+                raise ExecutionError(
+                    f"Cannot read {name} logs for job {self.id}: invalid path"
+                )
+            path = Path(value)
+            if not path.is_absolute():
+                path = directory / path
+            try:
+                streams[name] = (
+                    path.read_text(encoding="utf-8", errors="replace")
+                    if path.is_file()
+                    else None
+                )
+            except OSError as exc:
+                raise ExecutionError(
+                    f"Cannot read {name} logs for job {self.id}: {exc}"
+                ) from exc
+        return streams
+
+    def cancel(self, project: Project) -> None:
+        """Cancel the native job and persist its resulting status."""
+        job = self.get_psi_job()
+        try:
+            job.cancel()
+        except (
+            psij.InvalidJobException,
+            psij.SubmitException,
+            OSError,
+            ValueError,
+            TypeError,
+        ) as exc:
+            raise ExecutionError(f"Cannot cancel job {self.id}: {exc}") from exc
+        self.sync(job)
+        self.save(project)
+
     @classmethod
     def load(cls, project: Project, job_id: str) -> Submission:
         """Read validated history without contacting an executor."""
