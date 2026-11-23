@@ -1,8 +1,0 @@
-source:
-  type: wandb
-  project: eurosat-rgb
-metrics:
-- name: val/accuracy
-  direction: maximize
-- name: val/loss
-  direction: minimize

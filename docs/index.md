@@ -18,5 +18,5 @@ Research records document the data science lifecycle. Researchers and workflows 
 
 For other installation options, see the [installation instructions](getting_started.md#install-hiraku). Then:
 
-1. [Run your first experiment](examples/minimal/README.md) using a bundled evaluation script and local CSV tracking.
+1. [Run your first experiment](getting_started.md#run-your-first-experiment) with a small CSV-tracked evaluation.
 2. [Use Hiraku in your own project](guides/index.md).

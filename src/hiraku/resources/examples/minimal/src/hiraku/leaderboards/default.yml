@@ -1,6 +1,0 @@
-source:
-  type: csv
-  path: runs.csv
-metrics:
-- name: val/accuracy
-  direction: maximize

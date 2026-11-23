@@ -81,10 +81,18 @@ def source(tmp_path: Path) -> Path:
 
 
 @pytest.mark.parametrize(
-    "command", [["init", "minimal"], ["example", "create", "minimal"]]
+    ("command", "project_name", "example_file"),
+    [
+        (["init", "minimal"], "minimal", None),
+        (["example", "create", "digits-mlflow"], "digits-mlflow", "train.py"),
+    ],
 )
 def test_project_creation_does_not_invoke_git(
-    tmp_path: Path, monkeypatch, command: list[str]
+    tmp_path: Path,
+    monkeypatch,
+    command: list[str],
+    project_name: str,
+    example_file: str | None,
 ) -> None:
     def forbidden(*args, **kwargs):
         pytest.fail("Git must not be invoked during plain initialization")
@@ -93,9 +101,11 @@ def test_project_creation_does_not_invoke_git(
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(main, command)
     assert result.exit_code == 0, result.output
-    assert (tmp_path / "minimal/hiraku.yml").is_file()
-    assert (tmp_path / "minimal/evaluate.py").is_file() == (command[0] == "example")
-    assert not (tmp_path / "minimal/.git").exists()
+    project = tmp_path / project_name
+    assert (project / "hiraku.yml").is_file()
+    if example_file is not None:
+        assert (project / example_file).is_file()
+    assert not (project / ".git").exists()
 
 
 def test_init_without_git_installed(tmp_path: Path, monkeypatch) -> None:

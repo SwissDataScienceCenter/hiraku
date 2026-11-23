@@ -231,8 +231,9 @@ def test_example_list_works_outside_a_project(tmp_path: Path, monkeypatch) -> No
     result = invoke("example", "list")
 
     assert result.exit_code == 0
-    assert "minimal" in result.output
-    assert "heart-disease" in result.output
+    assert "digits-mlflow" in result.output
+    assert "workflows" in result.output
+    assert "heart-disease" not in result.output
     assert list(tmp_path.iterdir()) == []
 
 
@@ -242,7 +243,7 @@ def test_init_and_example_create_accept_destination(
     monkeypatch.chdir(tmp_path)
 
     plain = invoke("init", "research")
-    example = invoke("example", "create", "minimal", "demo")
+    example = invoke("example", "create", "digits-mlflow", "demo")
 
     assert plain.exit_code == 0, plain.output
     assert example.exit_code == 0, example.output
@@ -250,7 +251,7 @@ def test_init_and_example_create_accept_destination(
         tmp_path / "research"
     )
     assert Project.load(tmp_path / "demo/hiraku.yml").root == tmp_path / "demo"
-    assert (tmp_path / "demo/evaluate.py").is_file()
+    assert (tmp_path / "demo/train.py").is_file()
 
 
 def test_init_reports_existing_project_without_overwriting_it(

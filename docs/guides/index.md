@@ -1,6 +1,6 @@
 # User guide
 
-New to Hiraku? [Run your first experiment](../examples/minimal/README.md) to create a record and inspect two runs.
+New to Hiraku? [Run your first experiment](../getting_started.md#run-your-first-experiment) to create a record and inspect two runs.
 
 | I want to… | Go to |
 | --- | --- |

@@ -70,17 +70,14 @@ flowchart LR
     Q[Research question] --> E[Experiment record] --> L[Launch] --> R[Tracked run] --> F[Finding]
 ```
 
-Follow the [Heart Disease example](docs/examples/heart-disease/README.md) for a
-complete walkthrough, or browse the other runnable projects below.
+Browse the [Digits with MLflow](docs/examples/digits-mlflow/README.md) and
+[Workflow examples](docs/examples/workflows/README.md) without creating a local
+project. Use `hiraku example create` when you want to copy one into a directory.
 
 ## Examples
 
-- [Heart Disease](docs/examples/heart-disease/README.md) — compare models with CSV tracking.
-- [Iris with W&B](docs/examples/iris-wandb/README.md) — log scikit-learn experiments to Weights & Biases.
 - [Digits with MLflow](docs/examples/digits-mlflow/README.md) — track model runs and metrics with MLflow.
-- [EuroSAT RGB](docs/examples/eurosat-rgb/README.md) — compare image-classification architectures with W&B.
 - [Workflow examples](docs/examples/workflows/README.md) — try small Python and Markdown workflows.
-- [Autoresearch](docs/examples/autoresearch/README.md) — run a research loop on Karpathy's autoresearch project.
 
 Initialize an example with `hiraku example create NAME`. To include prepared
 results or generate them, use one of these options:
@@ -107,9 +104,9 @@ Initialization does not require Git. Add `--git` to initialize the code reposito
 as a convenience. Repeating plain `hiraku init` leaves an initialized project
 unchanged; repeating it with `--git` can add the code repository later.
 
-The results and generator modes are available for the Heart Disease and Digits
-examples. `--generate` cannot be combined with `--with-results`; generation can
-take time and may install the example's dependencies.
+The results and generator modes are available for the Digits example.
+`--generate` cannot be combined with `--with-results`; generation can take
+time and may install the example's dependencies.
 Immediate generation runs in a temporary source project and imports the
 completed results. Normal commands run in the current working tree, including
 local changes.

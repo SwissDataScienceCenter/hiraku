@@ -256,12 +256,13 @@ class Project(BaseModel):
                     or "\\" in example
                 ):
                     raise ValidationError("Invalid example name")
-                bundle = resources / "examples" / example
+                examples = files("hiraku.examples")
+                bundle = examples / example
                 if not (bundle / "src").is_dir():
                     try:
                         available = sorted(
                             item.name
-                            for item in (resources / "examples").iterdir()
+                            for item in examples.iterdir()
                             if (item / "src").is_dir()
                         )
                     except OSError:
@@ -319,7 +320,7 @@ class Project(BaseModel):
 
             # Copy the example's result generator if requested
             if with_generator:
-                generator = resources / "examples" / example / "generate_results.py"
+                generator = files("hiraku.examples") / example / "generate_results.py"
                 with as_file(generator) as source:
                     shutil.copy2(source, root / "generate_results.py")
 

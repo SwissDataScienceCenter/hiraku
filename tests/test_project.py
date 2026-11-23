@@ -234,14 +234,19 @@ def test_init_from_packaged_example_copies_only_src(
     tmp_path: Path, monkeypatch
 ) -> None:
     resources = tmp_path / "resources"
+    examples = tmp_path / "examples"
     for name in ("workflows", "dispatch"):
         (resources / name).mkdir(parents=True)
-    example = resources / "examples/demo"
+    example = examples / "demo"
     (example / "src").mkdir(parents=True)
     (example / "README.md").write_text("do not copy")
     (example / "example.yml").write_text("description: Demo\n")
     (example / "src/copied.txt").write_text("copied")
-    monkeypatch.setattr(hiraku.project, "files", lambda package: resources)
+    monkeypatch.setattr(
+        hiraku.project,
+        "files",
+        lambda package: examples if package == "hiraku.examples" else resources,
+    )
 
     root = tmp_path / "project"
     Project.create(root, example="demo", install_skill=False)
@@ -345,7 +350,7 @@ def test_init_leaves_inline_codex_mcp_servers_unchanged(tmp_path: Path) -> None:
 
 
 def test_base_example_has_no_results(tmp_path: Path):
-    config = Project.create(tmp_path, example="heart-disease", install_skill=False)
+    config = Project.create(tmp_path, example="digits-mlflow", install_skill=False)
     assert (tmp_path / "train.py").is_file()
     assert not (tmp_path / "runs.csv").exists()
     assert not list(config.records_dir.rglob("*.md"))
@@ -353,7 +358,7 @@ def test_base_example_has_no_results(tmp_path: Path):
 
 @pytest.mark.parametrize("example", [None, "minimal"])
 def test_unavailable_results_leave_no_project(tmp_path: Path, example):
-    with pytest.raises(ValidationError, match="requires|no results"):
+    with pytest.raises(ValidationError, match="Unknown example|requires|no results"):
         Project.create(tmp_path, example=example, results=True)
     assert not (tmp_path / "hiraku.yml").exists()
 
@@ -376,8 +381,9 @@ def test_results_include_leaderboard_configuration(tmp_path: Path):
 
 def test_results_override_base_files(tmp_path: Path, monkeypatch):
     resources = tmp_path / "resources"
-    base = resources / "examples/layered/src"
-    results = resources / "examples/layered/results"
+    examples = tmp_path / "examples"
+    base = examples / "layered/src"
+    results = examples / "layered/results"
     (resources / "workflows").mkdir(parents=True)
     base.mkdir(parents=True)
     results.mkdir()
@@ -385,7 +391,11 @@ def test_results_override_base_files(tmp_path: Path, monkeypatch):
     (base / "hiraku.yml").write_text("hiraku_dir: base-data\n")
     (results / "train.py").write_text("results")
     (results / "hiraku.yml").write_text("hiraku_dir: results-data\n")
-    monkeypatch.setattr(hiraku.project, "files", lambda name: resources)
+    monkeypatch.setattr(
+        hiraku.project,
+        "files",
+        lambda name: examples if name == "hiraku.examples" else resources,
+    )
     target = tmp_path / "target"
     config = Project.create(
         target, example="layered", results=True, install_skill=False
@@ -414,17 +424,84 @@ def _skill_git(project: Path, *arguments: str) -> str:
 
 
 def _new_project(tmp_path: Path) -> tuple[Path, Project, str]:
-    project = tmp_path / "heart-disease"
+    project = tmp_path / "classification"
     project.mkdir()
     _skill_git(project, "init", "-b", "main")
     _skill_git(project, "config", "user.email", "test@example.invalid")
     _skill_git(project, "config", "user.name", "Test")
-    config = Project.create(
-        project,
-        example="heart-disease",
+    config = Project.create(project)
+    Leaderboard.create(config, "default", {"type": "csv", "path": "runs.csv"})
+    (config.leaderboards_dir / "default.yml").write_text(
+        "source:\n"
+        "  type: csv\n"
+        "  path: runs.csv\n"
+        "metrics:\n"
+        "  - name: val/log_loss\n"
+        "    direction: minimize\n"
+        "  - name: val/accuracy\n"
+        "    direction: maximize\n",
+        encoding="utf-8",
+    )
+    with (project / ".gitignore").open("a", encoding="utf-8") as stream:
+        stream.write("/runs.csv\n")
+    (project / "train.py").write_text(
+        """import argparse
+import csv
+import os
+import subprocess
+import uuid
+from datetime import UTC, datetime
+
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--model", choices=("logistic", "random_forest"), default="logistic"
+)
+parser.add_argument("--seed", type=int, default=42)
+parser.add_argument("--validation-fraction", type=float, default=0.25)
+args = parser.parse_args()
+fields = [
+    "id",
+    "record_id",
+    "commit",
+    "git_state",
+    "hiraku_job_id",
+    "timestamp",
+    "duration",
+    "param.model",
+    "param.seed",
+    "param.validation_fraction",
+    "metric.val/log_loss",
+    "metric.val/accuracy",
+]
+if args.model == "logistic":
+    loss, accuracy = 0.32254890, 0.85526316
+else:
+    loss, accuracy = 0.35226763, 0.86842105
+row = {
+    "id": uuid.uuid4().hex,
+    "record_id": os.environ["HIRAKU_RECORD_ID"],
+    "commit": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+    "git_state": "clean",
+    "hiraku_job_id": os.environ["HIRAKU_JOB_ID"],
+    "timestamp": datetime.now(UTC).isoformat(),
+    "duration": 0,
+    "param.model": args.model,
+    "param.seed": args.seed,
+    "param.validation_fraction": args.validation_fraction,
+    "metric.val/log_loss": loss,
+    "metric.val/accuracy": accuracy,
+}
+write_header = not os.path.exists("runs.csv")
+with open("runs.csv", "a", newline="", encoding="utf-8") as stream:
+    writer = csv.DictWriter(stream, fieldnames=fields)
+    if write_header:
+        writer.writeheader()
+    writer.writerow(row)
+""",
+        encoding="utf-8",
     )
     _skill_git(project, "add", ".")
-    _skill_git(project, "commit", "-m", "initialize Heart Disease example")
+    _skill_git(project, "commit", "-m", "initialize classification project")
     commit = _skill_git(project, "rev-parse", "HEAD")
     return project, config, commit
 
@@ -485,14 +562,12 @@ def _run_codex(project: Path, prompt: str) -> str:
 
 def _create_task(project: Project) -> Record:
     record = project.vault.create(
-        "heart-disease-prediction",
+        "classification-study",
         type="task",
         branch="main",
-        goal="Develop and evaluate predictive models for heart disease "
-        "on a fixed Cleveland cohort",
-        question="Which modeling approaches achieve the best validation log loss "
-        "and accuracy on this cohort?",
-        title="Heart disease prediction",
+        goal="Compare predictive models on a fixed classification dataset",
+        question="Which models achieve the best validation log loss and accuracy?",
+        title="Classification study",
     )
     return record
 
@@ -523,11 +598,9 @@ def test_agent_creates_task_from_high_level_request(tmp_path: Path) -> None:
 
     agent_output = _run_codex(
         project,
-        """Use the $hiraku skill to create a root record named heart-disease.
-Its goal is
-to develop and evaluate predictive models for heart disease on the fixed
-Cleveland cohort without restricting the task to particular model families. Ask
-which modeling approaches achieve the best validation log loss and accuracy.
+        """Use the $hiraku skill to create a root record named classification-study.
+Its goal is to compare predictive models on a fixed classification dataset. Ask
+which models achieve the best validation log loss and accuracy.
 Track val/log_loss to minimize and val/accuracy to maximize. Only create and
 verify the record and its leaderboard.""",
     )
@@ -535,12 +608,11 @@ verify the record and its leaderboard.""",
     tasks = config.vault.list()
     assert len(tasks) == 1, agent_output
     task = tasks[0]
-    assert task.title == "heart-disease"
+    assert task.title == "classification-study"
     assert task.goal is not None
     goal = task.goal.lower()
     assert "predictive" in goal
-    assert "heart disease" in goal
-    assert "cleveland" in goal
+    assert "classification" in goal
     assert task.question is not None
     question = task.question.lower()
     assert "model" in question
@@ -566,8 +638,8 @@ def test_agent_creates_experiment_from_high_level_request(tmp_path: Path) -> Non
     agent_output = _run_codex(
         project,
         """Use the $hiraku skill to create the record
-heart-disease-prediction/logistic-regression with title 'Logistic regression'
-under heart-disease-prediction. Use the summary 'Logistic regression baseline' and the
+classification-study/logistic-regression with title 'Logistic regression'
+under classification-study. Use the summary 'Logistic regression baseline' and the
 hypothesis 'Regularized logistic regression provides a calibrated baseline'.
 Bind it to the current commit. Only create and verify the record; do not run it.""",
     )
