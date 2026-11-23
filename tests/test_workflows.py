@@ -86,14 +86,14 @@ def test_start_wraps_workflow_import_errors(tmp_path: Path) -> None:
 
 
 def test_workflow_status_rejects_unknown_session(tmp_path: Path) -> None:
-    config = Project.create(tmp_path, example="workflows", install_skill=False)
+    config = Project.create(tmp_path, install_skill=False)
 
     with pytest.raises(ValidationError, match="was not found"):
         workflow_status(f"unknown:{'0' * 32}", project=config)
 
 
-def test_resume_rejects_stale_checkpoint(tmp_path: Path) -> None:
-    config = Project.create(tmp_path, example="workflows", install_skill=False)
+def test_resume_rejects_stale_checkpoint(workflow_project: Project) -> None:
+    config = workflow_project
     started = start_workflow("count-steps", {"count": 1}, project=config)
 
     with pytest.raises(ValidationError, match="checkpoint has changed"):
@@ -232,12 +232,10 @@ def test_collaborative_runs_a_bounded_experiment_with_langgraph(tmp_path, task_i
     assert "Summarize the run" in completed["result"]
 
 
-def _project(tmp_path: Path) -> Project:
-    return Project.create(tmp_path, example="workflows", install_skill=False)
-
-
-def test_concurrent_resumes_reject_stale_checkpoint(tmp_path: Path) -> None:
-    config = _project(tmp_path)
+def test_concurrent_resumes_reject_stale_checkpoint(
+    workflow_project: Project,
+) -> None:
+    config = workflow_project
     started = start_workflow("count-steps", {"count": 2}, project=config)
     session_id = started["workflow_session_id"]
     token = started["interrupts"][0]["value"]["data"]["token"]
@@ -261,10 +259,12 @@ def test_concurrent_resumes_reject_stale_checkpoint(tmp_path: Path) -> None:
     assert "checkpoint has changed" in str(error)
 
 
-def test_checkpoint_storage_is_ignored(tmp_path: Path) -> None:
+def test_checkpoint_storage_is_ignored(
+    tmp_path: Path, workflow_project: Project
+) -> None:
     import subprocess
 
-    config = _project(tmp_path)
+    config = workflow_project
     (tmp_path / ".gitignore").write_text("/.hiraku/\n", encoding="utf-8")
     subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
     start_workflow("count-steps", project=config)

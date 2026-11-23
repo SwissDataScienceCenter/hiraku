@@ -232,7 +232,7 @@ def test_example_list_works_outside_a_project(tmp_path: Path, monkeypatch) -> No
 
     assert result.exit_code == 0
     assert "digits-mlflow" in result.output
-    assert "workflows" in result.output
+    assert "workflows" not in result.output
     assert "heart-disease" not in result.output
     assert list(tmp_path.iterdir()) == []
 
