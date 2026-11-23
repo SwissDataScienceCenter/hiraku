@@ -13,10 +13,9 @@ dev_addr = "localhost:8000"
 nav = [
   { "Introduction" = [
       { "Hiraku" = "index.md" },
-      { "Installation" = "installation.md" },
       { "Essential concepts" = "concepts.md" },
   ] },
-  { "First experiment" = "first_experiment.md" },
+  { "Getting started" = "getting_started.md" },
   { "User guide" = [
       { "Overview" = "guides/index.md" },
       { "Record code provenance" = "guides/experiment-branches.md" },
