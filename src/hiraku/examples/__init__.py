@@ -1,1 +1,1 @@
-"""Bundled example project templates."""
+"""Example project templates."""
