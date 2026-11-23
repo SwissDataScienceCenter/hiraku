@@ -13,97 +13,166 @@
   --sdsc-green: #91c743;
 }
 
-.md-typeset .sdsc-home-hero {
-  margin: 1.5rem 0 2rem;
-  padding: clamp(1.5rem, 4vw, 3rem);
+.md-typeset .sdsc-home-hero,
+.md-typeset .architecture-preview .records {
+  border-top: 0.25rem solid var(--sdsc-green);
   border-radius: 1rem;
   background: linear-gradient(120deg, var(--sdsc-navy), var(--sdsc-indigo));
   color: #fff;
-  box-shadow: 0 1rem 2.5rem #24265c24;
 }
 
-.sdsc-home-hero__eyebrow {
-  margin: 0 0 0.7rem;
-  color: #d3e8aa;
-  font-size: 0.75rem;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
+.md-typeset .sdsc-home-hero {
+  margin: 0 0 2rem;
+  padding: clamp(1rem, 4vw, 2.5rem);
 }
 
-.md-typeset .sdsc-home-hero__lead {
-  max-width: 42rem;
-  margin: 0 0 0.7rem;
+.md-typeset .sdsc-home-hero h1 {
+  margin: 0 0 0.45rem;
   color: #fff;
-  font-size: clamp(1.5rem, 3vw, 2.35rem);
+  font-size: clamp(2.1rem, 5vw, 3.2rem);
   font-weight: 700;
-  line-height: 1.2;
+  line-height: 1.1;
+}
+
+.md-typeset .sdsc-home-hero > p {
+  margin: 0.75rem 0;
+  color: #f1f2fa;
 }
 
 .md-typeset .sdsc-home-hero > p:last-child {
-  max-width: 48rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0;
+}
+
+.sdsc-home-hero .md-button {
+  border-color: #fff;
+  color: #fff;
+}
+
+.sdsc-home-hero .md-button--primary,
+.sdsc-home-hero .md-button:is(:hover, :focus-visible) {
+  border-color: var(--sdsc-green);
+  background: var(--sdsc-green);
+  color: var(--sdsc-navy);
+}
+
+.sdsc-home-hero .md-button--primary:is(:hover, :focus-visible) {
+  border-color: #fff;
+  background: #fff;
+}
+
+.md-typeset .sdsc-home-demos > ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
+  gap: 0.75rem;
+  padding: 0;
+  margin: 1rem 0;
+  list-style: none;
+}
+
+.md-typeset .sdsc-home-demos li,
+.md-typeset .architecture-preview > section {
+  padding: 0.85rem;
+  border: 1px solid var(--md-default-fg-color--lightest);
+  border-radius: 0.65rem;
+}
+
+.md-typeset .sdsc-home-demos li {
   margin: 0;
-  color: #f1f2fa;
-  font-size: 1.05rem;
+}
+
+.md-typeset .sdsc-home-demos li > p {
+  margin: 0;
+}
+
+.md-typeset .sdsc-home-demos li > p + p {
+  margin-top: 0.35rem;
+}
+
+.sdsc-home-demos a {
+  font-weight: 700;
 }
 
 .md-typeset figure.architecture-preview {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1.1rem 0.5rem;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
   width: 100%;
-  margin: 1.5rem 0;
+  margin: 1rem 0;
 }
 
-.architecture-preview section {
+.architecture-preview > section {
+  --architecture-accent: var(--sdsc-indigo);
   position: relative;
-  padding: 0.55rem;
-  border: 1px solid #7778;
-  border-radius: 0.65rem;
-  background: #eee;
-  color: #20252b;
+}
+
+.architecture-preview :is(.development, .workflows) {
+  --architecture-accent: var(--sdsc-green);
+}
+
+.md-typeset .architecture-preview > section:not(.records) {
+  border-color: color-mix(in srgb, var(--architecture-accent) 55%, var(--md-default-bg-color));
+  background: color-mix(in srgb, var(--architecture-accent) 26%, var(--md-default-bg-color));
+}
+
+.md-typeset .architecture-preview .records {
+  padding: 1rem;
   text-align: center;
 }
 
-.architecture-preview .development,
-.architecture-preview .workflows {
-  background: #dcedd8;
-}
-
-.architecture-preview .jobs,
-.architecture-preview .leaderboards {
-  background: #d9e9f6;
-}
-
-.architecture-preview h2 {
+.md-typeset .architecture-preview h3 {
   margin: 0;
   color: inherit;
-  font-size: 0.85rem;
+  font-size: 1rem;
   font-weight: 700;
+  line-height: 1.25;
+}
+
+.md-typeset .architecture-preview .records h3 {
+  font-size: 1.2rem;
 }
 
 .architecture-preview p {
-  margin: 0.15rem 0 0;
-  font-size: 0.65rem;
+  margin: 0.25rem 0 0;
+  font-size: 0.75rem;
+}
+
+.architecture-preview .records p {
+  color: #f1f2fa;
 }
 
 .architecture-preview .items {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.25rem;
-  margin-top: 0.4rem;
+  gap: 0.3rem;
+  margin-top: 0.65rem;
 }
 
 .architecture-preview .items span {
-  flex: 1 0 auto;
-  padding: 0.15rem 0.25rem;
-  border: 1px solid #7778;
-  border-radius: 0.2rem;
-  background: #fff;
-  font-size: 0.68rem;
+  padding: 0.12rem 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--architecture-accent) 45%, var(--md-default-bg-color));
+  border-radius: 1rem;
+  background: color-mix(in srgb, var(--architecture-accent) 8%, var(--md-default-bg-color));
+  font-size: 0.73rem;
+}
+
+.architecture-preview .records .items {
+  justify-content: center;
+}
+
+.architecture-preview .records .items span {
+  border-color: #fff6;
+  background: #fff1;
 }
 
 @media (min-width: 760px) {
+  .md-typeset figure.architecture-preview {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    row-gap: 1.4rem;
+  }
+
   .md-typeset figure.architecture-preview .records {
     grid-column: 1 / -1;
   }
@@ -116,7 +185,8 @@
     left: 50%;
     transform: translateX(-50%);
     color: var(--md-default-fg-color);
-    line-height: 1.1rem;
+    font-size: 1rem;
+    line-height: 1.4rem;
   }
 
   .architecture-preview .development::after,
@@ -222,11 +292,4 @@
 
 [data-md-color-scheme="slate"] .sdsc-error__message {
   color: #e4e5f1;
-}
-
-@media (max-width: 759px) {
-  .md-typeset figure.architecture-preview {
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0.5rem;
-  }
 }
