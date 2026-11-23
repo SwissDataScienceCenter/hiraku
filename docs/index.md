@@ -1,5 +1,9 @@
 # Hiraku
 
+```bash
+uv tool install hiraku
+```
+
 Hiraku connects the question behind an experiment, the code you ran, and the results you measured.
 
 Write the question and your conclusions in Markdown, associate the experiment with a Git commit, and query its results from CSV, MLflow, or Weights & Biases.
@@ -12,6 +16,7 @@ For example, to establish a baseline, create an experiment record and run the sa
 
 Research records document the data science lifecycle. Researchers and workflows read and update them, while jobs run computations and leaderboards surface results from tracking backends.
 
-1. [Install Hiraku](installation.md).
-2. [Run your first experiment](examples/minimal/README.md) using a bundled evaluation script and local CSV tracking.
-3. [Use Hiraku in your own project](guides/index.md).
+For other installation options, see the [installation instructions](getting_started.md#install-hiraku). Then:
+
+1. [Run your first experiment](examples/minimal/README.md) using a bundled evaluation script and local CSV tracking.
+2. [Use Hiraku in your own project](guides/index.md).
