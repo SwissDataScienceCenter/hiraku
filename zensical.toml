@@ -32,7 +32,7 @@ nav = [
   ] },
   { "Examples" = [
       { "Overview" = "examples/index.md" },
-      { "Digits with MLflow" = "examples/digits-mlflow/README.md" },
+      { "Digits" = "examples/digits/README.md" },
   ] },
   { "API reference" = [
       { "Overview" = "api/index.md" },

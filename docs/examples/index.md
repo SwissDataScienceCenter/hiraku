@@ -4,4 +4,4 @@ Browse each example's documentation below. The `hiraku example create` command i
 
 | Example | Description |
 | --- | --- |
-| [Digits with MLflow](digits-mlflow/README.md) | Track model runs and metrics with MLflow. |
+| [Digits](digits/README.md) | Track model runs and metrics with MLflow. |

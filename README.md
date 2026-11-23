@@ -70,13 +70,13 @@ flowchart LR
     Q[Research question] --> E[Experiment record] --> L[Launch] --> R[Tracked run] --> F[Finding]
 ```
 
-Browse the [Digits with MLflow](docs/examples/digits-mlflow/README.md) example
+Browse the [Digits](docs/examples/digits/README.md) example
 without creating a local project. Use `hiraku example create` when you want to
 copy it into a directory.
 
 ## Examples
 
-- [Digits with MLflow](docs/examples/digits-mlflow/README.md) — track model runs and metrics with MLflow.
+- [Digits](docs/examples/digits/README.md) — track model runs and metrics with MLflow.
 
 Initialize an example with `hiraku example create NAME`. To include prepared
 results or generate them, use one of these options:
@@ -134,7 +134,7 @@ the tree, ready for your own plots or marimo's AI assistant.
 Try every dashboard mode without training by loading the bundled Digits runs:
 
 ```bash
-hiraku example create digits-mlflow digits-dashboard --with-results
+hiraku example create digits digits-dashboard --with-results
 cd digits-dashboard
 hiraku dashboard --record digits                 # read-only
 hiraku dashboard --include-code --record digits  # read-only, with source

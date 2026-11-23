@@ -1,4 +1,4 @@
-# Digits classification with MLflow logging
+# Digits
 
 Train a small neural network on scikit-learn's bundled Digits dataset (1,797
 8×8 images) and log training and validation cross-entropy and accuracy after
@@ -17,18 +17,18 @@ Hiraku checkout: `uv tool install --force '.[mlflow]'`). Then create and
 initialize a new project:
 
 ```bash
-hiraku example create digits-mlflow --git
-cd digits-mlflow
+hiraku example create digits --git
+cd digits
 uv sync
 git add .
-git commit -m "initialize Digits MLflow example"
+git commit -m "initialize Digits example"
 ```
 
 Alternatively, to browse the example without training, install the `dashboard`
 extra too and initialize a separate project with the six bundled runs:
 
 ```bash
-hiraku example create digits-mlflow digits-dashboard --with-results
+hiraku example create digits digits-dashboard --with-results
 cd digits-dashboard
 hiraku dashboard --record digit-classification
 ```
