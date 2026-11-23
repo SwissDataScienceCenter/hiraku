@@ -30,13 +30,18 @@ nav = [
       { "MCP server" = "guides/mcp.md" },
       { "Workflows" = "guides/workflows.md" },
   ] },
-  { "Examples" = "examples/index.md" },
+  { "Examples" = [
+      { "Overview" = "examples/index.md" },
+      { "Digits with MLflow" = "examples/digits-mlflow/README.md" },
+      { "Workflows" = "examples/workflows/README.md" },
+  ] },
   { "API reference" = [
       { "Overview" = "api/index.md" },
       { "Project" = "api/python/project.md" },
-      { "Record and Vault" = "api/python/records.md" },
-      { "Tracking" = "api/python/tracking.md" },
-      { "Workflows" = "api/python/workflows.md" },
+      { "Record" = "api/python/records.md" },
+      { "Job" = "api/python/jobs.md" },
+      { "Leaderboard" = "api/python/leaderboards.md" },
+      { "Workflow" = "api/python/workflows.md" },
   ] },
   { "About" = [
       { "Authors" = "about/authors.md" },
@@ -145,7 +150,8 @@ pymdownx.keys = {}
 pymdownx.magiclink = {}
 pymdownx.mark = {}
 pymdownx.smartsymbols = {}
-# pymdownx.snippets.base_path = "includes"
+pymdownx.snippets.base_path = "."
+pymdownx.snippets.check_paths = true
 pymdownx.superfences.custom_fences = [
   { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
 ]
@@ -172,9 +178,3 @@ minify_html = true
 "api/cli.md" = "api/index.md"
 "api/python/index.md" = "api/index.md"
 "workflow.md" = "guides/workflows.md"
-"examples/autoresearch/README.md" = "https://github.com/SwissDataScienceCenter/hiraku/blob/main/src/hiraku/resources/examples/autoresearch/README.md"
-"examples/digits-mlflow/README.md" = "https://github.com/SwissDataScienceCenter/hiraku/blob/main/src/hiraku/resources/examples/digits-mlflow/README.md"
-"examples/eurosat-rgb/README.md" = "https://github.com/SwissDataScienceCenter/hiraku/blob/main/src/hiraku/resources/examples/eurosat-rgb/README.md"
-"examples/heart-disease/README.md" = "https://github.com/SwissDataScienceCenter/hiraku/blob/main/src/hiraku/resources/examples/heart-disease/README.md"
-"examples/iris-wandb/README.md" = "https://github.com/SwissDataScienceCenter/hiraku/blob/main/src/hiraku/resources/examples/iris-wandb/README.md"
-"examples/workflows/README.md" = "https://github.com/SwissDataScienceCenter/hiraku/blob/main/src/hiraku/resources/examples/workflows/README.md"

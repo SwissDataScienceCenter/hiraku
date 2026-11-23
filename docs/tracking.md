@@ -50,5 +50,5 @@ record ID, independently of the include flag.
 
 
 See [CSV](guides/tracking-csv.md), [MLflow](guides/tracking-mlflow.md),
-[W&B](guides/tracking-wandb.md), and the [Python API](api/python/tracking.md).
+[W&B](guides/tracking-wandb.md), and the [Python API](api/python/leaderboards.md).
 CSV headers use `metric.` and `param.` prefixes; leaderboard metric names are plain.

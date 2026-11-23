@@ -1,4 +1,4 @@
-# Tracking
+# Leaderboard
 
 See [Leaderboards](../../tracking.md) for configuration and CLI examples.
 

@@ -14,7 +14,7 @@ from hiraku.cli import main
 from hiraku.project import Project
 
 REPOSITORY = Path(__file__).parents[2]
-EXAMPLE = REPOSITORY / "src" / "hiraku" / "resources" / "examples" / "digits-mlflow"
+EXAMPLE = REPOSITORY / "src" / "hiraku" / "examples" / "digits-mlflow"
 OVERLAY = EXAMPLE / "src"
 
 

@@ -6,7 +6,7 @@ from zipfile import ZipFile
 
 REPOSITORY = Path(__file__).parents[1]
 PACKAGE = REPOSITORY / "src" / "hiraku"
-EXAMPLES = PACKAGE / "resources" / "examples"
+EXAMPLES = PACKAGE / "examples"
 SKILLS = PACKAGE / "resources" / "skills"
 WORKFLOWS = PACKAGE / "resources" / "workflows"
 

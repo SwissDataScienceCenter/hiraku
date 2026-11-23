@@ -269,7 +269,7 @@ def example_group() -> None:
 @example_group.command("list")
 def example_list_command() -> None:
     """List available bundled examples."""
-    examples = files("hiraku.resources") / "examples"
+    examples = files("hiraku.examples")
     rows = []
     for example in sorted(examples.iterdir(), key=lambda item: item.name):
         manifest = example / "example.yml"
@@ -315,9 +315,7 @@ def example_create_command(
         require_git()
     generator = None
     if generate:
-        generator = (
-            files("hiraku.resources") / "examples" / example / "generate_results.py"
-        )
+        generator = files("hiraku.examples") / example / "generate_results.py"
         if not generator.is_file():
             raise click.UsageError(f"Example {example!r} has no generator")
     project = Project.create(

@@ -1,0 +1,1 @@
+--8<-- "src/hiraku/examples/digits-mlflow/README.md"
