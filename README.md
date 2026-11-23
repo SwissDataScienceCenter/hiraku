@@ -70,14 +70,13 @@ flowchart LR
     Q[Research question] --> E[Experiment record] --> L[Launch] --> R[Tracked run] --> F[Finding]
 ```
 
-Browse the [Digits with MLflow](docs/examples/digits-mlflow/README.md) and
-[Workflow examples](docs/examples/workflows/README.md) without creating a local
-project. Use `hiraku example create` when you want to copy one into a directory.
+Browse the [Digits with MLflow](docs/examples/digits-mlflow/README.md) example
+without creating a local project. Use `hiraku example create` when you want to
+copy it into a directory.
 
 ## Examples
 
 - [Digits with MLflow](docs/examples/digits-mlflow/README.md) — track model runs and metrics with MLflow.
-- [Workflow examples](docs/examples/workflows/README.md) — try small Python and Markdown workflows.
 
 Initialize an example with `hiraku example create NAME`. To include prepared
 results or generate them, use one of these options:
