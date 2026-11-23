@@ -2,12 +2,16 @@
 
 New to Hiraku? [Run your first experiment](../getting_started.md#run-your-first-experiment) to create a record and inspect two runs.
 
-| I want to… | Go to |
+| Concept | Guide |
 | --- | --- |
-| Start using Hiraku in an existing repository | Run `hiraku init` from the project root, then [record which code an experiment used](experiment-branches.md). |
-| Run a command locally or submit it to an executor | [Jobs and executors](jobs.md) |
-| Log results from my script | [CSV](tracking-csv.md), [MLflow](tracking-mlflow.md), or [Weights & Biases](tracking-wandb.md) |
-| Choose a data source and compare metrics | [Leaderboards](../tracking.md) |
-| Browse records and results in a browser | [Dashboard](dashboard.md) |
-| Connect Hiraku to a coding agent | [MCP server](mcp.md) |
-| Define a repeatable procedure with LangGraph | [Workflows](workflows.md) |
+| Project | Initialize Hiraku in an existing repository with `hiraku init`. |
+| Record | [Record code provenance](experiment-branches.md) for an experiment. |
+| Job | [Run a command locally or submit it to an executor](jobs.md). |
+| Leaderboard | [Choose a data source and compare metrics](../tracking.md). |
+| Workflow | [Define a repeatable procedure with LangGraph](workflows.md). |
+
+Other guides:
+
+- [Tracking backends](tracking-csv.md): CSV, MLflow, and Weights & Biases.
+- [Dashboard](dashboard.md): browse records and results in a browser.
+- [MCP server](mcp.md): connect Hiraku to a coding agent.

@@ -794,8 +794,10 @@ def test_cli_serves_project(tmp_path, monkeypatch, args):
     factory.return_value.run.assert_called_once_with(transport="stdio")
 
 
-def test_workflow_mcp_uses_generic_langgraph_controls(tmp_path) -> None:
-    config = Project.create(tmp_path, example="workflows", install_skill=False)
+def test_workflow_mcp_uses_generic_langgraph_controls(
+    workflow_project: Project,
+) -> None:
+    config = workflow_project
     server = create_server(config)
 
     tools = asyncio.run(server.list_tools())
@@ -814,10 +816,6 @@ def resume_workflow(session_id, response, *, project):
     return _resume_workflow(
         session_id, response, project=project, checkpoint_id=status["checkpoint_id"]
     )
-
-
-def _project(tmp_path) -> Project:
-    return Project.create(tmp_path, example="workflows", install_skill=False)
 
 
 def _tool_names(server: Any) -> set[str]:
@@ -841,8 +839,8 @@ def test_workflow_approval_schema_omits_codex_unsupported_root_title() -> None:
     assert set(schema["properties"]) == {"decision", "feedback"}
 
 
-def test_count_steps_mcp_tools_and_graph_loop(tmp_path) -> None:
-    config = _project(tmp_path)
+def test_count_steps_mcp_tools_and_graph_loop(workflow_project: Project) -> None:
+    config = workflow_project
     server = create_server(config)
     assert {"workflow_start", "workflow_status", "workflow_resume"}.issubset(
         _tool_names(server)
@@ -897,8 +895,10 @@ def test_count_steps_mcp_tools_and_graph_loop(tmp_path) -> None:
     assert workflow_status(started["workflow_session_id"], project=config) == done
 
 
-def test_count_steps_can_finish_early_and_resume_after_server_restart(tmp_path) -> None:
-    config = _project(tmp_path)
+def test_count_steps_can_finish_early_and_resume_after_server_restart(
+    workflow_project: Project,
+) -> None:
+    config = workflow_project
     server = create_server(config)
     assert "workflow_resume" in _tool_names(server)
 
@@ -918,14 +918,16 @@ def test_count_steps_can_finish_early_and_resume_after_server_restart(tmp_path) 
     assert "Finished after 1 of 5 steps." in completed["result"]
 
 
-def test_count_steps_rejects_invalid_arguments(tmp_path) -> None:
-    config = _project(tmp_path)
+def test_count_steps_rejects_invalid_arguments(workflow_project: Project) -> None:
+    config = workflow_project
     with pytest.raises(ValidationError, match="positive integer"):
         start_workflow("count-steps", {"count": 0}, project=config)
 
 
-def test_workflow_graph_is_available_from_cli_and_mcp(tmp_path, monkeypatch) -> None:
-    config = _project(tmp_path)
+def test_workflow_graph_is_available_from_cli_and_mcp(
+    tmp_path, monkeypatch, workflow_project: Project
+) -> None:
+    config = workflow_project
     server = create_server(config)
 
     monkeypatch.chdir(tmp_path)

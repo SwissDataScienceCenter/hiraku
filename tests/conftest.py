@@ -4,6 +4,7 @@ import os
 import signal
 import socket
 import subprocess
+import shutil
 import sys
 import time
 import urllib.error
@@ -12,6 +13,8 @@ from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 import pytest
+
+from hiraku.project import Project
 
 
 @pytest.fixture(autouse=True)
@@ -100,3 +103,10 @@ def _serve_mlflow(directory: Path, database: Path):
                 else:
                     process.kill()
                 process.wait(timeout=15)
+@pytest.fixture
+def workflow_project(tmp_path: Path) -> Project:
+    """Create a project with a test-only workflow graph."""
+    project = Project.create(tmp_path, install_skill=False)
+    fixture = Path(__file__).parent / "fixtures" / "workflow_graphs"
+    shutil.copytree(fixture, project.workflows_dir, dirs_exist_ok=True)
+    return project

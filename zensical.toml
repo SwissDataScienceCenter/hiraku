@@ -17,23 +17,22 @@ nav = [
   ] },
   { "Getting started" = "getting_started.md" },
   { "User guide" = [
-      { "Overview" = "guides/index.md" },
-      { "Record code provenance" = "guides/experiment-branches.md" },
-      { "Jobs and executors" = "guides/jobs.md" },
-      { "Track and compare runs" = [
-          { "Leaderboards" = "tracking.md" },
+      { "Project" = "guides/index.md" },
+      { "Record" = "guides/experiment-branches.md" },
+      { "Job" = "guides/jobs.md" },
+      { "Leaderboard" = [
+          { "Overview" = "tracking.md" },
           { "CSV" = "guides/tracking-csv.md" },
           { "MLflow" = "guides/tracking-mlflow.md" },
           { "Weights & Biases" = "guides/tracking-wandb.md" },
           { "Dashboard" = "guides/dashboard.md" },
       ] },
       { "MCP server" = "guides/mcp.md" },
-      { "Workflows" = "guides/workflows.md" },
+      { "Workflow" = "guides/workflows.md" },
   ] },
   { "Examples" = [
       { "Overview" = "examples/index.md" },
       { "Digits with MLflow" = "examples/digits-mlflow/README.md" },
-      { "Workflows" = "examples/workflows/README.md" },
   ] },
   { "API reference" = [
       { "Overview" = "api/index.md" },
