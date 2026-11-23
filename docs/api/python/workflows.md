@@ -1,4 +1,4 @@
-# Workflows
+# Workflow
 
 See [Workflows](../../guides/workflows.md) for a graph and CLI walkthrough.
 

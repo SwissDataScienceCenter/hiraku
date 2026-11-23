@@ -1,1 +1,1 @@
-https://github.com/SwissDataScienceCenter/hiraku/blob/main/CHANGELOG.md
+--8<-- "CHANGELOG.md"

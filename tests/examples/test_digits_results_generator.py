@@ -16,7 +16,7 @@ from hiraku.tracking import Leaderboard
 @pytest.fixture
 def generator():
     path = (
-        Path(__file__).parents[2] / "src/hiraku/resources/examples/"
+        Path(__file__).parents[2] / "src/hiraku/examples/"
         "digits-mlflow/generate_results.py"
     )
     return runpy.run_path(str(path))

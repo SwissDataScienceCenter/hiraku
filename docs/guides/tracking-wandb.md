@@ -55,5 +55,5 @@ hiraku leaderboard runs --json
 The adapter queries W&B's remote API. Offline SDK runs need syncing before
 remote inspection.
 
-The `examples/iris-wandb/` directory includes a complete training script,
-README, and notebook with tags, groups, and provenance.
+The [Digits MLflow example](../examples/digits-mlflow/README.md) shows a complete
+training script and record-attributed runs with a different tracking backend.
