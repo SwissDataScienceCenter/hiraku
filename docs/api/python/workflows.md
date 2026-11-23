@@ -2,10 +2,26 @@
 
 See [Workflows](../../guides/workflows.md) for a graph and CLI walkthrough.
 
-::: hiraku.workflows.langgraph
+::: hiraku.workflows.langgraph.workflow_ids
     options:
-      members:
-        - workflow_ids
-        - start_workflow
-        - resume_workflow
-        - workflow_status
+      show_root_heading: true
+      show_root_full_path: false
+      show_signature_annotations: true
+
+::: hiraku.workflows.langgraph.start_workflow
+    options:
+      show_root_heading: true
+      show_root_full_path: false
+      show_signature_annotations: true
+
+::: hiraku.workflows.langgraph.resume_workflow
+    options:
+      show_root_heading: true
+      show_root_full_path: false
+      show_signature_annotations: true
+
+::: hiraku.workflows.langgraph.workflow_status
+    options:
+      show_root_heading: true
+      show_root_full_path: false
+      show_signature_annotations: true

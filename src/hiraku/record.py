@@ -225,13 +225,18 @@ class RecordUpdate(BaseModel):
 
 
 class Vault:
-    """A Markdown bundle that owns filesystem access and workspace operations."""
+    """Read and write Markdown records under a bundle root.
+
+    Record IDs are paths relative to ``root`` without the ``.md`` suffix.
+    Call :meth:`validate` to check relationships across the collection.
+    """
 
     def __init__(self, *, root: Path) -> None:
+        """Create a vault for the given records directory without creating it."""
         self.root = Path(root).absolute()
 
     def file_path(self, record_id: str) -> Path:
-        """Return the contained absolute filename for a concept ID."""
+        """Return the contained Markdown path for an ID without checking existence."""
         if not isinstance(record_id, str):
             raise ValidationError("Record ID must be a string")
         try:
@@ -245,7 +250,7 @@ class Vault:
         return target
 
     def load(self, record_id: str) -> Record:
-        """Read one document by its bundle-relative ID, without indexing the vault."""
+        """Load one record by ID without scanning or validating other records."""
         target = self.file_path(record_id)
         if not target.is_file():
             raise RecordNotFoundError(f"Record {record_id!r} not found")
@@ -253,12 +258,19 @@ class Vault:
         return Record.model_validate({**data, "id": record_id, "markdown": markdown})
 
     def create(self, id: str, **fields: Any) -> Record:
-        """Construct and save a document at an explicit concept ID."""
+        """Validate and save a new record at ``id``.
+
+        Refuses to replace existing files.
+        """
         record = Record(id=id, **fields)
         self.save(record)
         return record
 
     def list(self) -> builtins.list[Record]:
+        """Load records recursively in ID order; ignore ``index.md`` and ``log.md``.
+
+        Relationships between records are not checked.
+        """
         return [
             self.load(path.relative_to(self.root).with_suffix("").as_posix())
             for path in sorted(self.root.rglob("*.md"))
@@ -266,11 +278,14 @@ class Vault:
         ]
 
     def children(self, record_id: str) -> builtins.list[Record]:
-        """Return records that explicitly declare this parent ID."""
+        """Return records that declare ``record_id`` as their parent, sorted by ID."""
         return [record for record in self.list() if record.parent_id == record_id]
 
     def descendants(self, record_id: str) -> builtins.list[Record]:
-        """Traverse declared parent edges, tolerating cycles and missing nodes."""
+        """Return transitive descendants by declared parent IDs.
+
+        Tolerates cycles and missing nodes.
+        """
         records = self.list()
         seen = {record_id}
         pending = [record_id]
@@ -285,7 +300,11 @@ class Vault:
         return sorted(result, key=lambda record: record.id)
 
     def save(self, record: Record, *, overwrite: bool = False) -> Path:
-        """Validate and atomically write one record, without collection checks."""
+        """Validate and atomically write one record.
+
+        Replace existing files only with ``overwrite=True``. Relationships are
+        not checked.
+        """
         try:
             keys = (
                 record.model_fields_set
@@ -314,7 +333,10 @@ class Vault:
         record: Record,
         patch: RecordUpdate,
     ) -> Record:
-        """Apply local field changes and explicitly overwrite the document."""
+        """Apply supplied fields and save the record; ``markdown`` replaces its body.
+
+        The ID cannot be changed, and relationships to other records are not checked.
+        """
         changes = patch.model_dump(exclude_unset=True)
         markdown = changes.pop("markdown", None)
         fields = changes
@@ -329,7 +351,11 @@ class Vault:
         return updated
 
     def delete(self, record_id: str) -> None:
-        """Delete one document; dangling relationships are checked explicitly."""
+        """Delete one record and remove its empty parent directory if possible.
+
+        Other records' references are unchanged; call :meth:`validate` to find
+        dangling IDs.
+        """
         target = self.file_path(record_id)
         if not target.is_file():
             raise RecordNotFoundError(f"Record {record_id!r} not found")
@@ -341,7 +367,10 @@ class Vault:
             raise ValidationError(f"Cannot delete record at {target}: {exc}") from exc
 
     def validate(self) -> None:
-        """Explicitly check the bundle and declared relationships, allowing cycles."""
+        """Scan the collection and check that declared parent and related IDs exist.
+
+        Parent cycles are allowed.
+        """
         records = self.list()
         paths = {record.id for record in records}
         for record in records:
