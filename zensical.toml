@@ -168,6 +168,13 @@ paths = ["src"]
 docstring_style = "google"
 members_order = "alphabetical"
 show_source = false
+show_root_full_path = false
+show_object_full_path = false
+docstring_section_style = "table"
+separate_signature = true
+show_signature_annotations = true
+inherited_members = false
+merge_init_into_class = true
 filters = ["!^_"]
 
 [project.plugins.minify]
