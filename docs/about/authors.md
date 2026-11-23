@@ -2,8 +2,8 @@
 
 Developers and contributors:
 
-- Christian Donner
-- Johannes Kirschner
-- Matteo Fasulo
-- Qianqian Zou
-- Salman Mohebi
+- [Christian Donner](https://github.com/christiando)
+- [Johannes Kirschner](https://github.com/kirschnj)
+- [Matteo Fasulo](https://github.com/MatteoFasulo)
+- [Qianqian Zou](https://github.com/susiezou)
+- [Salman Mohebi](https://github.com/salmanmohebi)
