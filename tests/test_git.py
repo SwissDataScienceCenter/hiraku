@@ -84,7 +84,7 @@ def source(tmp_path: Path) -> Path:
     ("command", "project_name", "example_file"),
     [
         (["init", "minimal"], "minimal", None),
-        (["example", "create", "digits-mlflow"], "digits-mlflow", "train.py"),
+        (["example", "create", "digits"], "digits", "train.py"),
     ],
 )
 def test_project_creation_does_not_invoke_git(

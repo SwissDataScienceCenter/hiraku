@@ -55,5 +55,5 @@ hiraku leaderboard runs --json
 The adapter queries W&B's remote API. Offline SDK runs need syncing before
 remote inspection.
 
-The [Digits MLflow example](../examples/digits-mlflow/README.md) shows a complete
+The [Digits example](../examples/digits/README.md) shows a complete
 training script and record-attributed runs with a different tracking backend.
