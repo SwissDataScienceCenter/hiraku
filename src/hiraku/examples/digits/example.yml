@@ -1,2 +1,2 @@
-id: digits-mlflow
+id: digits
 description: Compare regularization strengths while logging learning curves to MLflow.

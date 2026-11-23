@@ -142,7 +142,7 @@ def generate_results(output: Path) -> None:
     with TemporaryDirectory(prefix="hiraku-digits-") as temporary:
         project = Project.create(
             Path(temporary).resolve() / "project",
-            example="digits-mlflow",
+            example="digits",
             install_skill=False,
         )
         for arguments in (

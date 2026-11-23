@@ -231,7 +231,7 @@ def test_example_list_works_outside_a_project(tmp_path: Path, monkeypatch) -> No
     result = invoke("example", "list")
 
     assert result.exit_code == 0
-    assert "digits-mlflow" in result.output
+    assert "digits" in result.output
     assert "workflows" not in result.output
     assert "heart-disease" not in result.output
     assert list(tmp_path.iterdir()) == []
@@ -243,7 +243,7 @@ def test_init_and_example_create_accept_destination(
     monkeypatch.chdir(tmp_path)
 
     plain = invoke("init", "research")
-    example = invoke("example", "create", "digits-mlflow", "demo")
+    example = invoke("example", "create", "digits", "demo")
 
     assert plain.exit_code == 0, plain.output
     assert example.exit_code == 0, example.output

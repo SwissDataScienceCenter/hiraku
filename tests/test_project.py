@@ -350,7 +350,7 @@ def test_init_leaves_inline_codex_mcp_servers_unchanged(tmp_path: Path) -> None:
 
 
 def test_base_example_has_no_results(tmp_path: Path):
-    config = Project.create(tmp_path, example="digits-mlflow", install_skill=False)
+    config = Project.create(tmp_path, example="digits", install_skill=False)
     assert (tmp_path / "train.py").is_file()
     assert not (tmp_path / "runs.csv").exists()
     assert not list(config.records_dir.rglob("*.md"))
@@ -366,7 +366,7 @@ def test_unavailable_results_leave_no_project(tmp_path: Path, example):
 def test_results_include_leaderboard_configuration(tmp_path: Path):
     config = Project.create(
         tmp_path,
-        example="digits-mlflow",
+        example="digits",
         results=True,
         install_skill=False,
     )
