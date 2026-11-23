@@ -1,6 +1,6 @@
 # Run your first experiment
 
-Evaluate a baseline twice with different seeds and look up both results under one experiment record. You’ll need [Hiraku installed](../../installation.md) and Git configured with your name and email.
+Evaluate a baseline twice with different seeds and look up both results under one experiment record. You’ll need [Hiraku installed](../../getting_started.md#install-hiraku) and Git configured with your name and email.
 
 ## 1. Create a project
 
