@@ -31,7 +31,9 @@ def invoke(runner: CliRunner, arguments: list[str]):
 
 
 @pytest.mark.integration
-def test_digits_curves_from_committed_launches(tmp_path, monkeypatch):
+def test_digits_curves_from_committed_launches(
+    tmp_path, monkeypatch, mlflow_server_factory
+):
     pytest.importorskip("mlflow")
     from mlflow.tracking import MlflowClient
 
@@ -40,7 +42,8 @@ def test_digits_curves_from_committed_launches(tmp_path, monkeypatch):
     monkeypatch.chdir(project)
     monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
     monkeypatch.delenv("MLFLOW_EXPERIMENT_NAME", raising=False)
-    uri = f"sqlite:///{project / 'mlflow.db'}"
+    uri = mlflow_server_factory(project / "mlflow.db")
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", uri)
     monkeypatch.setenv("MLFLOW_ENABLE_ASYNC_LOGGING", "false")
     git(project, "init", "-b", "main")
     git(project, "config", "user.email", "test@example.invalid")
