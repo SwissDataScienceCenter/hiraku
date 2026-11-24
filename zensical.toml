@@ -13,22 +13,24 @@ dev_addr = "localhost:8000"
 nav = [
   { "Introduction" = [
       { "Hiraku" = "index.md" },
-      { "Essential concepts" = "concepts.md" },
+      { "Concepts" = "concepts.md" },
   ] },
   { "Getting started" = "getting_started.md" },
   { "User guide" = [
-      { "Project" = "guides/index.md" },
-      { "Record" = "guides/experiment-branches.md" },
-      { "Job" = "guides/jobs.md" },
-      { "Leaderboard" = [
+      { "Project" = [
+          { "Overview" = "guides/index.md" },
+          { "MCP server" = "guides/mcp.md" },
+      ] },
+      { "Records" = "guides/experiment-branches.md" },
+      { "Jobs" = "guides/jobs.md" },
+      { "Leaderboards" = [
           { "Overview" = "tracking.md" },
           { "CSV" = "guides/tracking-csv.md" },
           { "MLflow" = "guides/tracking-mlflow.md" },
           { "Weights & Biases" = "guides/tracking-wandb.md" },
-          { "Dashboard" = "guides/dashboard.md" },
       ] },
-      { "MCP server" = "guides/mcp.md" },
-      { "Workflow" = "guides/workflows.md" },
+      { "Dashboard" = "guides/dashboard.md" },
+      { "Workflows" = "guides/workflows.md" },
   ] },
   { "Examples" = [
       { "Overview" = "examples/index.md" },

@@ -1,14 +1,14 @@
-# Essential concepts
+# Hiraku concepts
 
 | Term | What it represents |
 | --- | --- |
-| Project | A directory identified by `hiraku.yml`. By default, project data lives under `hiraku/`. |
-| Record | A Markdown document with YAML metadata. Use a task record for a research goal and an experiment record for one approach to that goal. |
-| Job | One command execution. Hiraku can run it in the foreground or submit it to an executor. |
-| Leaderboard | A named configuration that reads runs from CSV, MLflow, or Weights & Biases and optionally defines which metrics to compare and how to sort them. |
-| Workflow | A project-defined LangGraph graph that coordinates steps and can checkpoint progress between calls. |
+| [Project](guides/index.md) | A directory identified by `hiraku.yml`. By default, project data lives under `hiraku/`. |
+| [Record](guides/experiment-branches.md) | A Markdown document with YAML metadata. Use a task record for a research goal and an experiment record for one approach to that goal. |
+| [Job](guides/jobs.md) | One command execution. Hiraku can run it in the foreground or submit it to an executor. |
+| [Leaderboard](tracking.md) | A named configuration that reads runs from CSV, MLflow, or Weights & Biases and optionally defines which metrics to compare and how to sort them. |
+| [Workflow](guides/workflows.md) | A project-defined LangGraph graph that coordinates steps and can checkpoint progress between calls. |
 
-## How Hiraku fits together
+## Overview: How it fits together
 
 <figure class="architecture-preview" aria-label="Hiraku architecture">
   <section class="development">
