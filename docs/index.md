@@ -3,7 +3,7 @@
 
 ## Collaborative data science, with agents.
 
-Hiraku is built on a simple premise: **effective collaboration requires a shared structure.**
+Hiraku is built on a simple premise: **effective collaboration requires a common structure.**
 
 Designed to bring **user-driven development and scalable agentic workflows** together in a unified framework.
 
