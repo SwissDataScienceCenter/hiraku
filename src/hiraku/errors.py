@@ -29,7 +29,6 @@ class AmbiguousReferenceError(ValidationError):
     """A record reference cannot be resolved to one record."""
 
 
-
 class GitError(HirakuError):
     """A Git operation failed."""
 
