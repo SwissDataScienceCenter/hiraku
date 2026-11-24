@@ -1,35 +1,10 @@
-# Getting started
+# First experiment
 
-## Install Hiraku
-
-Use Python 3.11 or newer, Git, and `uv`. Install the CLI from the Hiraku repository and check that it is on your PATH.
-
-```bash
-uv tool install 'git+https://github.com/SwissDataScienceCenter/hiraku.git'
-hiraku --help
-```
-
-If your shell cannot find `hiraku`, run `uv tool update-shell` and open a new terminal.
-
-### Optional features
-
-The first experiment uses CSV, which is included. Add `mlflow`, `wandb`, or `dashboard` to the install requirement for the features you use.
-
-```bash
-uv tool install 'hiraku[mlflow,dashboard] @ git+https://github.com/SwissDataScienceCenter/hiraku.git'
-```
-
-Use `--force` to replace an existing tool installation if `uv` reports that it is already installed.
-
-### From a local checkout
-
-From the root of a Hiraku checkout, run `uv tool install .` for the CLI or `uv sync --all-extras` to set up the development environment. In the development environment, run the CLI with `uv run hiraku`.
-
-## Run your first experiment
+Before you begin, [install Hiraku](installation.md).
 
 Evaluate a baseline twice with different seeds and look up both results under one experiment record. Make sure Git is configured with your name and email.
 
-### 1. Initialize a project
+## 1. Initialize a project
 
 ```bash
 hiraku init my-project --git
@@ -95,7 +70,7 @@ git add evaluate.py
 git commit -m "add baseline evaluation"
 ```
 
-### 2. Record the research goal
+## 2. Record the research goal
 
 ```bash
 hiraku record create binary-classification \
@@ -106,7 +81,7 @@ hiraku record create binary-classification \
 
 This creates `hiraku/records/binary-classification.md`. Use it to keep the goal and summarize results across experiments.
 
-### 3. Describe the baseline
+## 3. Describe the baseline
 
 ```bash
 hiraku record create binary-classification/threshold-baseline \
@@ -120,7 +95,7 @@ hiraku record list
 
 The experiment has its own record. `--parent` connects it to the task, and `--commit HEAD` records the implementation commit.
 
-### 4. Run the evaluation twice
+## 4. Run the evaluation twice
 
 ```bash
 hiraku run --record binary-classification/threshold-baseline -- uv run python evaluate.py --seed 0
@@ -129,7 +104,7 @@ hiraku run --record binary-classification/threshold-baseline -- uv run python ev
 
 Everything after `--` is the command to execute. Hiraku passes the record and job IDs through environment variables. The evaluation script calculates a score and appends it to `runs.csv` along with those IDs and the seed.
 
-### 5. Review the runs and record a conclusion
+## 5. Review the runs and record a conclusion
 
 ```bash
 hiraku leaderboard runs --record binary-classification/threshold-baseline
