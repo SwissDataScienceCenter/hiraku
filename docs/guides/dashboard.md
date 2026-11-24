@@ -30,11 +30,11 @@ Run every command from inside a Hiraku project.
 hiraku dashboard --record digits
 ```
 
-The page is served on localhost and opens in your browser. A free port is
-selected automatically, starting at 2718; the terminal prints the URL.
-`--port` requests a specific port, `--no-browser` only prints the URL, and `--record`
-selects a record when the page opens. Press
-Ctrl-C to stop the server. Viewing never writes to the project.
+The page is served on localhost and opens in your browser. Hiraku selects a
+free port automatically, starting at 2718, and prints the URL in the terminal.
+Use `--port` to request a specific port, `--no-browser` to print the URL without
+opening it, and `--record` to select a record when the page opens. Press Ctrl-C
+to stop the server. Viewing never writes to the project.
 
 Add `--include-code` to send the notebook's code to the page. Open marimo's
 menu (**⋯**, top right) and choose to show the code to see each cell's source
@@ -47,12 +47,11 @@ hiraku dashboard --init
 ```
 
 Copies the bundled notebook to `hiraku/dashboard/app.py` and the Studio view,
-including its HTML, CSS, and logos, to `hiraku/dashboard/studio/`, with a
-`.gitignore` for marimo's `__marimo__/` caches and Studio's build state. From then on,
-`hiraku dashboard` serves this copy instead of the bundled notebook, so commit
-it with the project. `--init`
-refuses to overwrite an existing copy; delete `hiraku/dashboard/` to start
-over from the bundled version.
+including its HTML, CSS, and logos, to `hiraku/dashboard/studio/`. It also adds
+a `.gitignore` for marimo's `__marimo__/` caches and Studio's build state. From
+then on, `hiraku dashboard` serves this copy, so commit it with the project.
+`--init` refuses to overwrite an existing copy. Delete `hiraku/dashboard/` to
+start over from the bundled version.
 
 The notebook imports data helpers from `hiraku.dashboard.data` and reusable
 widgets and renderers from `hiraku.dashboard.components`. Components build the
@@ -88,9 +87,9 @@ named cells on the page; add a named cell there to show it on the dashboard. `--
 run `--init` first, or both at once with `hiraku dashboard --init --edit`.
 Saved changes appear the next time you run `hiraku dashboard`.
 
-The notebook editor runs arbitrary code, so, unlike the dashboard, it is protected
-by marimo's access token, which is part of the URL it prints and opens. You can
-also open the copy without Hiraku's CLI, with
+The notebook editor runs arbitrary code and is protected by marimo's access
+token, included in the URL it prints and opens. You can also open the copy
+without Hiraku's CLI:
 `marimo edit hiraku/dashboard/app.py`; it then finds its project from its own
 location.
 
@@ -319,6 +318,5 @@ source:
   experiment_name: hiraku-digits
 ```
 
-See the
-[Digits example](../examples/digits-mlflow/README.md) to inspect the runs in
+See the [Digits example](../examples/digits/README.md) to inspect the runs in
 MLflow or generate fresh results.
