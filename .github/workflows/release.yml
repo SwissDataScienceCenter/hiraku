@@ -71,12 +71,12 @@ jobs:
         with:
           enable-cache: false
       - name: Download distributions artifact
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v8.0.2
         with:
           name: dist
           path: dist/
       - name: Generate PEP 740 attestations
-        uses: astral-sh/attest-action@39b6ce43875c196a579e31635b11aa2a2036384a
+        uses: astral-sh/attest-action@v0.0.7
       - name: Publish
         run: uv publish
 
