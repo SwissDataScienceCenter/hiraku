@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
 
 from ..errors import BackendError
 from ..project import Project
-from .base import BackendOperations, MLflowBackendConfig, Run
+from .base import BackendOperations, MLflowBackendConfig, Run, _validate_mlflow_url
 
 
 class MLflowBackend(BackendOperations):
@@ -18,9 +17,8 @@ class MLflowBackend(BackendOperations):
     Args:
         project: Hiraku project.
         settings: Pre-validated MLflow settings supplied by a leaderboard.
-        tracking_uri: Optional MLflow tracking URI.
+        tracking_uri: HTTP(S) server URL; defaults to MLFLOW_TRACKING_URI.
         experiment_name: Optional MLflow experiment name.
-        database: Optional project-relative SQLite database path.
         ui_url: Optional base URL of the MLflow web UI used for run links.
     """
 
@@ -31,7 +29,6 @@ class MLflowBackend(BackendOperations):
         settings: MLflowBackendConfig | None = None,
         tracking_uri: str | None = None,
         experiment_name: str | None = None,
-        database: Path | None = None,
         ui_url: str | None = None,
     ) -> None:
         """Create an MLflow adapter from validated settings.
@@ -39,41 +36,36 @@ class MLflowBackend(BackendOperations):
         Args:
             project: Hiraku project.
             settings: Pre-validated MLflow settings supplied by a leaderboard.
-            tracking_uri: Optional remote tracking URI.
+            tracking_uri: HTTP(S) server URL; defaults to MLFLOW_TRACKING_URI.
             experiment_name: Experiment name; otherwise use MLflow environment
                 variables, then the project directory name.
-            database: Optional local database path.
             ui_url: Optional web UI base URL. Defaults to an HTTP(S)
                 ``tracking_uri``, which MLflow servers also serve the UI from.
 
         Raises:
-            hiraku.errors.BackendError: If URI and database settings conflict
-                or ``ui_url`` is not a plain HTTP(S) URL.
+            hiraku.errors.BackendError: If the tracking server URL is missing
+                or a connection setting is invalid.
         """
         if settings is None:
             settings = MLflowBackendConfig(
                 tracking_uri=tracking_uri,
                 experiment_name=experiment_name,
-                database=database,
                 ui_url=ui_url,
             )
         elif any(
-            value is not None
-            for value in (tracking_uri, experiment_name, database, ui_url)
+            value is not None for value in (tracking_uri, experiment_name, ui_url)
         ):
             raise BackendError("Pass MLflow backend settings or options, not both")
         if not isinstance(settings, MLflowBackendConfig):
             raise BackendError("MLflow backend settings must be MLflowBackendConfig")
         self.project = project
-        tracking_uri = settings.tracking_uri
-        if tracking_uri is None and settings.database is None:
-            tracking_uri = os.environ.get("MLFLOW_TRACKING_URI") or None
-        self.tracking_uri = tracking_uri or _mlflow_uri(project, settings.database)
-        self._database = (
-            (project.root / (settings.database or "mlflow.db")).resolve()
-            if tracking_uri is None
-            else None
-        )
+        tracking_uri = settings.tracking_uri or os.environ.get("MLFLOW_TRACKING_URI")
+        if not tracking_uri:
+            raise BackendError(
+                "mlflow backend requires tracking_uri or MLFLOW_TRACKING_URI "
+                "pointing to an HTTP(S) tracking server"
+            )
+        self.tracking_uri = _validate_mlflow_url(tracking_uri)
         self._experiment_id = (
             os.environ.get("MLFLOW_EXPERIMENT_ID") or None
             if settings.experiment_name is None
@@ -85,15 +77,14 @@ class MLflowBackend(BackendOperations):
             or (None if self._experiment_id else project.root.name)
         )
         # Credential-bearing tracking URIs stay usable but never become links.
+        parsed = urlsplit(self.tracking_uri)
         self.ui_url = settings.ui_url or (
-            self.tracking_uri if _is_web_base(self.tracking_uri) else None
+            self.tracking_uri
+            if parsed.username is None and parsed.password is None
+            else None
         )
 
     def _read_source_runs(self) -> list[Run]:
-        if self._database is not None and not self._database.is_file():
-            raise BackendError(
-                f"mlflow backend database is not an existing file: {self._database}"
-            )
         try:
             from mlflow.tracking import MlflowClient
         except ImportError as exc:
@@ -198,34 +189,3 @@ def _duration(start_time: int | None, end_time: int | None) -> float | None:
     if start_time is None or end_time is None:
         return None
     return (end_time - start_time) / 1000
-
-
-def _is_web_base(value: str) -> bool:
-    try:
-        parsed = urlsplit(value)
-    except ValueError:
-        return False
-    return (
-        parsed.scheme in {"http", "https"}
-        and bool(parsed.hostname)
-        and parsed.username is None
-        and parsed.password is None
-        and not parsed.query
-        and not parsed.fragment
-    )
-
-
-def _mlflow_uri(project: Project, database: Path | None = None) -> str:
-    relative = Path(database or "mlflow.db")
-    if relative.is_absolute() or ".." in relative.parts:
-        raise BackendError(
-            "mlflow backend database must be a safe project-relative path"
-        )
-    resolved = (project.root / relative).resolve(strict=False)
-    try:
-        resolved.relative_to(project.root.resolve())
-    except ValueError as exc:
-        raise BackendError(
-            "mlflow backend database resolves outside project root"
-        ) from exc
-    return f"sqlite:///{resolved}"

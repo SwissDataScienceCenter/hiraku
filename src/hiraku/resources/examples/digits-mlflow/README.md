@@ -8,7 +8,21 @@ Initialize with `--with-results` to include three research records and six
 measured MLflow runs. The bundled SQLite database contains metrics and their
 epoch histories; it does not include model or plot artifacts. Artifact URI
 fields are relative so the snapshot can move between project directories.
-Use Hiraku's `mlflow` extra to query these results.
+Start a server in the example environment to query these results with Hiraku's
+`mlflow` client extra:
+
+```bash
+uv sync
+uv run mlflow server --backend-store-uri sqlite:///mlflow.db \
+  --host 127.0.0.1 --port 5000
+```
+
+In another terminal in the project directory:
+
+```bash
+export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
+hiraku leaderboard runs
+```
 
 Generate fresh runs immediately with:
 

@@ -369,7 +369,6 @@ def test_results_include_leaderboard_configuration(tmp_path: Path):
         mode="json", exclude_none=True
     ) == {
         "type": "mlflow",
-        "database": "mlflow.db",
         "experiment_name": "hiraku-digits",
     }
     assert config.vault.load("digit-classification").id == "digit-classification"

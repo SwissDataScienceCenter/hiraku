@@ -38,7 +38,10 @@ def test_digits_refuses_existing_output_and_partial_export(
     assert not output.exists()
 
 
-def test_bundled_digits_database_is_portable(generator, tmp_path):
+@pytest.mark.integration
+def test_bundled_digits_database_is_portable(
+    generator, tmp_path, monkeypatch, mlflow_server_factory
+):
     Project.create(tmp_path, example="digits-mlflow", results=True, install_skill=False)
     project = Project.discover(tmp_path)
     assert {record.id: record.title for record in project.vault.list()} == {
@@ -65,6 +68,9 @@ def test_bundled_digits_database_is_portable(generator, tmp_path):
 
     from hiraku.dashboard.data import run_rows
 
+    monkeypatch.setenv(
+        "MLFLOW_TRACKING_URI", mlflow_server_factory(tmp_path / "mlflow.db")
+    )
     leaderboard = Leaderboard.load(project)
     rows = run_rows(
         leaderboard.list_runs(project),
@@ -78,7 +84,10 @@ def test_bundled_digits_database_is_portable(generator, tmp_path):
     assert {row["source"] for row in rows} == {"mlflow"}
 
 
-def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
+@pytest.mark.integration
+def test_generate_relocate_query_and_append(
+    generator, tmp_path, monkeypatch, mlflow_server_factory
+):
     pytest.importorskip("mlflow")
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "https://invalid.example")
     monkeypatch.setenv("MLFLOW_EXPERIMENT_NAME", "unrelated")
@@ -109,6 +118,9 @@ def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
     config = Project.discover(config.root)
     weak = config.vault.load("digit-classification/weak-l2")
     leaderboard = Leaderboard.load(config)
+    monkeypatch.setenv(
+        "MLFLOW_TRACKING_URI", mlflow_server_factory(config.root / "mlflow.db")
+    )
     runs = leaderboard.list_runs(config)
     ids_by_name = {
         record.id.rsplit("/", 1)[-1]: record.id for record in config.vault.list()

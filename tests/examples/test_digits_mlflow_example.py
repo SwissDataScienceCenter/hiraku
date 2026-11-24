@@ -31,16 +31,18 @@ def invoke(runner: CliRunner, arguments: list[str]):
 
 
 @pytest.mark.integration
-def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
+def test_digits_mlflow_curves_from_committed_launches(
+    tmp_path, monkeypatch, mlflow_server
+):
     pytest.importorskip("mlflow")
     from mlflow.tracking import MlflowClient
 
     project = tmp_path / "digits-mlflow"
     project.mkdir()
     monkeypatch.chdir(project)
-    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", mlflow_server)
     monkeypatch.delenv("MLFLOW_EXPERIMENT_NAME", raising=False)
-    uri = f"sqlite:///{project / 'mlflow.db'}"
+    uri = mlflow_server
     monkeypatch.setenv("MLFLOW_ENABLE_ASYNC_LOGGING", "false")
     git(project, "init", "-b", "main")
     git(project, "config", "user.email", "test@example.invalid")
@@ -123,7 +125,7 @@ def test_digits_mlflow_curves_from_committed_launches(tmp_path, monkeypatch):
         ).output
     )
     assert len(rows) == 2
-    assert (project / "mlflow.db").is_file()
+    assert not (project / "mlflow.db").exists()
     assert {row["record_id"] for row in rows} == {
         ids_by_name["weak-l2"],
         ids_by_name["strong-l2"],

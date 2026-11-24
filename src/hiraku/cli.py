@@ -907,10 +907,7 @@ def leaderboard_show(
     type=click.Path(),
     help="Required for CSV. Absolute or project-relative path; supports ${NAME}.",
 )
-@click.option("--tracking-uri", help="MLflow tracking server URI.")
-@click.option(
-    "--database", type=click.Path(path_type=Path), help="Local MLflow database."
-)
+@click.option("--tracking-uri", help="MLflow HTTP(S) tracking server URL.")
 @click.option("--experiment-name", help="MLflow experiment name.")
 @click.option("--entity", help="W&B account or team.")
 @click.option("--project", help="W&B project name.")
