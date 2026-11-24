@@ -28,7 +28,7 @@ from pydantic_core import to_jsonable_python
 from hiraku.record import Record, RecordUpdate
 
 from .errors import ExecutionError, HirakuError, ValidationError
-from .job import JobRequest, Submission, get_executor, observe_submission, prepare_job
+from .job import JobRequest, Submission, observe_submission, prepare_job, submit_job
 from .project import Project
 from .tracking import Leaderboard
 from .workflows.langgraph import (
@@ -244,15 +244,14 @@ def register_tools(server: MCPServer, project: Project) -> None:
             else None,
         )
         try:
-            get_executor(
-                request.executor,
-                work_directory=project.psij_dir,
+            entry = submit_job(
+                job,
+                project=project,
+                executor=request.executor,
                 url=request.executor_url,
-            ).submit(job)
+            )
         except (InvalidJobException, SubmitException, ValueError, OSError) as exc:
             raise ExecutionError(str(exc)) from exc
-        entry = Submission.from_psi_job(job)
-        entry.save(project)
         return {
             "id": entry.id,
             "record_id": entry.record_id,
@@ -271,8 +270,7 @@ def register_tools(server: MCPServer, project: Project) -> None:
     ) -> dict[str, Any]:
         """Sync and show status by full ID or unique nonempty prefix."""
         entry = Submission.from_prefix(project, job_id)
-        entry.sync()
-        entry.save(project)
+        entry.refresh(project)
         return entry.model_dump(
             mode="json",
             include={
