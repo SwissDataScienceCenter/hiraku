@@ -4,6 +4,7 @@ Use Python 3.11 or newer and [uv](https://docs.astral.sh/uv/getting-started/inst
 
 ```bash
 uv tool install hiraku
+hiraku --version
 hiraku --help
 ```
 

@@ -8,8 +8,10 @@ import runpy
 import shlex
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
+from importlib import metadata
 from importlib.resources import as_file
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -17,6 +19,7 @@ from typing import Any
 
 import click
 import yaml
+from packaging.requirements import Requirement
 from psij import (
     InvalidJobException,
     JobAttributes,
@@ -185,10 +188,53 @@ def _edit_recoverable(path: Path, loader: Callable[[], Any], label: str) -> Any:
     return loader()
 
 
+def _extra_status(extra: str, requirements: Sequence[str]) -> str:
+    missing = False
+    incompatible = False
+    for raw in requirements:
+        requirement = Requirement(raw)
+        if requirement.marker is None or not requirement.marker.evaluate(
+            {"extra": extra}
+        ):
+            continue
+        # Ignore base requirements that also apply without selecting an extra.
+        if requirement.marker.evaluate({"extra": ""}):
+            continue
+        try:
+            version = metadata.version(requirement.name)
+        except metadata.PackageNotFoundError:
+            missing = True
+        else:
+            if not requirement.specifier.contains(version, prereleases=True):
+                incompatible = True
+    return "missing" if missing else "incompatible" if incompatible else "available"
+
+
+def _show_version(ctx: click.Context, param: click.Parameter, value: bool) -> None:
+    if not value or ctx.resilient_parsing:
+        return
+    distribution = metadata.distribution("hiraku")
+    click.echo(f"hiraku {distribution.version}")
+    click.echo(f"Executable: {Path(sys.argv[0]).absolute()}")
+    click.echo(f"Python: {sys.executable} ({sys.version.split()[0]})")
+    click.echo("Extras:")
+    for extra in sorted(distribution.metadata.get_all("Provides-Extra") or []):
+        click.echo(f"  {extra}: {_extra_status(extra, distribution.requires or [])}")
+    ctx.exit()
+
+
 @click.group(name="hiraku", cls=HirakuGroup)
+@click.option(
+    "--version",
+    is_flag=True,
+    is_eager=True,
+    expose_value=False,
+    callback=_show_version,
+    help="Show version and installation details.",
+)
 @click.pass_context
 def main(ctx: click.Context) -> None:
-    """Manage research records, launches, and tracked runs."""
+    """Manage research records, leaderboards, job submissions, and workflows."""
     ctx.ensure_object(CLIContext)
 
 

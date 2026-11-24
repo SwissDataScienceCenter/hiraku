@@ -16,6 +16,61 @@ def invoke(*args: str):
     return CliRunner().invoke(main, args, catch_exceptions=False)
 
 
+def test_version_outside_project(tmp_path, monkeypatch) -> None:
+    from email.message import Message
+    from types import SimpleNamespace
+
+    from hiraku import cli
+
+    info = Message()
+    info["Provides-Extra"] = "wandb"
+    info["Provides-Extra"] = "dashboard"
+    distribution = SimpleNamespace(version="1.2.3", metadata=info, requires=[])
+    monkeypatch.setattr(cli.metadata, "distribution", lambda name: distribution)
+    monkeypatch.setattr(sys, "argv", ["/env/bin/hiraku"])
+    monkeypatch.setattr(sys, "executable", "/env/bin/python")
+    monkeypatch.chdir(tmp_path)
+
+    result = invoke("--version")
+
+    assert result.exit_code == 0
+    assert result.output == (
+        "hiraku 1.2.3\n"
+        "Executable: /env/bin/hiraku\n"
+        f"Python: /env/bin/python ({sys.version.split()[0]})\n"
+        "Extras:\n"
+        "  dashboard: available\n"
+        "  wandb: available\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("installed", "expected"),
+    [
+        ({"example": "2.0"}, "available"),
+        ({}, "missing"),
+        ({"example": "1.0"}, "incompatible"),
+    ],
+)
+def test_extra_dependency_status(monkeypatch, installed, expected) -> None:
+    from hiraku import cli
+
+    def version(name):
+        if name not in installed:
+            raise cli.metadata.PackageNotFoundError(name)
+        return installed[name]
+
+    monkeypatch.setattr(cli.metadata, "version", version)
+    requirements = [
+        'example>=2; extra == "dashboard"',
+        'other; extra == "wandb"',
+        'platform-only; extra == "dashboard" and python_version < "3.0"',
+        "base>=1",
+        'conditional-base; python_version >= "3.0"',
+    ]
+    assert cli._extra_status("dashboard", requirements) == expected
+
+
 def test_root_help_lists_primary_commands() -> None:
     result = invoke("--help")
 
