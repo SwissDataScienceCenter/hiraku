@@ -12,11 +12,12 @@ by their known maximum of 16.
 
 ## Setup
 
-Install Hiraku with its MLflow extra in your CLI environment first (from the
-Hiraku checkout: `uv tool install --force '.[mlflow]'`). Then create and
-initialize a new project:
+Install Hiraku with its MLflow extra in your CLI environment first. See
+[installation options](https://swissdatasciencecenter.github.io/hiraku/installation/)
+for prerequisites and other environments. Then create a new project:
 
 ```bash
+uv tool install --force 'hiraku[mlflow]'
 hiraku example create digits --git
 cd digits
 uv sync
@@ -28,8 +29,10 @@ Alternatively, to browse the example without training, install the `dashboard`
 extra too and initialize a separate project with the six bundled runs:
 
 ```bash
+uv tool install --force 'hiraku[mlflow,dashboard]'
 hiraku example create digits digits-dashboard --with-results
 cd digits-dashboard
+uv sync
 ```
 
 Hiraku reads the prepared `mlflow.db` through an MLflow tracking server. Start

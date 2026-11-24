@@ -20,22 +20,16 @@ It's a hint towards a possible integration with [renkulab.io](https://renkulab.i
 
 ## How to Install
 
-First clone the repository:
+Use Python 3.11 or newer and [uv](https://docs.astral.sh/uv/getting-started/installation/).
+Install Hiraku as a command-line tool:
 
 ```bash
-git clone https://github.com/SwissDataScienceCenter/hiraku.git
-cd hiraku
+uv tool install hiraku
+hiraku --help
 ```
 
-Install Hiraku from the checkout as a command-line tool:
-
-```bash
-uv tool install --force .
-```
-
-> [!TIP]
-> Omit `--force` on a first install. Use it when reinstalling from this
-> checkout after changing code without changing the package version.
+See [installation options](docs/installation.md) for project environments,
+source checkouts, and shell setup.
 
 <details>
 <summary>Install optional tracking extras</summary>
@@ -44,12 +38,13 @@ Examples that use MLflow or W&amp;B need the matching optional extra in the
 tool environment:
 
 ```bash
-uv tool install --force '.[mlflow,wandb]'
+uv tool install --force 'hiraku[mlflow,wandb]'
 ```
 
 See the [MLflow](docs/guides/tracking-mlflow.md) and
 [W&amp;B](docs/guides/tracking-wandb.md) guides. If Hiraku is installed in a
-project's environment, install the tracking SDK in that project instead.
+project's environment, install the tracking SDK in that environment too.
+When replacing a tool installation, include all extras you want to keep.
 
 </details>
 
@@ -131,20 +126,30 @@ After `--init`, `hiraku dashboard` serves your copy. In the editor, the
 `runs_df` and `records_df` tables hold every run and record with its place in
 the tree, ready for your own plots or marimo's AI assistant.
 
-Try every dashboard mode without training by loading the bundled Digits runs:
+Try every dashboard mode without training by loading the bundled Digits runs.
+Start the MLflow server in one terminal:
 
 ```bash
+uv tool install --force 'hiraku[mlflow,dashboard]'
 hiraku example create digits digits-dashboard --with-results
 cd digits-dashboard
-hiraku dashboard --record digits                 # read-only
-hiraku dashboard --include-code --record digits  # read-only, with source
-hiraku dashboard --init --edit --record digits   # copy and edit
+uv sync
+uv run mlflow server --backend-store-uri sqlite:///mlflow.db \
+  --host 127.0.0.1 --port 5000
+```
+
+In another terminal in `digits-dashboard`, run:
+
+```bash
+export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
+hiraku dashboard --record digit-classification
+hiraku dashboard --include-code --record digit-classification
+hiraku dashboard --init --edit --record digit-classification
 ```
 
 Run the dashboard commands one at a time and press Ctrl-C before changing mode.
-The bundled database works without an MLflow server. To show **Open in
-mlflow** links, start the MLflow UI and configure its `ui_url`; the
-[dashboard guide](docs/guides/dashboard.md) has the complete commands.
+Keep the MLflow server running while browsing results. It also provides the
+**Open in mlflow** links; see the [dashboard guide](docs/guides/dashboard.md).
 
 ## Documentation
 
