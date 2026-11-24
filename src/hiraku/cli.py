@@ -36,7 +36,7 @@ from .errors import (
 )
 from .git import GitRepository, init_code_repository, require_git
 from .io import dump_yaml
-from .job import Submission, get_executor, observe_submission, prepare_job, run_local
+from .job import Submission, observe_submission, prepare_job, run_local, submit_job
 from .project import Project
 from .record import Record, RecordUpdate, validate_identifier
 from .tracking import Leaderboard, Run
@@ -715,13 +715,7 @@ def job_submit(
         if custom_attributes
         else None,
     )
-    get_executor(
-        executor,
-        work_directory=state.project.psij_dir,
-        url=executor_url,
-    ).submit(job)
-    entry = Submission.from_psi_job(job)
-    entry.save(state.project)
+    entry = submit_job(job, project=state.project, executor=executor, url=executor_url)
     _emit_json(entry.model_dump(mode="json"))
 
 
@@ -768,8 +762,7 @@ def run(
 def job_status(state: CLIContext, job_id: str, json_output: bool) -> None:
     """Sync and show status by full ID or unique nonempty prefix."""
     entry = Submission.from_prefix(state.project, job_id)
-    entry.sync()
-    entry.save(state.project)
+    entry.refresh(state.project)
     _show_submission(entry.model_dump(mode="json"), json_output)
 
 

@@ -10,7 +10,7 @@ import sys
 import time
 import warnings
 from collections.abc import Mapping, Sequence
-from contextlib import ExitStack, suppress
+from contextlib import ExitStack, nullcontext, suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -19,6 +19,8 @@ from uuid import UUID
 
 import psij
 import psutil
+from filelock import FileLock
+from psij.executors.batch.slurm import SlurmExecutorConfig
 from psij.serialize import JSONSerializer
 from pydantic import (
     AwareDatetime,
@@ -87,11 +89,12 @@ def get_executor(
     name: str, *, work_directory: Path, url: str | None = None
 ) -> psij.JobExecutor:
     """Create an executor with an explicit auxiliary storage directory."""
-    return psij.JobExecutor.get_instance(
-        name,
-        url=url,
-        config=psij.JobExecutorConfig(work_directory=work_directory),
+    config = (
+        SlurmExecutorConfig(work_directory=work_directory, keep_files=True)
+        if name.lower() == "slurm"
+        else psij.JobExecutorConfig(work_directory=work_directory)
     )
+    return psij.JobExecutor.get_instance(name, url=url, config=config)
 
 
 def validate_command(value: Any) -> list[str] | None:
@@ -159,6 +162,22 @@ def prepare_job(
     return job
 
 
+def submit_job(
+    job: psij.Job, *, project: Project, executor: str, url: str | None = None
+) -> Submission:
+    """Submit a prepared job in the background and save its history."""
+    backend = get_executor(executor, work_directory=project.psij_dir, url=url)
+    if executor.lower() == "slurm" and job.spec is not None:
+        work = (backend.config.work_directory / backend.name).absolute()
+        job.spec.stdout_path = job.spec.stdout_path or work / f"{job.id}.stdout"
+        job.spec.stderr_path = job.spec.stderr_path or work / f"{job.id}.stderr"
+        job.spec.launcher = job.spec.launcher or "quoted-single"
+    backend.submit(job)
+    entry = Submission.from_psi_job(job)
+    entry.save(project)
+    return entry
+
+
 def run_local(job: psij.Job, *, project: Project) -> psij.JobStatus:
     """Submit locally, stream output, and return the native final status.
 
@@ -214,6 +233,10 @@ class Status(BaseModel):
     exit_code: int | None
     message: str | None
     metadata: dict[str, Any] | None
+
+    @property
+    def final(self) -> bool:
+        return psij.JobState[self.state].final
 
     @classmethod
     def from_psi_status(cls, status: psij.JobStatus) -> Status:
@@ -316,8 +339,11 @@ class Submission(BaseModel):
             raise ObservationError(f"Cannot attach job {self.id}: {exc}") from exc
 
     def sync(self, job: psij.Job | None = None) -> None:
-        """Attach if needed and copy current status without waiting or saving."""
+        """Copy native status, allowing a fresh Slurm attachment time to poll."""
+        attached_here = job is None
         if job is None:
+            if self.status.final:
+                return
             job = self.get_psi_job()
         if job.executor is None or (
             job.executor.name,
@@ -328,7 +354,19 @@ class Submission(BaseModel):
                 "Job executor target and native ID must match submission"
             )
         try:
-            status = Status.from_psi_status(job.status)
+            native_status = job.status
+            if (
+                attached_here
+                and self.executor.lower() == "slurm"
+                and native_status.state == psij.JobState.NEW
+            ):
+                job.wait(
+                    timeout=timedelta(seconds=8), target_states=psij.JobState.QUEUED
+                )
+                native_status = job.status
+            if native_status.state == psij.JobState.NEW:
+                return
+            status = Status.from_psi_status(native_status)
             observed_at = datetime.now(UTC)
         except (AttributeError, TypeError, ValueError) as exc:
             raise ObservationError(
@@ -337,15 +375,41 @@ class Submission(BaseModel):
         self.status = status
         self.observed_at = observed_at
 
+    def refresh(self, project: Project) -> None:
+        """Update and save the snapshot of a submission that is still in progress."""
+        if not self.status.final:
+            self.sync()
+            self.save(project)
+
     def save(self, project: Project) -> None:
         """Atomically save submission metadata."""
         try:
             entry = type(self).model_validate(self.model_dump())
-            atomic_write(
-                project.jobs_dir / f"{entry.id}.json",
-                entry.model_dump_json(indent=2),
-                mode=0o600,
+            path = project.jobs_dir / f"{entry.id}.json"
+            is_slurm = entry.executor.lower() == "slurm"
+            lock = (
+                FileLock(path.with_suffix(".lock"), timeout=10)
+                if is_slurm
+                else nullcontext()
             )
+            with lock:
+                if is_slurm:
+                    # A concurrent observer may have saved a newer or final result.
+                    with suppress(FileNotFoundError):
+                        saved = type(self).model_validate_json(
+                            path.read_text(encoding="utf-8")
+                        )
+                        if saved.id == entry.id and (
+                            saved.status.final
+                            or (
+                                not entry.status.final
+                                and saved.observed_at >= entry.observed_at
+                            )
+                        ):
+                            self.status = saved.status
+                            self.observed_at = saved.observed_at
+                            return
+                atomic_write(path, entry.model_dump_json(indent=2), mode=0o600)
         except (OSError, TypeError, ValueError) as exc:
             raise ExecutionError(
                 f"Cannot save history for job {self.id} "
@@ -384,6 +448,8 @@ class Submission(BaseModel):
 
     def cancel(self, project: Project) -> None:
         """Cancel the native job and persist its resulting status."""
+        if self.status.final:
+            return
         job = self.get_psi_job()
         try:
             job.cancel()
@@ -469,16 +535,13 @@ def observe_submission(entry: Submission, project: Project) -> dict[str, Any]:
     Observation failures return UNKNOWN and an error without changing history.
     Callers own warning reporting; storage failures propagate.
     """
-    result = entry.model_dump(mode="json")
-    if entry.status.state in {"COMPLETED", "FAILED", "CANCELED"}:
-        return result
     try:
-        entry.sync()
+        entry.refresh(project)
     except ObservationError as exc:
+        result = entry.model_dump(mode="json")
         result["status"]["state"] = "UNKNOWN"
         result["observation_error"] = str(exc)
         return result
-    entry.save(project)
     return entry.model_dump(mode="json")
 
 
