@@ -242,11 +242,8 @@ def test_init_from_packaged_example_copies_only_src(
     (example / "README.md").write_text("do not copy")
     (example / "example.yml").write_text("description: Demo\n")
     (example / "src/copied.txt").write_text("copied")
-    monkeypatch.setattr(
-        hiraku.project,
-        "files",
-        lambda package: examples if package == "hiraku.examples" else resources,
-    )
+    monkeypatch.setattr(hiraku.project, "files", lambda package: resources)
+    monkeypatch.setattr(hiraku.project, "_examples_root", lambda: examples)
 
     root = tmp_path / "project"
     Project.create(root, example="demo", install_skill=False)
@@ -391,11 +388,8 @@ def test_results_override_base_files(tmp_path: Path, monkeypatch):
     (base / "hiraku.yml").write_text("hiraku_dir: base-data\n")
     (results / "train.py").write_text("results")
     (results / "hiraku.yml").write_text("hiraku_dir: results-data\n")
-    monkeypatch.setattr(
-        hiraku.project,
-        "files",
-        lambda name: examples if name == "hiraku.examples" else resources,
-    )
+    monkeypatch.setattr(hiraku.project, "files", lambda package: resources)
+    monkeypatch.setattr(hiraku.project, "_examples_root", lambda: examples)
     target = tmp_path / "target"
     config = Project.create(
         target, example="layered", results=True, install_skill=False

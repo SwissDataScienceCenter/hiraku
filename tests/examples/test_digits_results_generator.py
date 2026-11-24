@@ -15,10 +15,7 @@ from hiraku.tracking import Leaderboard
 
 @pytest.fixture
 def generator():
-    path = (
-        Path(__file__).parents[2] / "src/hiraku/examples/"
-        "digits-mlflow/generate_results.py"
-    )
+    path = Path(__file__).parents[2] / "examples/digits/generate_results.py"
     return runpy.run_path(str(path))
 
 
@@ -38,11 +35,8 @@ def test_digits_refuses_existing_output_and_partial_export(
     assert not output.exists()
 
 
-@pytest.mark.integration
-def test_bundled_digits_database_is_portable(
-    generator, tmp_path, monkeypatch, mlflow_server_factory
-):
-    Project.create(tmp_path, example="digits-mlflow", results=True, install_skill=False)
+def test_bundled_digits_database_is_portable(generator, tmp_path):
+    Project.create(tmp_path, example="digits", results=True, install_skill=False)
     project = Project.discover(tmp_path)
     assert {record.id: record.title for record in project.vault.list()} == {
         "digit-classification": "Digit classification",
@@ -68,9 +62,6 @@ def test_bundled_digits_database_is_portable(
 
     from hiraku.dashboard.data import run_rows
 
-    monkeypatch.setenv(
-        "MLFLOW_TRACKING_URI", mlflow_server_factory(tmp_path / "mlflow.db")
-    )
     leaderboard = Leaderboard.load(project)
     rows = run_rows(
         leaderboard.list_runs(project),
@@ -84,10 +75,7 @@ def test_bundled_digits_database_is_portable(
     assert {row["source"] for row in rows} == {"mlflow"}
 
 
-@pytest.mark.integration
-def test_generate_relocate_query_and_append(
-    generator, tmp_path, monkeypatch, mlflow_server_factory
-):
+def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
     pytest.importorskip("mlflow")
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "https://invalid.example")
     monkeypatch.setenv("MLFLOW_EXPERIMENT_NAME", "unrelated")
@@ -109,18 +97,13 @@ def test_generate_relocate_query_and_append(
             for record in Project.discover(output).vault.list()
         ),
     }
-    config = Project.create(
-        tmp_path / "moved", example="digits-mlflow", install_skill=False
-    )
+    config = Project.create(tmp_path / "moved", example="digits", install_skill=False)
     import shutil
 
     shutil.copytree(output, config.root, dirs_exist_ok=True)
     config = Project.discover(config.root)
     weak = config.vault.load("digit-classification/weak-l2")
     leaderboard = Leaderboard.load(config)
-    monkeypatch.setenv(
-        "MLFLOW_TRACKING_URI", mlflow_server_factory(config.root / "mlflow.db")
-    )
     runs = leaderboard.list_runs(config)
     ids_by_name = {
         record.id.rsplit("/", 1)[-1]: record.id for record in config.vault.list()
