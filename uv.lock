@@ -1221,7 +1221,7 @@ dashboard = [
     { name = "pyarrow" },
 ]
 mlflow = [
-    { name = "mlflow" },
+    { name = "mlflow-skinny" },
 ]
 wandb = [
     { name = "wandb" },
@@ -1232,6 +1232,7 @@ dev = [
     { name = "bump-my-version" },
     { name = "mkdocs-click" },
     { name = "mkdocstrings", extra = ["python"] },
+    { name = "mlflow" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "pre-commit" },
@@ -1252,6 +1253,7 @@ lint = [
     { name = "ruff" },
 ]
 test = [
+    { name = "mlflow" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "pytest" },
@@ -1271,7 +1273,7 @@ requires-dist = [
     { name = "marimo-studio", marker = "extra == 'dashboard'", specifier = "==0.3.0" },
     { name = "markdown-it-py", specifier = ">=4.0" },
     { name = "mcp", specifier = ">=2.3.0" },
-    { name = "mlflow", marker = "extra == 'mlflow'", specifier = "==3.16.0" },
+    { name = "mlflow-skinny", marker = "extra == 'mlflow'", specifier = "==3.16.0" },
     { name = "pandas", marker = "extra == 'dashboard'", specifier = ">=2.3.3" },
     { name = "psij-python", specifier = ">=0.9.11" },
     { name = "psutil", specifier = ">=7" },
@@ -1289,6 +1291,7 @@ dev = [
     { name = "bump-my-version", specifier = ">=1.5.1" },
     { name = "mkdocs-click", specifier = ">=0.9.0" },
     { name = "mkdocstrings", extras = ["python"], specifier = ">=1.0.6" },
+    { name = "mlflow", specifier = "==3.16.0" },
     { name = "numpy", specifier = "==2.4.6" },
     { name = "pandas", specifier = "==2.3.3" },
     { name = "pre-commit", specifier = ">=4.0" },
@@ -1307,6 +1310,7 @@ docs = [
 ]
 lint = [{ name = "ruff", specifier = ">=0.8" }]
 test = [
+    { name = "mlflow", specifier = "==3.16.0" },
     { name = "numpy", specifier = "==2.4.6" },
     { name = "pandas", specifier = "==2.3.3" },
     { name = "pytest", specifier = ">=8" },

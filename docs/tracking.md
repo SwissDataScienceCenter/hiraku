@@ -5,7 +5,8 @@ metrics. Definitions live in `hiraku/leaderboards/<name>.yml`; relative source
 paths resolve from the project root.
 
 ```bash
-hiraku leaderboard create validation --source mlflow --database mlflow.db \
+hiraku leaderboard create validation --source mlflow \
+  --tracking-uri http://127.0.0.1:5000 \
   --experiment-name classification
 hiraku leaderboard edit validation
 ```
@@ -15,7 +16,7 @@ Edit the YAML to select metric order and optional optimization directions:
 ```yaml
 source:
   type: mlflow
-  database: mlflow.db
+  tracking_uri: http://127.0.0.1:5000
   experiment_name: classification
 metrics:
   - name: accuracy

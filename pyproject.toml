@@ -34,7 +34,7 @@ dependencies = [
 hiraku = "hiraku.cli:main"
 
 [project.optional-dependencies]
-mlflow = ["mlflow==3.16.0"]
+mlflow = ["mlflow-skinny==3.16.0"]
 wandb = ["wandb>=0.29.0"]
 dashboard = [
     "altair>=6.3.0",
@@ -46,6 +46,7 @@ dashboard = [
 
 [dependency-groups]
 test = [
+  "mlflow==3.16.0",
   "tqdm>=4.70.0",
   "pytest>=8",
   "pytest-xdist>=3.8.0",

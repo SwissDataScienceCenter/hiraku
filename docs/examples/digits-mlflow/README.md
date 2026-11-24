@@ -30,21 +30,35 @@ extra too and initialize a separate project with the six bundled runs:
 ```bash
 hiraku example create digits-mlflow digits-dashboard --with-results
 cd digits-dashboard
+uv sync
+uv run mlflow server --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port 5000
+```
+
+Keep the server running. In another terminal in the project directory:
+
+```bash
+export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
 hiraku dashboard --record digit-classification
 ```
 
-The dashboard reads the prepared `mlflow.db` directly, so an MLflow server is
-not required. Use `hiraku dashboard --init --edit --record digit-classification` to copy the
-notebook into the project and edit it. Run details only show an MLflow link
-after you start the MLflow UI. See the dashboard guide for adding a UI link to
-a custom project.
+The dashboard queries the server for the six prepared runs. Use
+`hiraku dashboard --init --edit --record digit-classification` to copy the
+notebook into the project and edit it. Run details link to the MLflow UI.
 
-MLflow creates `mlflow.db` in the project root on the first launch. The training
-script uses the Hiraku project root to keep that location stable. Set
-`MLFLOW_TRACKING_URI` or `MLFLOW_EXPERIMENT_NAME` only
-when you want to override the local defaults. These variables affect the
-training process only; see the MLflow guide when adapting the example to a
-custom tracking store.
+For training, start the server in the project environment:
+
+```bash
+uv run mlflow server --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port 5000
+```
+
+In the terminal used for training and inspecting results, set:
+
+```bash
+export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
+```
+
+The training script and Hiraku use this server. The example selects the
+`hiraku-digits` MLflow experiment.
 
 ## Create the research root and child records
 
@@ -92,8 +106,6 @@ hiraku leaderboard runs \
   --sort val/log_loss --ascending
 
 hiraku leaderboard runs --record digit-classification/strong-l2 --json
-
-uv run mlflow ui --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port 5000
 ```
 
 Open <http://127.0.0.1:5000>, select `hiraku-digits`, and compare the two runs

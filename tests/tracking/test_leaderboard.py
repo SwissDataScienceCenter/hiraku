@@ -109,7 +109,11 @@ def test_csv_environment_path_resolves_without_rewriting_config(
             Path("results.csv"),
         ),
         (
-            {"type": "mlflow", "experiment_name": "evaluation"},
+            {
+                "type": "mlflow",
+                "tracking_uri": "https://mlflow.example.com",
+                "experiment_name": "evaluation",
+            },
             MLflowBackend,
             "experiment_name",
             "evaluation",

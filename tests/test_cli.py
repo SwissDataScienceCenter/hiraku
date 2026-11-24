@@ -578,12 +578,16 @@ def test_leaderboard_lifecycle(project):
             [
                 "--source",
                 "mlflow",
-                "--database",
-                "mlflow.db",
+                "--tracking-uri",
+                "http://localhost:5000",
                 "--experiment-name",
                 "test",
             ],
-            {"type": "mlflow", "database": "mlflow.db", "experiment_name": "test"},
+            {
+                "type": "mlflow",
+                "tracking_uri": "http://localhost:5000",
+                "experiment_name": "test",
+            },
         ),
         (
             ["--source", "wandb", "--entity", "team", "--project", "training"],
@@ -612,16 +616,14 @@ def test_leaderboard_source_options(project, options, expected, monkeypatch):
         ["missing-path", "--source", "csv"],
         ["blank-path", "--source", "csv", "--path", ""],
         ["../escape", "--source", "csv"],
-        ["bad", "--source", "csv", "--database", "mlflow.db"],
+        ["bad", "--source", "csv", "--tracking-uri", "https://example.com"],
         ["bad", "--source", "wandb"],
         [
             "bad",
             "--source",
             "mlflow",
-            "--database",
-            "db",
             "--tracking-uri",
-            "http://localhost",
+            "sqlite:///runs.db",
         ],
     ],
 )

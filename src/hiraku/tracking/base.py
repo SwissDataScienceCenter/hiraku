@@ -9,13 +9,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from types import MappingProxyType
 from typing import Annotated, Any, Literal, Protocol
+from urllib.parse import urlsplit
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    ValidationInfo,
     field_validator,
-    model_validator,
 )
 
 from ..errors import (
@@ -118,9 +119,8 @@ class MLflowBackendConfig(BaseModel):
 
     Attributes:
         type: Discriminator identifying the MLflow backend.
-        tracking_uri: Optional MLflow tracking server URI.
+        tracking_uri: HTTP(S) server URL; defaults to MLFLOW_TRACKING_URI.
         experiment_name: Optional experiment name to query.
-        database: Optional local MLflow database path.
         ui_url: Optional base URL used when constructing run links.
     """
 
@@ -128,23 +128,46 @@ class MLflowBackendConfig(BaseModel):
     type: Literal["mlflow"] = "mlflow"
     tracking_uri: str | None = Field(default=None, min_length=1)
     experiment_name: str | None = Field(default=None, min_length=1)
-    database: Path | None = None
     ui_url: str | None = Field(default=None, min_length=1)
 
-    @model_validator(mode="after")
-    def validate_sources(self) -> MLflowBackendConfig:
-        from .mlflow import _is_web_base
+    @field_validator("tracking_uri", "ui_url")
+    @classmethod
+    def validate_url(cls, value: str | None, info: ValidationInfo) -> str | None:
+        return (
+            _validate_mlflow_url(value, field=info.field_name)
+            if value is not None
+            else None
+        )
 
-        if self.tracking_uri and self.database:
-            raise BackendError(
-                "mlflow backend cannot set both tracking_uri and database"
+
+def _validate_mlflow_url(value: str, *, field: str = "tracking_uri") -> str:
+    """Validate a server URL, excluding credentials from UI links."""
+    try:
+        parsed = urlsplit(value)
+        _ = parsed.port  # urlsplit validates the port only when accessed.
+        valid = (
+            parsed.scheme in {"http", "https"}
+            and bool(parsed.hostname)
+            and not any(character.isspace() for character in value)
+            and not parsed.query
+            and not parsed.fragment
+            and (
+                field != "ui_url"
+                or (parsed.username is None and parsed.password is None)
             )
-        if self.ui_url is not None and not _is_web_base(self.ui_url):
-            raise BackendError(
-                "mlflow ui_url must be an absolute HTTP(S) URL without "
-                "credentials, query, or fragment"
-            )
-        return self
+        )
+    except ValueError:
+        valid = False
+    if not valid:
+        excluded = (
+            "credentials, query, or fragment"
+            if field == "ui_url"
+            else ("query or fragment")
+        )
+        raise BackendError(
+            f"mlflow {field} must be an absolute HTTP(S) server URL without {excluded}"
+        )
+    return value
 
 
 class WandbBackendConfig(BaseModel):

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -23,16 +22,20 @@ def clear_mlflow_environment(monkeypatch):
 
 @pytest.mark.parametrize(
     "options",
-    [{}, {"database": "custom.db"}, {"tracking_uri": "https://explicit.example"}],
+    [{}, {"tracking_uri": "https://explicit.example"}],
 )
 def test_mlflow_destination_precedence(tmp_path, monkeypatch, options):
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "https://environment.example")
     backend = MLflowBackend(Project(tmp_path), **options)
     expected = options.get("tracking_uri", "https://environment.example")
-    if "database" in options:
-        expected = f"sqlite:///{tmp_path / 'custom.db'}"
     assert backend.tracking_uri == expected
-    assert backend.ui_url == (None if "database" in options else expected)
+    assert backend.ui_url == expected
+
+
+def test_explicit_server_overrides_invalid_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", "sqlite:///runs.db")
+    backend = MLflowBackend(Project(tmp_path), tracking_uri="https://explicit.example")
+    assert backend.tracking_uri == "https://explicit.example"
 
 
 @pytest.mark.parametrize(
@@ -89,14 +92,17 @@ def test_mlflow_experiment_environment(
     assert searched == ([] if error or name == "missing" else ["e1"])
 
 
-def test_training_and_leaderboard_share_mlflow_environment(tmp_path, monkeypatch):
+@pytest.mark.integration
+def test_training_and_leaderboard_share_mlflow_environment(
+    tmp_path, monkeypatch, mlflow_server
+):
     mlflow = pytest.importorskip("mlflow")
     from mlflow.tracking._tracking_service import utils
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(utils, "_tracking_uri", None)
     monkeypatch.setattr(mlflow.tracking.fluent, "_active_experiment_id", None)
-    monkeypatch.setenv("MLFLOW_TRACKING_URI", f"sqlite:///{tmp_path / 'shared.db'}")
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", mlflow_server)
     monkeypatch.setenv("MLFLOW_EXPERIMENT_NAME", "shared")
     with mlflow.start_run() as active:
         mlflow.set_tag("hiraku.record_id", "baseline")
@@ -106,56 +112,51 @@ def test_training_and_leaderboard_share_mlflow_environment(tmp_path, monkeypatch
     assert runs[0].record_id == "baseline" and runs[0].metrics["loss"] == 0.5
 
 
-def test_mlflow_backend_config_accepts_uri_or_database() -> None:
-    assert MLflowBackendConfig(tracking_uri="http://localhost:5000").tracking_uri
-    assert MLflowBackendConfig(database="mlflow.db").database is not None
+@pytest.mark.parametrize(
+    "uri",
+    ["http://localhost:5000", "https://example.com/prefix", "http://[::1]:5000"],
+)
+def test_mlflow_backend_config_accepts_server_url(uri):
+    assert MLflowBackendConfig(tracking_uri=uri).tracking_uri == uri
 
 
-def test_mlflow_backend_config_rejects_uri_and_database() -> None:
-    with pytest.raises(BackendError, match="both"):
-        MLflowBackendConfig(tracking_uri="http://localhost:5000", database="mlflow.db")
-
-
-@pytest.mark.parametrize("database", [Path("/tmp/mlflow.db"), Path("../mlflow.db")])
-def test_mlflow_backend_rejects_unsafe_database_paths(tmp_path, database) -> None:
-    config = Project.create(tmp_path)
-
-    with pytest.raises(BackendError, match="safe project-relative path"):
-        MLflowBackend(config, database=database)
-
-
-def test_mlflow_backend_rejects_database_symlink_escape(tmp_path) -> None:
-    config = Project.create(tmp_path)
-    outside = tmp_path.parent / f"{tmp_path.name}-outside"
-    outside.mkdir()
-    (tmp_path / "linked").symlink_to(outside, target_is_directory=True)
-
-    with pytest.raises(BackendError, match="outside project root"):
-        MLflowBackend(config, database=Path("linked/mlflow.db"))
-
-
-@pytest.mark.parametrize("database", [None, "custom.db"])
-@pytest.mark.parametrize("directory", [False, True])
-def test_mlflow_backend_requires_existing_database(
-    tmp_path, monkeypatch, database, directory
-) -> None:
-    mlflow = pytest.importorskip("mlflow")
-    config = Project.create(tmp_path)
-    path = tmp_path / (database or "mlflow.db")
-    if directory:
-        path.mkdir()
+@pytest.mark.parametrize("environment", [False, True])
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "sqlite:///runs.db",
+        "file:///runs",
+        "./mlruns",
+        "databricks",
+        "ftp://example.com",
+        "http:///path",
+        "https://[::1",
+        "http://example.com:invalid",
+        "https://example.com:99999",
+        "https://example.com/?query=1",
+        "https://example.com/#fragment",
+        "https://exa mple.com",
+        "https://example.com\n",
+    ],
+)
+def test_mlflow_requires_http_server_before_client_creation(
+    tmp_path, monkeypatch, environment, uri
+):
+    monkeypatch.setitem(sys.modules, "mlflow.tracking", None)
+    options = {} if environment else {"tracking_uri": uri}
+    if environment:
+        monkeypatch.setenv("MLFLOW_TRACKING_URI", uri)
     before = set(tmp_path.rglob("*"))
-    monkeypatch.setattr(
-        mlflow.tracking,
-        "MlflowClient",
-        lambda **kwargs: pytest.fail("client must not be constructed"),
-    )
-
-    with pytest.raises(BackendError, match="not an existing file"):
-        MLflowBackend(config, database=database).list_runs()
-
+    with pytest.raises(BackendError, match="HTTP\\(S\\)"):
+        MLflowBackend(Project(tmp_path), **options).list_runs()
     assert set(tmp_path.rglob("*")) == before
-    assert path.is_dir() if directory else not path.exists()
+
+
+def test_mlflow_backend_requires_explicit_server(tmp_path, monkeypatch):
+    monkeypatch.setitem(sys.modules, "mlflow.tracking", None)
+    with pytest.raises(BackendError, match="tracking_uri or MLFLOW_TRACKING_URI"):
+        MLflowBackend(Project(tmp_path)).list_runs()
+    assert list(tmp_path.iterdir()) == []
 
 
 class _Page(list):
@@ -206,8 +207,9 @@ def test_mlflow_backend_paginates_runs_in_named_experiment(
             return _Page([_native_run("r2")])
 
     monkeypatch.setattr(mlflow.tracking, "MlflowClient", FakeClient)
-    backend = MLflowBackend(Project.create(tmp_path), database="mlflow.db")
-    (tmp_path / "mlflow.db").touch()
+    backend = MLflowBackend(
+        Project.create(tmp_path), tracking_uri="https://mlflow.example.com"
+    )
 
     assert [run.id for run in backend._read_source_runs()] == ["r1", "r2"]
     assert calls == [None, "next"]
@@ -333,17 +335,12 @@ def test_mlflow_backend_preserves_backend_errors_from_client(
 )
 def test_mlflow_backend_config_rejects_unsafe_ui_url(value: str) -> None:
     with pytest.raises(BackendError, match="ui_url"):
-        MLflowBackendConfig(database="mlflow.db", ui_url=value)
+        MLflowBackendConfig(ui_url=value)
 
 
 @pytest.mark.parametrize(
     ("settings", "expected"),
     [
-        ({"database": "mlflow.db"}, None),
-        (
-            {"database": "mlflow.db", "ui_url": "http://127.0.0.1:5000"},
-            "http://127.0.0.1:5000/#/experiments/e%2F1/runs/r1",
-        ),
         (
             {"tracking_uri": "https://mlflow.example.com/prefix/"},
             "https://mlflow.example.com/prefix/#/experiments/e%2F1/runs/r1",

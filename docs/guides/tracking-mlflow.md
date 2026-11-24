@@ -1,72 +1,68 @@
 # Track with MLflow
 
-MLflow can store runs in a local SQLite database or a remote server.
+Hiraku queries an MLflow tracking server over HTTP(S). Run the server in the
+environment that owns your MLflow installation and tracking data.
 
 ## Install and configure
 
-From the Hiraku source checkout:
+Install Hiraku's client extra from the source checkout:
 
 ```bash
 uv tool install --force '.[mlflow]'
 ```
 
-In the training project:
+In the training project, install MLflow and start its server:
 
 ```bash
 uv add mlflow
+uv run mlflow server --backend-store-uri sqlite:///mlflow.db \
+  --host 127.0.0.1 --port 5000
 ```
 
-For a local project, create `hiraku/leaderboards/local.yml`:
+Keep the server running. It owns database initialization and schema management.
+Hiraku does not start it or manage its storage.
 
-```yaml
-source:
-  type: mlflow
-```
-
-Share MLflow's standard environment variables between training and Hiraku:
+In another terminal, share the server and experiment settings between training
+and Hiraku:
 
 ```bash
-export MLFLOW_TRACKING_URI="sqlite:///$PWD/mlflow.db"
+export MLFLOW_TRACKING_URI="http://127.0.0.1:5000"
 export MLFLOW_EXPERIMENT_NAME="my-task"
 ```
 
-Explicit leaderboard `tracking_uri` or `database` overrides the environment URI.
-An explicit `experiment_name` overrides both experiment environment variables.
-Otherwise, Hiraku uses `MLFLOW_EXPERIMENT_NAME` or `MLFLOW_EXPERIMENT_ID`; when
-both are set, they must identify the same experiment. An unknown experiment name
-returns no runs instead of creating an experiment.
-
-Without environment settings, Hiraku retains its defaults: `mlflow.db` in the
-project root and an experiment named after the project directory. Leaderboards
-only configure reading; training must inherit the same environment or explicitly
-select the same destination and experiment.
-
-For a remote server or a different local database, use a mapping. The database
-path is relative to the Hiraku project root. Specify `tracking_uri` instead of
-`database`; the options are mutually exclusive.
-
-Runs read from an HTTP(S) `tracking_uri` link to that server's web UI. For a
-local `database`, set `ui_url` to the address where you serve `mlflow ui`:
+Create `hiraku/leaderboards/local.yml`:
 
 ```yaml
 source:
   type: mlflow
-  database: mlflow.db
-  experiment_name: my-task
-  ui_url: http://127.0.0.1:5000
 ```
 
-`ui_url` must be an absolute HTTP(S) URL without credentials, query, or
-fragment; it may include a path prefix. Tracking URIs that contain credentials
-are never turned into links.
+Alternatively, configure the server explicitly:
+
+```yaml
+source:
+  type: mlflow
+  tracking_uri: https://mlflow.example.org
+  experiment_name: my-task
+```
+
+An explicit `tracking_uri` overrides `MLFLOW_TRACKING_URI`. One must be set to
+an absolute HTTP(S) server URL without a query or fragment. Hiraku uses the
+MLflow SDK's authentication settings, including `MLFLOW_TRACKING_TOKEN` and
+`MLFLOW_TRACKING_USERNAME` / `MLFLOW_TRACKING_PASSWORD`.
+
+An explicit `experiment_name` overrides both experiment environment variables.
+Otherwise, Hiraku uses `MLFLOW_EXPERIMENT_NAME` or `MLFLOW_EXPERIMENT_ID`; when
+both are set, they must identify the same experiment. Without either, the
+experiment name defaults to the project directory name. An unknown experiment
+name returns no runs instead of creating an experiment.
+
+Runs link to the tracking server's web UI. Set `ui_url` when the UI is served at
+a different address. It must be an absolute HTTP(S) URL without credentials,
+query, or fragment and may include a path prefix. Tracking URLs containing
+credentials are never turned into links.
 
 ## Log from your script
-
-Set the logging URI in your script or environment, including for `hiraku run`:
-
-```bash
-export MLFLOW_TRACKING_URI="sqlite:///$PWD/mlflow.db"
-```
 
 Your script uses native MLflow logging and Hiraku attribution tags:
 
@@ -92,18 +88,3 @@ hiraku leaderboard runs --json
 Hiraku reads native run IDs, parameters, metrics, and attribution tags.
 The MLflow experiment name is a backend grouping, distinct from a Hiraku
 record ID.
-
-??? warning "MLflow local database"
-    With `database` (or the default `mlflow.db`), queries require an existing file
-    and fail before constructing the MLflow client if it is missing. Log runs with
-    MLflow first to create the database. Explicit `tracking_uri` values use native
-    MLflow behavior without this file check.
-
-    This check does not guarantee read-only storage access: MLflow may initialize
-    tables, migrate some existing schemas, or recreate the default experiment when
-    opening an existing database. Other outdated schemas require an explicit
-    `mlflow db upgrade`. These are MLflow limitations; the standard MLflow client
-    does not provide a read-only connection mode.
-
-    For MLflow projects, install Hiraku in the project environment to avoid
-    version conflicts.
