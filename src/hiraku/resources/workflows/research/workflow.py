@@ -18,7 +18,7 @@ from langgraph.types import Command, interrupt
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic import ValidationError as PydanticValidationError
 
-from hiraku.errors import HirakuError, ValidationError
+from hiraku.errors import HirakuError, RecordNotFoundError, ValidationError
 from hiraku.git import GitRepository
 from hiraku.job import validate_command
 from hiraku.markdown import Markdown
@@ -635,6 +635,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             "command": state["command"],
             "failure": getattr(experiment, "failure", None),
             "smoke_test_required": _autonomous(state),
+            "project_setup": _project_setup(project),
         }
         response = _ask(
             markdown,
@@ -677,7 +678,11 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
         response = _ask(
             markdown,
             "Launch",
-            {"experiment": _describe(experiment), "command": rendered},
+            {
+                "experiment": _describe(experiment),
+                "command": rendered,
+                "project_setup": _project_setup(project),
+            },
             LaunchResponse,
             state.get("feedback", ""),
             ["experiment.launch", "tracking.run.read"],
@@ -712,7 +717,11 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
         response = _ask(
             markdown,
             "Wait",
-            {"launched": waiting, "runs_left_out": left_out},
+            {
+                "launched": waiting,
+                "runs_left_out": left_out,
+                "project_setup": _project_setup(project),
+            },
             WaitResponse,
             state.get("feedback", ""),
             ["tracking.run.read", "workflow.user_input"],
@@ -1033,7 +1042,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             # The whole study, so a ruling can weigh the experiment against it.
             "task": _describe(task),
             "metrics": _metrics(task),
-            "project_setup": str(project.vault.load("project-setup").markdown),
+            "project_setup": _project_setup(project),
             "tree": _tree(state["task"], project, state["max_depth"], _reviews(state)),
             "parent": _describe(parent),
             "experiment": _describe(experiment),
@@ -1893,6 +1902,18 @@ def _step_of(
     if runs or experiment.state == "launched":
         return "waiting"
     return "launch"
+
+
+def _project_setup(project: Project) -> str:
+    """The `project-setup` context, for the steps that build, launch or check runs.
+
+    Only it says how this project submits jobs and where their output goes, and
+    an agent may no longer have it in view after a long or resumed session.
+    """
+    try:
+        return str(project.vault.load("project-setup").markdown)
+    except RecordNotFoundError:
+        return ""
 
 
 def _all_runs(experiment: Record, project: Project) -> list[Run]:

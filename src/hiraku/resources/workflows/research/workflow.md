@@ -56,8 +56,8 @@ Hiraku creates the experiment records.
 Implement the experiment in the data. Start from `parent_commit` when it is
 set, otherwise from the task's current code, and keep the change to what the
 experiment describes. The command is executed as an argument list without a
-shell. Each run must be recorded as the `project-setup` context
-describes, with the task's metrics. If
+shell. `project_setup` in the data is the `project-setup` context. Each run
+must be recorded as it describes, with the task's metrics. If
 `failure` is set, an earlier attempt failed to run: fix that first. Then run a smoke
 test that exercises the change quickly, as the `project-setup` context
 describes (for example a few steps on a tiny input), and fix what it shows.
@@ -67,18 +67,21 @@ mandatory).
 
 ## Launch
 
-Check out the experiment's commit, then run `command` from the data. The
-command runs in the foreground with `hiraku run --record <id> -- <command>`,
-or in the background with `hiraku job submit --record <id> -- <command>` (the
-MCP `job_submit` tool is equivalent). Send `launched` once execution or submission succeeds. If the
+Check out the experiment's commit, then run `command` from the data the way
+`project_setup` in the data describes, for example as a scheduler job with its
+options. Without such instructions the command runs in the foreground with
+`hiraku run --record <id> -- <command>`, or in the background with
+`hiraku job submit --record <id> -- <command>` (the MCP `job_submit` tool is
+equivalent). Send `launched` once execution or submission succeeds. If the
 launch fails and the code has to change, send `failed` with the experiment's
 record ID and the error.
 
 ## Wait
 
 The experiments in the data are launched and have no run with metrics yet.
-Check their jobs and runs, for example with `hiraku job status <job-id>` and
-`hiraku leaderboard runs --record <id>`. Send
+Check their jobs and runs as `project_setup` in the data describes, for example
+with `hiraku job status <job-id>` and `hiraku leaderboard runs --record <id>`.
+Send
 `checked` when a run has finished; Hiraku answers not ready until a run has
 metrics. `runs_left_out` lists runs of an experiment that have metrics but not
 its commit. A run there without a `commit` means the command did not record the

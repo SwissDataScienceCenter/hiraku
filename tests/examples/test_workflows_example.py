@@ -534,6 +534,24 @@ def test_wait_names_runs_that_do_not_carry_the_experiment_commit(
     assert _step(analyzing) == "analyze"
 
 
+def test_steps_that_run_code_carry_the_project_setup(runner: CliRunner) -> None:
+    # Only the `project-setup` context says how runs are launched and checked
+    # (for example a scheduler and its log files); an agent in a long or resumed
+    # session may no longer have it in view, so these steps carry it.
+    project, session, _ = _autonomous_study(reviews=[])
+    setup = project.vault.load("project-setup")
+    setup.markdown = "Submit with slurm/submit.sh; read logs/<job-id>.log."
+    project.vault.save(setup, overwrite=True)
+    implementing = _design(project, session)
+    assert _step(implementing) == "implement"
+    launching, _ = _implement(project, session, "baseline")
+    assert _step(launching) == "launch"
+    waiting = resume_workflow(session, {"event": "launched"}, project=project)
+    assert _step(waiting) == "wait"
+    for response in (implementing, launching, waiting):
+        assert "slurm/submit.sh" in _value(response)["data"]["project_setup"]
+
+
 def test_wait_does_not_blame_runs_of_an_earlier_commit(runner: CliRunner) -> None:
     # A run of an earlier commit (for example before a review fix) has a commit;
     # it is ignored while the run of the current commit is pending, and the
