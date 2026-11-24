@@ -1274,7 +1274,7 @@ wheels = [
 
 [[package]]
 name = "hiraku"
-version = "0.1.2.dev1"
+version = "0.1.1"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
