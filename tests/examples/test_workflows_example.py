@@ -152,14 +152,16 @@ def test_research_accepts_task_name(runner: CliRunner) -> None:
     assert interrupt["data"]["task"] == task.id
 
 
-def test_research_ignores_the_active_record(runner: CliRunner) -> None:
+def test_research_does_not_pick_an_existing_task_implicitly(
+    runner: CliRunner,
+) -> None:
+    # Without a `task` argument research drafts one, even when a task exists.
     project = Project.discover()
     project.vault.create("project-setup", type="context")
     Leaderboard.create(project, "runs", {"type": "csv", "path": "runs.csv"})
-    task = project.vault.create(
+    project.vault.create(
         "task", type="task", metrics=[{"name": "loss", "direction": "minimize"}]
     )
-    project.set_active_record(task.id)
     started = start_workflow(
         "research", {"command": ["python", "train.py"]}, project=project
     )

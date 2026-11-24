@@ -138,12 +138,11 @@ def run_table(
 
 
 @app.cell
-def research_controls(project_context, records):
+def research_controls(records):
     _tasks = [record.id for record in records if record.type == "task"]
-    _active = project_context.active_record_id
     research_task = mo.ui.dropdown(
         _tasks,
-        value=_active if _active in _tasks else (_tasks[0] if _tasks else None),
+        value=_tasks[0] if _tasks else None,
         label="Task",
     )
     return (research_task,)
