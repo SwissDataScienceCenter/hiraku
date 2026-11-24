@@ -6,7 +6,7 @@ from zipfile import ZipFile
 
 REPOSITORY = Path(__file__).parents[1]
 PACKAGE = REPOSITORY / "src" / "hiraku"
-EXAMPLES = PACKAGE / "examples"
+EXAMPLES = REPOSITORY / "examples"
 SKILLS = PACKAGE / "resources" / "skills"
 WORKFLOWS = PACKAGE / "resources" / "workflows"
 
@@ -16,7 +16,7 @@ def test_wheel_contains_all_packaged_example_files(tmp_path: Path) -> None:
         [
             "uv",
             "build",
-            "--wheel",
+            "--offline",
             "--out-dir",
             str(tmp_path),
         ],
@@ -30,11 +30,16 @@ def test_wheel_contains_all_packaged_example_files(tmp_path: Path) -> None:
     assert len(wheels) == 1
 
     expected = {
-        f"hiraku/{path.relative_to(PACKAGE)}"
-        for resource_root in (EXAMPLES, SKILLS, WORKFLOWS)
+        f"hiraku/{path.relative_to(PACKAGE).as_posix()}"
+        for resource_root in (SKILLS, WORKFLOWS)
         for path in resource_root.rglob("*")
         if path.is_file() and "__pycache__" not in path.parts
     }
+    expected.update(
+        f"hiraku/examples/{path.relative_to(EXAMPLES).as_posix()}"
+        for path in EXAMPLES.rglob("*")
+        if path.is_file() and "__pycache__" not in path.parts
+    )
     assert any(path.endswith("collaborative/workflow.md") for path in expected)
     expected.add("hiraku/workflows/__init__.py")
     expected.add("hiraku/workflows/langgraph.py")

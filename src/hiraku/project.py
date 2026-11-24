@@ -7,6 +7,7 @@ import shutil
 import tomllib
 from contextlib import ExitStack
 from importlib.resources import as_file, files
+from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -21,6 +22,17 @@ from .io import atomic_write, dump_yaml, load_yaml_mapping
 
 if TYPE_CHECKING:
     from .record import Vault
+
+
+def _examples_root() -> Traversable:
+    bundled = files("hiraku") / "examples"
+    if bundled.is_dir():
+        return bundled
+    # Editable installs expose src/ while the examples remain in the checkout.
+    source = Path(__file__).resolve().parents[1]
+    if source.name == "src" and (source.parent / "pyproject.toml").is_file():
+        return source.parent / "examples"
+    return bundled
 
 
 class Project(BaseModel):
@@ -256,7 +268,7 @@ class Project(BaseModel):
                     or "\\" in example
                 ):
                     raise ValidationError("Invalid example name")
-                examples = files("hiraku.examples")
+                examples = _examples_root()
                 bundle = examples / example
                 if not (bundle / "src").is_dir():
                     try:
@@ -320,7 +332,7 @@ class Project(BaseModel):
 
             # Copy the example's result generator if requested
             if with_generator:
-                generator = files("hiraku.examples") / example / "generate_results.py"
+                generator = _examples_root() / example / "generate_results.py"
                 with as_file(generator) as source:
                     shutil.copy2(source, root / "generate_results.py")
 

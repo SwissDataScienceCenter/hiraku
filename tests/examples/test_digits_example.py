@@ -14,7 +14,7 @@ from hiraku.cli import main
 from hiraku.project import Project
 
 REPOSITORY = Path(__file__).parents[2]
-EXAMPLE = REPOSITORY / "src" / "hiraku" / "examples" / "digits-mlflow"
+EXAMPLE = REPOSITORY / "examples" / "digits"
 OVERLAY = EXAMPLE / "src"
 
 
@@ -31,29 +31,27 @@ def invoke(runner: CliRunner, arguments: list[str]):
 
 
 @pytest.mark.integration
-def test_digits_mlflow_curves_from_committed_launches(
-    tmp_path, monkeypatch, mlflow_server
-):
+def test_digits_curves_from_committed_launches(tmp_path, monkeypatch):
     pytest.importorskip("mlflow")
     from mlflow.tracking import MlflowClient
 
-    project = tmp_path / "digits-mlflow"
+    project = tmp_path / "digits"
     project.mkdir()
     monkeypatch.chdir(project)
-    monkeypatch.setenv("MLFLOW_TRACKING_URI", mlflow_server)
+    monkeypatch.delenv("MLFLOW_TRACKING_URI", raising=False)
     monkeypatch.delenv("MLFLOW_EXPERIMENT_NAME", raising=False)
-    uri = mlflow_server
+    uri = f"sqlite:///{project / 'mlflow.db'}"
     monkeypatch.setenv("MLFLOW_ENABLE_ASYNC_LOGGING", "false")
     git(project, "init", "-b", "main")
     git(project, "config", "user.email", "test@example.invalid")
     git(project, "config", "user.name", "Test")
     runner = CliRunner()
-    initialized = invoke(runner, ["example", "create", "digits-mlflow", "."])
+    initialized = invoke(runner, ["example", "create", "digits", "."])
     assert initialized.exit_code == 0
     assert not (project / "README.md").exists()
     assert not (project / "example.yml").exists()
     git(project, "add", ".")
-    git(project, "commit", "-m", "initialize Digits MLflow example")
+    git(project, "commit", "-m", "initialize Digits example")
     invoke(
         runner,
         [
@@ -125,7 +123,7 @@ def test_digits_mlflow_curves_from_committed_launches(
         ).output
     )
     assert len(rows) == 2
-    assert not (project / "mlflow.db").exists()
+    assert (project / "mlflow.db").is_file()
     assert {row["record_id"] for row in rows} == {
         ids_by_name["weak-l2"],
         ids_by_name["strong-l2"],

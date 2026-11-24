@@ -1,1 +1,1 @@
---8<-- "src/hiraku/examples/digits/README.md"
+--8<-- "examples/digits/README.md"
