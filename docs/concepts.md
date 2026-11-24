@@ -44,4 +44,4 @@ A record ID is its path relative to the records directory, without `.md`. For ex
 
 When you launch a command with `--record classification/baseline`, Hiraku supplies `HIRAKU_RECORD_ID` and `HIRAKU_JOB_ID`. Your script logs those values with its results. A leaderboard reads the resulting runs and lets you compare experiments; a job can log several runs or finish without logging any.
 
-Follow the [Getting started walkthrough](getting_started.md#run-your-first-experiment) to see those pieces work together.
+Follow the [First experiment walkthrough](first_experiment.md) to see those pieces work together.

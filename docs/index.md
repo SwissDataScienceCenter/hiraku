@@ -2,34 +2,41 @@
 
 # Hiraku
 
-Document research, run experiments, and compare results.
+## Collaborative data science, with agents.
 
+
+
+Hiraku is built on a simple premise: **effective collaboration requires a shared structure.**
+
+Designed to bring **user-driven development and scalable agentic workflows** together within a unified framework.
+
+Built on the **open ecosystem**, Hiraku integrates with existing research infrastructure and project needs.
 ```bash
 uv tool install 'git+https://github.com/SwissDataScienceCenter/hiraku.git'
 ```
 
-[Getting started](getting_started.md){ .md-button .md-button--primary }
-[Install options](getting_started.md#install-hiraku){ .md-button }
-[Explore Concepts](concepts.md#how-hiraku-fits-together){ .md-button }
-
+[Getting started](installation.md){ .md-button .md-button--primary }
+[Install options](installation.md){ .md-button }
+[Explore concepts](concepts.md){ .md-button }
 </div>
 
-## Demos
+
+<!-- [Explore the concepts](concepts.md) -->
+
+## Explore further
 
 <div class="sdsc-home-demos" markdown="1">
 
-- [First experiment](getting_started.md#run-your-first-experiment)
+- [Examples](examples/index.md)
 
-    Run a baseline with two seeds and compare both results on a CSV leaderboard.
+    Get started with ready-to-run examples.
 
-- [Digits](examples/digits/README.md)
+- [User Guides](guides/index.md)
 
-    Track digit-classification runs and metrics with MLflow.
+    Learn about Hiraku concepts and how to use them.
 
-- [OGB Hiraku](https://github.com/SwissDataScienceCenter/ogb-hiraku)
+- [Demo Project](https://github.com/SwissDataScienceCenter/ogb-hiraku)
 
-    Explore the Open Graph Benchmark example project.
+    Explore a Hiraku demo project on the Open Graph Benchmark<sup>[↗](https://ogb.stanford.edu/)</sup>.
 
 </div>
-
-[Use Hiraku in your own project](guides/index.md)

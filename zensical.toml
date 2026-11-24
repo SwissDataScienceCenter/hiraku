@@ -15,7 +15,10 @@ nav = [
       { "Hiraku" = "index.md" },
       { "Concepts" = "concepts.md" },
   ] },
-  { "Getting started" = "getting_started.md" },
+  { "Getting started" = [
+      { "Installation" = "installation.md" },
+      { "First experiment" = "first_experiment.md" },
+  ] },
   { "User guide" = [
       { "Project" = [
           { "Overview" = "guides/index.md" },
@@ -182,6 +185,7 @@ filters = ["!^_"]
 minify_html = true
 
 [project.plugins.redirects.redirect_maps]
+"getting_started.md" = "installation.md"
 "api/cli.md" = "api/index.md"
 "api/python/index.md" = "api/index.md"
 "workflow.md" = "guides/workflows.md"
