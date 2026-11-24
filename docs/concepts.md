@@ -8,6 +8,36 @@
 | Leaderboard | A named configuration that reads runs from CSV, MLflow, or Weights & Biases and optionally defines which metrics to compare and how to sort them. |
 | Workflow | A project-defined LangGraph graph that coordinates steps and can checkpoint progress between calls. |
 
+## How Hiraku fits together
+
+<figure class="architecture-preview" aria-label="Hiraku architecture">
+  <section class="development">
+    <h3>User-driven development</h3>
+    <p>Using any coding agent</p>
+    <div class="items"><span>CLI</span><span>MCP</span><span>Dashboard</span></div>
+  </section>
+  <section class="workflows">
+    <h3>Customizable agentic workflows</h3>
+    <p>Using LangGraph</p>
+    <div class="items"><span>Workflow A</span><span>Workflow B</span><span>Workflow C</span></div>
+  </section>
+  <section class="records">
+    <h3>Hiraku research records</h3>
+    <p>Using the Open Knowledge Format</p>
+    <div class="items"><span>Datasets</span><span>Tasks</span><span>Experiments</span><span>Analysis</span><span>Results</span></div>
+  </section>
+  <section class="jobs">
+    <h3>Job submission</h3>
+    <p>Using PSI/J</p>
+    <div class="items"><span>Local</span><span>Renku</span><span>Slurm</span></div>
+  </section>
+  <section class="leaderboards">
+    <h3>Leaderboards</h3>
+    <p>Via tracking backends</p>
+    <div class="items"><span>CSV</span><span>MLflow</span><span>W&amp;B</span></div>
+  </section>
+</figure>
+
 ## How records connect to leaderboards
 
 A record ID is its path relative to the records directory, without `.md`. For example, `hiraku/records/classification/baseline.md` has ID `classification/baseline`. Use `--parent` when creating a child record to declare the relationship. A record can also store the Git commit for its implementation.

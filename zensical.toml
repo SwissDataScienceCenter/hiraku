@@ -59,7 +59,6 @@ extra_javascript = [
 [project.theme]
 variant = "modern"
 language = "en"
-logo = "assets/SDSC_01_primary_logo-color-RGB.svg"
 favicon = "assets/SDSC_04_symbol-color-RGB.svg"
 custom_dir = "overrides"
 features = [
@@ -116,7 +115,7 @@ toggle.name = "Switch to system preference"
 repo = "fontawesome/brands/github"
 
 [project.extra]
-homepage = "https://datascience.ch"
+sdsc_url = "https://datascience.ch"
 
 [[project.extra.social]]
 icon = "fontawesome/brands/github"

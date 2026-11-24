@@ -1,10 +1,25 @@
-.md-header__button.md-logo img {
-  height: 2.4rem;
-  width: auto;
+.md-header__home {
+  display: block;
 }
 
-[data-md-color-scheme="slate"] .md-header__button.md-logo img {
-  content: url("../assets/SDSC_01_primary_logo-reversed-RGB.svg");
+.md-header__button.md-header__sdsc {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+.md-header__sdsc img {
+  width: 1.25rem;
+  height: 1.25rem;
+  border-radius: 0.25rem;
+  background: #fff;
+}
+
+.md-header__home:is(:hover, :focus-visible) .md-ellipsis,
+.md-header__sdsc:is(:hover, :focus-visible) span {
+  text-decoration: underline;
 }
 
 :root {
@@ -13,22 +28,59 @@
   --sdsc-green: #91c743;
 }
 
-.md-typeset .sdsc-home-hero,
-.md-typeset .architecture-preview .records {
-  border-top: 0.25rem solid var(--sdsc-green);
-  border-radius: 1rem;
-  background: linear-gradient(120deg, var(--sdsc-navy), var(--sdsc-indigo));
-  color: #fff;
+:is(.md-typeset:has(.sdsc-home-hero), .architecture-preview) {
+  --sdsc-primary-blue: #26245c;
+  --sdsc-secondary-blue: #5461a6;
+  --sdsc-panel-surface: #f3f2f7;
+  --sdsc-panel-text: #000;
+  --sdsc-panel-heading: var(--sdsc-primary-blue);
+  --sdsc-panel-border: #b5c0e9;
+  --sdsc-label-surface: #e8e8f5;
+  --sdsc-panel-accent: var(--sdsc-secondary-blue);
+  color: var(--sdsc-panel-text);
+}
+
+[data-md-color-scheme="slate"] :is(.md-typeset:has(.sdsc-home-hero), .architecture-preview) {
+  --sdsc-panel-surface: #1c1948;
+  --sdsc-panel-text: #f3f2f7;
+  --sdsc-panel-heading: #fff;
+  --sdsc-panel-border: #444a86;
+  --sdsc-label-surface: #34346e;
+  --sdsc-panel-accent: #b5c0e9;
+}
+
+.md-typeset:has(.sdsc-home-hero) {
+  --home-action: var(--sdsc-primary-blue);
+  --home-action-hover: var(--sdsc-secondary-blue);
+  --home-action-text: #fff;
+  --md-code-bg-color: #fff;
+  --md-typeset-a-color: var(--sdsc-panel-accent);
+  --md-accent-fg-color: var(--sdsc-panel-heading);
+}
+
+[data-md-color-scheme="slate"] .md-typeset:has(.sdsc-home-hero) {
+  --home-action: #b5c0e9;
+  --home-action-hover: #d3d8f0;
+  --home-action-text: var(--sdsc-primary-blue);
+  --md-code-bg-color: #12102f;
+}
+
+.md-typeset:has(.sdsc-home-hero) :is(h1, h2) {
+  color: var(--sdsc-panel-heading);
 }
 
 .md-typeset .sdsc-home-hero {
+  --md-code-fg-color: var(--sdsc-panel-text);
+  --md-code-hl-string-color: var(--md-typeset-a-color);
   margin: 0 0 2rem;
   padding: clamp(1rem, 4vw, 2.5rem);
+  border: 1px solid var(--sdsc-panel-border);
+  border-radius: 1rem;
+  background: var(--sdsc-panel-surface);
 }
 
 .md-typeset .sdsc-home-hero h1 {
   margin: 0 0 0.45rem;
-  color: #fff;
   font-size: clamp(2.1rem, 5vw, 3.2rem);
   font-weight: 700;
   line-height: 1.1;
@@ -36,7 +88,6 @@
 
 .md-typeset .sdsc-home-hero > p {
   margin: 0.75rem 0;
-  color: #f1f2fa;
 }
 
 .md-typeset .sdsc-home-hero > p:last-child {
@@ -46,21 +97,30 @@
   margin-bottom: 0;
 }
 
-.sdsc-home-hero .md-button {
-  border-color: #fff;
-  color: #fff;
+.md-typeset .sdsc-home-hero .md-button {
+  border: 1px solid var(--home-action);
+  background: transparent;
+  color: var(--sdsc-panel-heading);
 }
 
-.sdsc-home-hero .md-button--primary,
-.sdsc-home-hero .md-button:is(:hover, :focus-visible) {
-  border-color: var(--sdsc-green);
-  background: var(--sdsc-green);
-  color: var(--sdsc-navy);
+.md-typeset .sdsc-home-hero .md-button:is(:hover, :focus-visible) {
+  background: var(--sdsc-label-surface);
+  opacity: 1;
 }
 
-.sdsc-home-hero .md-button--primary:is(:hover, :focus-visible) {
-  border-color: #fff;
-  background: #fff;
+.md-typeset .sdsc-home-hero .md-button--primary {
+  background: var(--home-action);
+  color: var(--home-action-text);
+}
+
+.md-typeset .sdsc-home-hero .md-button--primary:is(:hover, :focus-visible) {
+  border-color: var(--home-action-hover);
+  background: var(--home-action-hover);
+}
+
+.md-typeset .sdsc-home-hero .md-button:focus-visible {
+  outline: 2px solid var(--sdsc-panel-heading);
+  outline-offset: 2px;
 }
 
 .md-typeset .sdsc-home-demos > ul {
@@ -75,8 +135,9 @@
 .md-typeset .sdsc-home-demos li,
 .md-typeset .architecture-preview > section {
   padding: 0.85rem;
-  border: 1px solid var(--md-default-fg-color--lightest);
+  border: 1px solid var(--sdsc-panel-border);
   border-radius: 0.65rem;
+  background: var(--sdsc-panel-surface);
 }
 
 .md-typeset .sdsc-home-demos li {
@@ -104,27 +165,22 @@
 }
 
 .architecture-preview > section {
-  --architecture-accent: var(--sdsc-indigo);
   position: relative;
 }
 
-.architecture-preview :is(.development, .workflows) {
-  --architecture-accent: var(--sdsc-green);
-}
-
-.md-typeset .architecture-preview > section:not(.records) {
-  border-color: color-mix(in srgb, var(--architecture-accent) 55%, var(--md-default-bg-color));
-  background: color-mix(in srgb, var(--architecture-accent) 26%, var(--md-default-bg-color));
-}
-
 .md-typeset .architecture-preview .records {
+  --sdsc-panel-heading: #fff;
+  --sdsc-label-surface: #34346e;
+  --sdsc-panel-border: #7283c3;
   padding: 1rem;
+  background: var(--sdsc-primary-blue);
+  color: #fff;
   text-align: center;
 }
 
 .md-typeset .architecture-preview h3 {
   margin: 0;
-  color: inherit;
+  color: var(--sdsc-panel-heading);
   font-size: 1rem;
   font-weight: 700;
   line-height: 1.25;
@@ -139,10 +195,6 @@
   font-size: 0.75rem;
 }
 
-.architecture-preview .records p {
-  color: #f1f2fa;
-}
-
 .architecture-preview .items {
   display: flex;
   flex-wrap: wrap;
@@ -152,19 +204,15 @@
 
 .architecture-preview .items span {
   padding: 0.12rem 0.5rem;
-  border: 1px solid color-mix(in srgb, var(--architecture-accent) 45%, var(--md-default-bg-color));
+  border: 1px solid var(--sdsc-panel-border);
   border-radius: 1rem;
-  background: color-mix(in srgb, var(--architecture-accent) 8%, var(--md-default-bg-color));
+  background: var(--sdsc-label-surface);
+  color: var(--sdsc-panel-heading);
   font-size: 0.73rem;
 }
 
 .architecture-preview .records .items {
   justify-content: center;
-}
-
-.architecture-preview .records .items span {
-  border-color: #fff6;
-  background: #fff1;
 }
 
 @media (min-width: 760px) {
@@ -184,7 +232,7 @@
     position: absolute;
     left: 50%;
     transform: translateX(-50%);
-    color: var(--md-default-fg-color);
+    color: var(--sdsc-panel-accent);
     font-size: 1rem;
     line-height: 1.4rem;
   }
