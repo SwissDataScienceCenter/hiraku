@@ -5,12 +5,14 @@ attributed to them. The page is a [marimo](https://marimo.io) notebook served
 through [Marimo Studio](https://marimo-team.github.io/marimo-studio/). Its
 performance and metric trade-off plots are separate, independently placeable cells.
 
-Install the optional dependencies first:
+Install the optional dashboard dependencies first:
 
 ```bash
-uv sync --extra dashboard              # from a Hiraku checkout
-uv tool install "hiraku[dashboard]"    # or for an installed CLI
+uv tool install --force 'hiraku[dashboard]'
 ```
+
+Include all extras you want to use, for example, when using MLflow or W&B
+`uv tool install --force 'hiraku[dashboard,mlflow]'`. See [installation options](../installation.md).
 
 ## Modes
 
@@ -27,7 +29,7 @@ Run every command from inside a Hiraku project.
 ### View
 
 ```bash
-hiraku dashboard --record digits
+hiraku dashboard --record digit-classification
 ```
 
 The page is served on localhost and opens in your browser. Hiraku selects a
@@ -285,8 +287,8 @@ so you can try the dashboard without training first. Install both optional
 extras, then create a project with the prepared results (Git is optional):
 
 ```bash
-uv tool install "hiraku[dashboard,mlflow]"
-hiraku example create digits-mlflow digits-dashboard --with-results
+uv tool install --force 'hiraku[dashboard,mlflow]'
+hiraku example create digits digits-dashboard --with-results
 cd digits-dashboard
 uv sync
 uv run mlflow server --backend-store-uri sqlite:///mlflow.db \
@@ -297,15 +299,15 @@ Keep the server running. In another terminal in the project directory:
 
 ```bash
 export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
-hiraku dashboard --record digits
+hiraku dashboard --record digit-classification
 ```
 
 The dashboard reads the six bundled runs through the MLflow server.
 You can also try the other modes in that project:
 
 ```bash
-hiraku dashboard --include-code --record digits
-hiraku dashboard --init --edit --record digits
+hiraku dashboard --include-code --record digit-classification
+hiraku dashboard --init --edit --record digit-classification
 ```
 
 Run details include an **Open in mlflow** link to the server UI. To persist the

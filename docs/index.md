@@ -10,7 +10,7 @@ Designed to bring **user-driven development and scalable agentic workflows** tog
 Built on the **open ecosystem**, Hiraku integrates with existing research infrastructure and project needs.
 
 ```bash
-uv tool install 'git+https://github.com/SwissDataScienceCenter/hiraku.git'
+uv tool install hiraku
 ```
 [Get started](first_experiment.md){ .md-button .md-button--primary }
 [Install options](installation.md){ .md-button }

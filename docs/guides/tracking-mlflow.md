@@ -5,11 +5,11 @@ environment that owns your MLflow installation and tracking data.
 
 ## Install and configure
 
-Install Hiraku's client extra from the source checkout:
-
+Install Hiraku's MLflow extra in the CLI environment:
 ```bash
-uv tool install --force '.[mlflow]'
+uv tool install --force 'hiraku[mlflow]'
 ```
+See [installation options](../installation.md).
 
 In the training project, install MLflow and start its server:
 
