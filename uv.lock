@@ -287,35 +287,6 @@ wheels = [
 ]
 
 [[package]]
-name = "bracex"
-version = "3.2.3"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/42/39/9ae971118d77b86cc3f03ab5a467ddb58de352d8ef29830c81531d22010c/bracex-3.2.3.tar.gz", hash = "sha256:8fbf92b4db3c31de999145e22a47d4ffdbefb983a98583c3272bd7d570f9a343", size = 35266, upload-time = "2026-11-14T17:11:16.858Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c8/42/f5d49972873bd3fff36e736ad1fcb36f9fdadb1ad577dfcfa17777dc84f0/bracex-3.2.3-py3-none-any.whl", hash = "sha256:8d6d677856121820d67b9009e76a5740fb02ab6dcd2d9815a83724d1888c305d", size = 14182, upload-time = "2026-11-14T17:11:15.595Z" },
-]
-
-[[package]]
-name = "bump-my-version"
-version = "1.8.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "click" },
-    { name = "httpx2" },
-    { name = "pydantic" },
-    { name = "pydantic-settings" },
-    { name = "questionary" },
-    { name = "rich" },
-    { name = "rich-click" },
-    { name = "tomlkit" },
-    { name = "wcmatch" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/d9/a1/b88d53a19df8cb724f3e6616a76869213b10307b60c6ed125fb623771d64/bump_my_version-1.8.1.tar.gz", hash = "sha256:6457f2a1b964df60ff7d532e61d41422f19dbf936c9752bdff25d79f63768069", size = 1128093, upload-time = "2026-11-01T15:09:59.19Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/9b/06/5484254ed5682b9ace7fb3ab5c46d6c6339de1b29d4f6586a1ecbcf71644/bump_my_version-1.8.1-py3-none-any.whl", hash = "sha256:b85397a51d5fa6bfa338fe7672de5c02268b455584be17cb455568b71c6eb0af", size = 69778, upload-time = "2026-11-01T15:09:57.482Z" },
-]
-
-[[package]]
 name = "cachetools"
 version = "7.3.3"
 source = { registry = "https://pypi.org/simple" }
@@ -1308,7 +1279,6 @@ wandb = [
 
 [package.dev-dependencies]
 dev = [
-    { name = "bump-my-version" },
     { name = "mkdocstrings", extra = ["python"] },
     { name = "mlflow" },
     { name = "numpy" },
@@ -1365,7 +1335,6 @@ provides-extras = ["mlflow", "wandb", "dashboard"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "bump-my-version", specifier = ">=1.5.1" },
     { name = "mkdocstrings", extras = ["python"], specifier = ">=1.0.6" },
     { name = "mlflow", specifier = "==3.16.0" },
     { name = "numpy", specifier = "==2.4.6" },
@@ -3205,18 +3174,6 @@ wheels = [
 ]
 
 [[package]]
-name = "prompt-toolkit"
-version = "3.0.53"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "wcwidth" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/7d/ea/39b988c938f75cb75d7045b5c69f8bfed47ee2152c8837fb403de29d6fb8/prompt_toolkit-3.0.53.tar.gz", hash = "sha256:9ec8a0ad96d5c56148b3f914aa79c1564c3fde5d2e6b876e7bc327e353cf8fa6", size = 435492, upload-time = "2026-07-26T20:56:14.758Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/54/6f/84908cad2d6aa5144abcf7b42709fe4fdb459bc640ec7ac5786e7693dabc/prompt_toolkit-3.0.53-py3-none-any.whl", hash = "sha256:01c0891d7f9237d5e339f7d3e42cdae80b7534abb1c7c0e3352efba6231492f2", size = 392288, upload-time = "2026-07-26T20:56:12.512Z" },
-]
-
-[[package]]
 name = "propcache"
 version = "0.5.4"
 source = { registry = "https://pypi.org/simple" }
@@ -3614,21 +3571,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pydantic-settings"
-version = "2.16.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "pydantic" },
-    { name = "python-dotenv" },
-    { name = "typing-extensions" },
-    { name = "typing-inspection" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/59/28/227c843eedd29bd78e132e5aafa420d83154b10465c312f9c21ff2eaf77d/pydantic_settings-2.16.3.tar.gz", hash = "sha256:10e36f616623ebb586c05ca3d3cd22927146869db413d4f14c20c514442a1337", size = 311716, upload-time = "2026-11-13T11:18:30.102Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/4c/26/3e68379ca313b6aa58e11fbd8b28d5c6f1b9f4428d70222ba021a76797ec/pydantic_settings-2.16.3-py3-none-any.whl", hash = "sha256:d1db16a2d34006323a1b42c0640898da58adfbad7ec30baaa9e2b18aafc08999", size = 82679, upload-time = "2026-11-13T11:18:28.73Z" },
-]
-
-[[package]]
 name = "pygments"
 version = "2.21.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3934,18 +3876,6 @@ wheels = [
 ]
 
 [[package]]
-name = "questionary"
-version = "2.1.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "prompt-toolkit" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/f6/45/eafb0bba0f9988f6a2520f9ca2df2c82ddfa8d67c95d6625452e97b204a5/questionary-2.1.1.tar.gz", hash = "sha256:3d7e980292bb0107abaa79c68dd3eee3c561b83a0f89ae482860b181c8bd412d", size = 25845, upload-time = "2025-08-28T19:00:20.851Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/3c/26/1062c7ec1b053db9e499b4d2d5bc231743201b74051c973dadeac80a8f43/questionary-2.1.1-py3-none-any.whl", hash = "sha256:a51af13f345f1cdea62347589fbb6df3b290306ab8930713bfae4d475a7d4a59", size = 36753, upload-time = "2025-08-28T19:00:19.56Z" },
-]
-
-[[package]]
 name = "referencing"
 version = "0.37.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3997,20 +3927,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c0/8f/0722ca900cc807c13a6a0c696dacf35430f72e0ec571c4275d2371fca3e9/rich-15.0.0.tar.gz", hash = "sha256:edd07a4824c6b40189fb7ac9bc4c52536e9780fbbfbddf6f1e2502c31b068c36", size = 230680, upload-time = "2026-04-12T08:24:00.75Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/82/3b/64d4899d73f91ba49a8c18a8ff3f0ea8f1c1d75481760df8c68ef5235bf5/rich-15.0.0-py3-none-any.whl", hash = "sha256:33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb", size = 310654, upload-time = "2026-04-12T08:24:02.83Z" },
-]
-
-[[package]]
-name = "rich-click"
-version = "1.9.9"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "click" },
-    { name = "colorama", marker = "sys_platform == 'win32'" },
-    { name = "rich" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/96/3e/5688fdd83aea416de336582a274f2bc8236b5c261b04c11e17bc262786ad/rich_click-1.9.9.tar.gz", hash = "sha256:324cba7513cd4187ee92b2eef21f071714e45be062458c8b157bd7e0c81103e3", size = 75866, upload-time = "2026-09-05T19:20:14.799Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/b5/51/b2b91aec091e86bc961e5164f00207d89f133cc82b5ddad541d2132ea819/rich_click-1.9.9-py3-none-any.whl", hash = "sha256:365e7a9d0adb42e41ea832a0a12e02c44c079a26536dee688125eb9814f97274", size = 71910, upload-time = "2026-09-05T19:20:13.587Z" },
 ]
 
 [[package]]
@@ -4961,18 +4877,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/5a/bc/c04fbb2d6366afb0850e39c6d848f2d38066ff6dadccc886b3cb12c39e32/watchdog-7.1.0-py3-none-win_amd64.whl", hash = "sha256:16a5ba8694587cdbeae4ab8e6434cece994f9cce4e5bab03e61e6d1a0a93a643", size = 103260, upload-time = "2026-11-05T09:33:17.687Z" },
     { url = "https://files.pythonhosted.org/packages/92/9c/5a39ec8880c08e50f75d90f4e0e27b95dc91a04deb5e6e04871dd4b7e006/watchdog-7.1.0-py3-none-win_arm64.whl", hash = "sha256:5ed4b94365c53ffd51d88e47ca48d6afae02fb1bd849175a9a10927a2fbfb932", size = 103260, upload-time = "2026-11-05T09:33:18.987Z" },
     { url = "https://files.pythonhosted.org/packages/c0/aa/7a7210433e000f2491ddec7756d312009b0a47847e5c3457ccb03852cfdf/watchdog-7.1.0-py3-none-win_ia64.whl", hash = "sha256:0cfc5a6b3d4e76fc3e18fd371ee79d57945004da4105b589f71bb16966fd3e67", size = 103256, upload-time = "2026-11-05T09:33:20.159Z" },
-]
-
-[[package]]
-name = "wcmatch"
-version = "12.0.3"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "bracex" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/db/c5/fb0e01e995d104af32ce83a4ada70476d647c116dc8897887949c9886204/wcmatch-12.0.3.tar.gz", hash = "sha256:ccf83affafadc4286ffb335bc827ca2bffb0547fa5d5587600b585151bce4359", size = 167761, upload-time = "2026-11-14T21:47:55.702Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/82/e1/1be8aa2cc624821fc17c195da4a467fc5dfa5073345b08c784dd76977ebc/wcmatch-12.0.3-py3-none-any.whl", hash = "sha256:7255aeae27423a2dfe5bbce9bab7e97369ecad16f0d0a5244f85239123daeaa5", size = 52483, upload-time = "2026-11-14T21:47:54.32Z" },
 ]
 
 [[package]]
