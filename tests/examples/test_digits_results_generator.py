@@ -35,7 +35,9 @@ def test_digits_refuses_existing_output_and_partial_export(
     assert not output.exists()
 
 
-def test_bundled_digits_database_is_portable(generator, tmp_path):
+def test_bundled_digits_database_is_portable(
+    generator, tmp_path, monkeypatch, mlflow_server_factory
+):
     Project.create(tmp_path, example="digits", results=True, install_skill=False)
     project = Project.discover(tmp_path)
     assert {record.id: record.title for record in project.vault.list()} == {
@@ -47,6 +49,8 @@ def test_bundled_digits_database_is_portable(generator, tmp_path):
         record.id.rsplit("/", 1)[-1]: record.id for record in project.vault.list()
     }
     generator["validate_database"](tmp_path / "mlflow.db", ids_by_name)
+    tracking_uri = mlflow_server_factory(tmp_path / "mlflow.db")
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", tracking_uri)
     assert not (tmp_path / "generate_results.py").exists()
     with sqlite3.connect(tmp_path / "mlflow.db") as db:
         for (uri,) in db.execute("SELECT artifact_uri FROM runs"):
@@ -75,7 +79,9 @@ def test_bundled_digits_database_is_portable(generator, tmp_path):
     assert {row["source"] for row in rows} == {"mlflow"}
 
 
-def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
+def test_generate_relocate_query_and_append(
+    generator, tmp_path, monkeypatch, mlflow_server_factory
+):
     pytest.importorskip("mlflow")
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "https://invalid.example")
     monkeypatch.setenv("MLFLOW_EXPERIMENT_NAME", "unrelated")
@@ -102,6 +108,8 @@ def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
 
     shutil.copytree(output, config.root, dirs_exist_ok=True)
     config = Project.discover(config.root)
+    tracking_uri = mlflow_server_factory(config.root / "mlflow.db")
+    monkeypatch.setenv("MLFLOW_TRACKING_URI", tracking_uri)
     weak = config.vault.load("digit-classification/weak-l2")
     leaderboard = Leaderboard.load(config)
     runs = leaderboard.list_runs(config)
@@ -148,7 +156,7 @@ def test_generate_relocate_query_and_append(generator, tmp_path, monkeypatch):
         project=config,
         directory=config.root,
         env={
-            "MLFLOW_TRACKING_URI": f"sqlite:///{config.root / 'mlflow.db'}",
+            "MLFLOW_TRACKING_URI": tracking_uri,
             "MLFLOW_EXPERIMENT_NAME": "hiraku-digits",
         },
     )

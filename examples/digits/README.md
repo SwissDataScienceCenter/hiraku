@@ -30,20 +30,33 @@ extra too and initialize a separate project with the six bundled runs:
 ```bash
 hiraku example create digits digits-dashboard --with-results
 cd digits-dashboard
+```
+
+Hiraku reads the prepared `mlflow.db` through an MLflow tracking server. Start
+the server from the project directory in one terminal:
+
+```bash
+uv run mlflow server --backend-store-uri sqlite:///mlflow.db \
+  --host 127.0.0.1 --port 5000
+```
+
+In another terminal, point Hiraku to it before querying runs or opening the
+dashboard:
+
+```bash
+export MLFLOW_TRACKING_URI="http://127.0.0.1:5000"
 hiraku dashboard --record digit-classification
 ```
 
-The dashboard reads the prepared `mlflow.db` directly, so an MLflow server is
-not required. Use `hiraku dashboard --init --edit --record digit-classification` to copy the
-notebook into the project and edit it. Run details only show an MLflow link
-after you start the MLflow UI. See the dashboard guide for adding a UI link to
-a custom project.
+Use `hiraku dashboard --init --edit --record digit-classification` to copy the
+notebook into the project and edit it. Run details link to the MLflow UI when
+the dashboard is configured with its URL. See the dashboard guide for details.
 
 MLflow creates `mlflow.db` in the project root on the first launch. The training
 script uses the Hiraku project root to keep that location stable. Set
-`MLFLOW_TRACKING_URI` or `MLFLOW_EXPERIMENT_NAME` only
-when you want to override the local defaults. These variables affect the
-training process only; see the MLflow guide when adapting the example to a
+`MLFLOW_TRACKING_URI` or `MLFLOW_EXPERIMENT_NAME` to override the training
+defaults. Hiraku's MLflow backend requires `MLFLOW_TRACKING_URI` to point to an
+HTTP(S) tracking server; see the MLflow guide when adapting the example to a
 custom tracking store.
 
 ## Create the research root and child records
