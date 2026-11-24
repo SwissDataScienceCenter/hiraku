@@ -79,6 +79,10 @@ with mlflow.start_run():
     mlflow.log_metric("val/accuracy", accuracy)  # calculated by your code
 ```
 
+Add a `hiraku.commit` tag with the commit that the script runs at (for example
+`git rev-parse HEAD`) if you use the research workflow: it only uses runs whose
+commit is the experiment's.
+
 ## Inspect
 
 ```bash

@@ -33,6 +33,8 @@ def test_eurosat_rgb_example_initializes_without_downloading_data(
     invoke(runner, ["example", "create", "eurosat-rgb", "."])
 
     assert (project / "train.py").is_file()
+    # The research workflow only counts runs that carry the experiment's commit.
+    assert '"hiraku.commit"' in (project / "train.py").read_text()
     assert (project / "pyproject.toml").is_file()
     assert "/data/" in (project / ".gitignore").read_text()
     assert not (project / "data").exists()

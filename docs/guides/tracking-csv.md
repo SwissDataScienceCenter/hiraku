@@ -46,7 +46,7 @@ run-001,baseline,JOB_ID,2026-01-01T12:00:00Z,0.84,42
 Choose a unique run ID for each execution. Prefix metric columns with
 `metric.` and parameter columns with `param.`. Populate `record_id` and
 `hiraku_job_id` from `HIRAKU_RECORD_ID` and `HIRAKU_JOB_ID` respectively.
-The optional `commit` column describes source-reported code provenance.
+The `commit` column describes source-reported code provenance. It is optional, except for the research workflow, which only uses runs whose commit is the experiment's.
 
 Your script chooses the CSV location, relative to its working directory:
 

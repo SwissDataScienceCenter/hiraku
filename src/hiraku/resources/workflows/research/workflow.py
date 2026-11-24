@@ -704,10 +704,15 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             )
             if item["step"] == "waiting"
         ]
+        left_out = {
+            item["id"]: stray
+            for item in waiting
+            if (stray := _left_out_runs(project.vault.load(item["id"]), project))
+        }
         response = _ask(
             markdown,
             "Wait",
-            {"launched": waiting},
+            {"launched": waiting, "runs_left_out": left_out},
             WaitResponse,
             state.get("feedback", ""),
             ["tracking.run.read", "workflow.user_input"],
@@ -729,11 +734,36 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
         if any(item["step"] == "waiting" for item in fresh) and not any(
             item["step"] in WORK_PRIORITIES for item in fresh
         ):
+            stray = {
+                item["id"]: _left_out_runs(project.vault.load(item["id"]), project)
+                for item in fresh
+                if item["step"] == "waiting"
+            }
+            # A run without a commit means the command does not record it; a run
+            # with another commit belongs to an earlier commit of the experiment
+            # (for example before a review fix) and only needs to be ignored.
+            unrecorded = _runs_by_record(stray, recorded=False)
+            earlier = _runs_by_record(stray, recorded=True)
+            hint = ""
+            if unrecorded:
+                hint += (
+                    " Runs with metrics but no commit were left out: "
+                    + _list_runs(unrecorded)
+                    + ". The command has to record the commit it runs at (for "
+                    "W&B `hiraku.commit` in the run config); send `failed` for "
+                    "the experiment so the code is fixed."
+                )
+            if earlier:
+                hint += (
+                    " Runs of an earlier commit were ignored: "
+                    + _list_runs(earlier)
+                    + "; wait for a run of the experiment's current commit."
+                )
             return Command(
                 update={
                     "feedback": (
                         "No launched experiment has a run with metrics yet; "
-                        "check again later."
+                        "check again later." + hint
                     )
                 },
                 goto="wait",
@@ -1882,6 +1912,37 @@ def _matching_runs(experiment: Record, project: Project) -> list[Run]:
         for run in _all_runs(experiment, project)
         if run.commit == experiment.commit and run.id not in excluded
     ]
+
+
+def _left_out_runs(experiment: Record, project: Project) -> list[dict[str, Any]]:
+    """Runs of the record that have metrics but not the experiment's commit.
+
+    Such a run never reaches the analysis. A run without a commit usually means
+    that the command does not record it in the tracking source; a run with
+    another commit comes from an earlier commit of the experiment.
+    """
+    if not experiment.commit:
+        return []
+    return [
+        {"run_id": run.id, "commit": run.commit}
+        for run in _all_runs(experiment, project)
+        if run.metrics and run.commit != experiment.commit
+    ]
+
+
+def _runs_by_record(
+    left_out: dict[str, list[dict[str, Any]]], *, recorded: bool
+) -> dict[str, list[str]]:
+    """Run IDs per record whose commit is (or is not) recorded."""
+    selected = {
+        key: [run["run_id"] for run in runs if bool(run["commit"]) is recorded]
+        for key, runs in left_out.items()
+    }
+    return {key: run_ids for key, run_ids in selected.items() if run_ids}
+
+
+def _list_runs(runs: dict[str, list[str]]) -> str:
+    return "; ".join(f"{key}: {', '.join(run_ids)}" for key, run_ids in runs.items())
 
 
 def _run_data(run: Run, reason: str = "") -> dict[str, Any]:

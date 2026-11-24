@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import os
 import random
+import subprocess
 import time
 
 import torch
@@ -107,6 +108,20 @@ def provenance() -> dict[str, str]:
     return {name: os.environ[name] for name in PROVENANCE_VARIABLES}
 
 
+def code_commit() -> str | None:
+    """Return the commit that this script runs at, so a run can be attributed."""
+    try:
+        return subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
 def train_one_epoch(
     model: nn.Module,
     loader: DataLoader,
@@ -183,6 +198,7 @@ def main() -> None:
         config={
             "hiraku.record_id": attribution["HIRAKU_RECORD_ID"],
             "hiraku.job_id": attribution["HIRAKU_JOB_ID"],
+            "hiraku.commit": code_commit(),
             "dataset.name": "EuroSAT RGB",
             "dataset.classes": 10,
             "dataset.image_size": IMAGE_SIZE,

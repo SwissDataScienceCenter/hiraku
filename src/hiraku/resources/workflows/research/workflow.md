@@ -21,7 +21,11 @@ research step and is done once. Fix every problem in `problems`:
   Describe the data and model paths, software environment, command execution,
   log locations, and how the leaderboard's tracking source records run IDs,
   record IDs, commits, and metrics. `hiraku run` provides `HIRAKU_RECORD_ID`
-  and `HIRAKU_COMMIT` to the command.
+  and `HIRAKU_JOB_ID` to the command, but not the commit: the command must
+  record the commit it runs at in the tracking source (`hiraku.commit` in a W&B
+  run's config or an MLflow run's tags, the `commit` column of a CSV). Hiraku
+  only counts runs whose commit is the experiment's, so a run without it never
+  reaches the analysis.
 
 Find these facts in the repository (README, CLAUDE.md, job scripts) and ask the
 user for what you cannot find. Then send `set_up`; Hiraku checks again.
@@ -73,9 +77,16 @@ record ID and the error.
 ## Wait
 
 The experiments in the data are launched and have no run with metrics yet.
-Check their jobs and runs, for example with `hiraku runs --record <id>`. Send
+Check their jobs and runs, for example with `hiraku job status <job-id>` and
+`hiraku leaderboard runs --record <id>`. Send
 `checked` when a run has finished; Hiraku answers not ready until a run has
-metrics. If a job failed without recording a run, read its log and send
+metrics. `runs_left_out` lists runs of an experiment that have metrics but not
+its commit. A run there without a `commit` means the command did not record the
+commit: fix that (it is the code of the experiment) and send `failed` with the
+experiment's record ID and the reason. A run with another `commit` comes from an
+earlier commit of the experiment, for example before a review fix; it is
+ignored, so keep waiting for the run of the current commit. If a job failed
+without recording a run, read its log (`hiraku job logs <job-id>`) and send
 `failed` with the experiment's record ID and the reason.
 
 ## Analyze

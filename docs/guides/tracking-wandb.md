@@ -47,7 +47,7 @@ with wandb.init(
 W&B assigns the run ID. Configure the logging project in your training code
 or with `WANDB_PROJECT`; Hiraku does not infer it from leaderboards. Include `hiraku.record_id` in the
 W&B run configuration so Hiraku can attribute the run; `hiraku.commit` is
-optional. A W&B group alone does not provide record attribution. The leaderboard source
+optional, except for the research workflow, which only uses runs whose commit is the experiment's (for example `git rev-parse HEAD` in the run config). A W&B group alone does not provide record attribution. The leaderboard source
 selects which W&B project to query and does not initialize a W&B run.
 
 ## Inspect

@@ -507,6 +507,54 @@ def test_only_the_result_and_the_study_are_reviewed_by_default(
     assert [item["kind"] for item in experiment.reviews] == ["result"]
 
 
+def test_wait_names_runs_that_do_not_carry_the_experiment_commit(
+    runner: CliRunner,
+) -> None:
+    # A tracking source that does not record the commit (for example a W&B script
+    # without `hiraku.commit`): the runs finish but never match the experiment.
+    project, session, _ = _autonomous_study(reviews=[])
+    _design(project, session)
+    _, sha = _implement(project, session, "baseline")
+    waiting = resume_workflow(session, {"event": "launched"}, project=project)
+    assert _step(waiting) == "wait"
+    assert _value(waiting)["data"]["runs_left_out"] == {}
+    _write_runs(project, "run-1,baseline,,0.5")
+    stuck = resume_workflow(session, {"event": "checked"}, project=project)
+    assert _step(stuck) == "wait"
+    assert "run-1" in _value(stuck)["feedback"]
+    assert "hiraku.commit" in _value(stuck)["feedback"]
+    assert _value(stuck)["data"]["runs_left_out"] == {
+        "baseline": [{"run_id": "run-1", "commit": None}]
+    }
+    # With the commit recorded the same experiment goes on to the analysis.
+    _write_runs(project, f"run-1,baseline,{sha},0.5")
+    analyzing = resume_workflow(session, {"event": "checked"}, project=project)
+    assert _step(analyzing) == "analyze"
+
+
+def test_wait_does_not_blame_runs_of_an_earlier_commit(runner: CliRunner) -> None:
+    # A run of an earlier commit (for example before a review fix) has a commit;
+    # it is ignored while the run of the current commit is pending, and the
+    # agent is not told to send `failed`, which would spend a repair.
+    project, session, _ = _autonomous_study(reviews=[])
+    _design(project, session)
+    _, sha = _implement(project, session, "baseline")
+    resume_workflow(session, {"event": "launched"}, project=project)
+    _write_runs(project, "run-old,baseline,deadbeef,0.4")
+    pending = resume_workflow(session, {"event": "checked"}, project=project)
+    assert _step(pending) == "wait"
+    assert "run-old" in _value(pending)["feedback"]
+    assert "earlier commit" in _value(pending)["feedback"]
+    assert "send `failed`" not in _value(pending)["feedback"]
+    assert _value(pending)["data"]["runs_left_out"] == {
+        "baseline": [{"run_id": "run-old", "commit": "deadbeef"}]
+    }
+    _write_runs(project, "run-old,baseline,deadbeef,0.4", f"run-1,baseline,{sha},0.5")
+    analyzing = resume_workflow(session, {"event": "checked"}, project=project)
+    assert _step(analyzing) == "analyze"
+    assert [item["run_id"] for item in _value(analyzing)["data"]["runs"]] == ["run-1"]
+
+
 def test_reviews_option_defaults_and_validation(runner: CliRunner) -> None:
     from hiraku.resources.workflows.research.workflow import ResearchInput
 
