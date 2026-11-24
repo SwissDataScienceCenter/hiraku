@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import os
+import shutil
 import signal
 import socket
 import subprocess
-import shutil
 import sys
 import time
 import urllib.error
@@ -103,6 +103,8 @@ def _serve_mlflow(directory: Path, database: Path):
                 else:
                     process.kill()
                 process.wait(timeout=15)
+
+
 @pytest.fixture
 def workflow_project(tmp_path: Path) -> Project:
     """Create a project with a test-only workflow graph."""
