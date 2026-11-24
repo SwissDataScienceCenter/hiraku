@@ -3,11 +3,11 @@
 
 ## Collaborative data science, with agents.
 
-Hiraku is built on a simple premise: **effective collaboration requires a common structure.**
+Hiraku is built on a simple premise: **effective collaboration requires a shared structure.**
 
-Designed to bring **user-driven development and scalable agentic workflows** together in a unified framework.
+Designed to support **user-driven development and scalable agentic workflows**, Hiraku provides a standardized workspace for human-agent collaboration.
+Built on the **open ecosystem**, Hiraku integrates with existing research infrastructure and adapts to *your* project needs.
 
-Built on the **open ecosystem**, Hiraku integrates with existing research infrastructure and project needs.
 
 ```bash
 uv tool install hiraku
