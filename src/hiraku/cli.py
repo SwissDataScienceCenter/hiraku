@@ -10,7 +10,7 @@ import shutil
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
-from importlib.resources import as_file, files
+from importlib.resources import as_file
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -37,7 +37,7 @@ from .errors import (
 from .git import GitRepository, init_code_repository, require_git
 from .io import dump_yaml
 from .job import Submission, observe_submission, prepare_job, run_local, submit_job
-from .project import Project
+from .project import Project, _examples_root
 from .record import Record, RecordUpdate, validate_identifier
 from .tracking import Leaderboard, Run
 from .tracking.leaderboard import _leaderboard_path
@@ -269,7 +269,7 @@ def example_group() -> None:
 @example_group.command("list")
 def example_list_command() -> None:
     """List available bundled examples."""
-    examples = files("hiraku.examples")
+    examples = _examples_root()
     rows = []
     for example in sorted(examples.iterdir(), key=lambda item: item.name):
         manifest = example / "example.yml"
@@ -315,7 +315,7 @@ def example_create_command(
         require_git()
     generator = None
     if generate:
-        generator = files("hiraku.examples") / example / "generate_results.py"
+        generator = _examples_root() / example / "generate_results.py"
         if not generator.is_file():
             raise click.UsageError(f"Example {example!r} has no generator")
     project = Project.create(

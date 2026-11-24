@@ -1,6 +1,6 @@
 [build-system]
-requires = ["uv_build>=0.11,<0.12"]
-build-backend = "uv_build"
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
 
 [project]
 name = "hiraku"
@@ -68,15 +68,19 @@ dev = [
   "bump-my-version>=1.5.1",
 ]
 
-[tool.uv.build-backend]
-module-name = ["hiraku", "psij-descriptors"]
-namespace = true
-source-exclude = [
-    "**/.artifacts",
-    "**/.locks",
-    "**/.owners",
-    "**/__marimo__",
-]
+[tool.hatch.build]
+exclude = [".artifacts", ".locks", ".owners", "__marimo__", "__pycache__"]
+
+[tool.hatch.build.targets.sdist]
+only-include = ["src", "examples"]
+
+[tool.hatch.build.targets.wheel]
+only-include = ["src/hiraku", "src/psij-descriptors", "examples"]
+dev-mode-dirs = ["src"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src" = ""
+"examples" = "hiraku/examples"
 
 [tool.ruff]
 target-version = "py311"
