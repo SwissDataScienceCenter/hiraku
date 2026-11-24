@@ -1,14 +1,11 @@
 <div class="sdsc-home-hero" markdown="1">
-
 # Hiraku
 
 ## Collaborative data science, with agents.
 
-
-
 Hiraku is built on a simple premise: **effective collaboration requires a shared structure.**
 
-Designed to bring **user-driven development and scalable agentic workflows** together within a unified framework.
+Designed to bring **user-driven development and scalable agentic workflows** together in a unified framework.
 
 Built on the **open ecosystem**, Hiraku integrates with existing research infrastructure and project needs.
 ```bash
