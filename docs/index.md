@@ -8,11 +8,11 @@ Hiraku is built on a simple premise: **effective collaboration requires a shared
 Designed to bring **user-driven development and scalable agentic workflows** together in a unified framework.
 
 Built on the **open ecosystem**, Hiraku integrates with existing research infrastructure and project needs.
+
 ```bash
 uv tool install 'git+https://github.com/SwissDataScienceCenter/hiraku.git'
 ```
-
-[Getting started](installation.md){ .md-button .md-button--primary }
+[Get started](first_experiment.md){ .md-button .md-button--primary }
 [Install options](installation.md){ .md-button }
 [Explore concepts](concepts.md){ .md-button }
 </div>
