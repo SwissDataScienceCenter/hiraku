@@ -77,39 +77,20 @@ Use a feature branch and focused commits. [Conventional Commit](https://www.conv
 
 Release permissions are restricted to maintainers and administrators.
 
-The `--bump` option supports the following common version components: `major`, `minor`, and `patch`.
+1. Make sure `## [Unreleased]` in `CHANGELOG.md` has at least one entry. In
+   GitHub Actions, run **Prepare release** from `main` and select `patch`,
+   `minor`, or `major`. The workflow bumps the version, updates the lockfile and
+   changelog, and opens a PR. [Prepare release](https://github.com/SwissDataScienceCenter/hiraku/actions/workflows/prepare-release.yml)
+2. Select **Approve workflows to run** on the PR to start CI. Review and merge
+   the PR once the checks pass.
+3. Tag the merged commit using the version and commit SHA shown by GitHub.
 
-From an up-to-date `main` branch, create a temporary branch and let `uv` update the project version and lockfile:
+   ```bash
+   git fetch origin main
+   git tag vX.Y.Z <merge-commit-sha>
+   git push origin vX.Y.Z
+   ```
 
-```bash
-git switch main
-git pull --ff-only
-git switch -c release/prepare
-uv version --bump patch
-VERSION=$(uv version --short)
-git branch -m "release/v${VERSION}"
-uv run --no-sync python scripts/update_changelog.py
-```
-
-The script adds the dated version heading below `## [Unreleased]` with the unreleased notes then fall under the new version heading.
-
-Commit and push the release branch:
-
-```bash
-git add pyproject.toml uv.lock CHANGELOG.md
-git commit -m "chore(release): prepare v${VERSION}"
-git push -u origin HEAD
-```
-
-Open a pull request from `release/vX.Y.Z` to `main`; the PR CI runs the tests, lint, and docs checks.
-
-After the PR merges, tag its merge commit using the actual version and merge commit SHA shown by GitHub:
-
-```bash
-git tag vX.Y.Z <merge-commit-sha>
-git push origin vX.Y.Z
-```
-
-CI verifies that the tag matches the project version and points to a commit on `main`, builds the distributions, publishes them to PyPI, then attaches those same files to the GitHub Release.
-
-Use `uv version --bump minor` or `uv version --bump major` for other release types. `uv` also supports `stable`, `alpha`, `beta`, `rc`, `post`, and `dev` bumps.
+The Release workflow checks the tag against the project version and confirms the
+tagged commit is on `main`. It builds the distributions, publishes them to PyPI,
+and attaches the same files to the GitHub release.
