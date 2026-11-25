@@ -52,6 +52,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- Add `hiraku job wait JOB_ID...` and `wait_for_submissions()` to block until
+  submitted jobs are final, with `--any`, `--timeout` (exit code 124) and
+  `--json`; final statuses are saved to the submission history
+  ([issue #200](https://github.com/SwissDataScienceCenter/hiraku/issues/200)).
 - Document submitting Slurm jobs through PSI/J's native `slurm` executor,
   including scheduler options passed with `slurm.*` custom attributes.
 - Add native PSI/J execution with `prepare_job()` for research attribution,
