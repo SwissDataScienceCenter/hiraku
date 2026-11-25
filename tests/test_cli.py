@@ -307,6 +307,35 @@ def test_init_and_example_create_accept_destination(
     )
     assert Project.load(tmp_path / "demo/hiraku.yml").root == tmp_path / "demo"
     assert (tmp_path / "demo/train.py").is_file()
+    assert not (tmp_path / "demo/mlflow.db").exists()
+
+
+def test_example_create_copies_bundled_results(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = invoke("example", "create", "digits", "--with-results")
+
+    assert result.exit_code == 0, result.output
+    project = Project.load(tmp_path / "digits/hiraku.yml")
+    assert (project.root / "train.py").is_file()
+    assert (project.root / "mlflow.db").is_file()
+    assert project.vault.load("digit-classification/weak-l2").title == (
+        "Weak L2 regularization"
+    )
+
+
+@pytest.mark.parametrize("option", ["--generate", "--with-generator"])
+def test_example_create_rejects_generator_options(
+    tmp_path: Path, monkeypatch, option: str
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    result = invoke("example", "create", "digits", option)
+
+    assert result.exit_code == 2
+    assert "No such option" in result.output
+    assert option in result.output
+    assert not (tmp_path / "digits").exists()
 
 
 def test_init_reports_existing_project_without_overwriting_it(

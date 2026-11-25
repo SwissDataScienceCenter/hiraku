@@ -25,8 +25,10 @@ git add .
 git commit -m "initialize Digits example"
 ```
 
-Alternatively, to browse the example without training, install the `dashboard`
-extra too and initialize a separate project with the six bundled runs:
+To browse the example without training, install the `dashboard` extra too and
+create a project with `--with-results`. This copies the research records and a
+prepared MLflow database containing six runs. Each regularization setting has
+three runs of 20 epochs, one per seed (1, 2, and 3).
 
 ```bash
 uv tool install --force 'hiraku[mlflow,dashboard]'

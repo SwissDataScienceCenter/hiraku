@@ -226,7 +226,6 @@ class Project(BaseModel):
         template: Path | str | None = None,
         example: str | None = None,
         results: bool = False,
-        with_generator: bool = False,
     ) -> Project:
         """Create a project and install its selected resources.
 
@@ -237,7 +236,6 @@ class Project(BaseModel):
             template: Optional directory whose contents are copied into the project.
             example: Optional packaged example name to initialize from.
             results: Whether to include the example's prepared records and runs.
-            with_generator: Whether to copy the example's result generator.
 
         Returns:
             The initialized project.
@@ -251,7 +249,7 @@ class Project(BaseModel):
             raise ProjectExistsError(f"Hiraku project already exists at {root}")
         if template and example:
             raise ValidationError("template and example are mutually exclusive")
-        if (results or with_generator) and not example:
+        if results and not example:
             raise ValidationError("results requires an example")
 
         resources = files("hiraku.resources")
@@ -329,12 +327,6 @@ class Project(BaseModel):
                         dirs_exist_ok=True,
                         ignore=shutil.ignore_patterns("hiraku.yml"),
                     )
-
-            # Copy the example's result generator if requested
-            if with_generator:
-                generator = _examples_root() / example / "generate_results.py"
-                with as_file(generator) as source:
-                    shutil.copy2(source, root / "generate_results.py")
 
             ignore_path = root / ".gitignore"
             content = ignore_path.read_text() if ignore_path.exists() else ""
