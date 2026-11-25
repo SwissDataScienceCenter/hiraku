@@ -583,7 +583,10 @@ def wait_for_submissions(
     while pending:
         for item in list(pending):
             remaining = None if deadline is None else deadline - time.monotonic()
-            if remaining is not None and remaining <= 0:
+            # timedelta rounds anything below a microsecond to zero, which
+            # PSI/J's wait() reads as "no timeout"; treat the last millisecond
+            # as expired so the deadline always holds.
+            if remaining is not None and remaining < 0.001:
                 record(pending)
                 return False
             # Short slices let several jobs be watched in turn; PSI/J's own
