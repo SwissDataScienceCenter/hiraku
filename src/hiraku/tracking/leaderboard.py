@@ -73,7 +73,8 @@ class Leaderboard(BaseModel):
                 )
             if len(names) != 1:
                 raise ValidationError(
-                    f"Select a leaderboard by name. Available: {', '.join(names)}"
+                    "Select a leaderboard with --leaderboard; "
+                    f"available: {', '.join(names)}"
                 )
             name = names[0]
         path = _leaderboard_path(project, name)

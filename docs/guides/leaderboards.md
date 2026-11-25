@@ -36,9 +36,9 @@ last; plots skip runs without the required finite values and report the count.
 ```bash
 hiraku leaderboard list
 hiraku leaderboard show validation --json
-hiraku leaderboard runs validation --sort accuracy
-hiraku leaderboard runs validation --include-unattributed
-hiraku leaderboard runs validation --record baseline
+hiraku leaderboard runs --leaderboard validation --sort accuracy
+hiraku leaderboard runs --leaderboard validation --include-unattributed
+hiraku leaderboard runs --leaderboard validation --record baseline
 hiraku dashboard --leaderboard validation
 hiraku leaderboard delete validation
 ```

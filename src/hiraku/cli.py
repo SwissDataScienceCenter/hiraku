@@ -970,11 +970,11 @@ def leaderboard_delete(state: CLIContext, name: str) -> None:
 
 
 @leaderboard_group.command("runs")
-@click.argument("name", required=False)
 @click.option(
     "--include-unattributed", is_flag=True, help="Include runs without a record ID."
 )
 @click.option("--record", "record_id")
+@click.option("--leaderboard", "leaderboard_name")
 @click.option("--metrics")
 @click.option("--params")
 @click.option("--sort")
@@ -986,8 +986,8 @@ def leaderboard_delete(state: CLIContext, name: str) -> None:
 @click.pass_obj
 def run_list(
     state: CLIContext,
-    name: str | None,
     record_id: str | None,
+    leaderboard_name: str | None,
     include_unattributed: bool,
     metrics: str | None,
     params: str | None,
@@ -998,13 +998,13 @@ def run_list(
     json_output: bool,
     pretty: bool,
 ) -> None:
-    """List attributed runs. Omit NAME to select the sole leaderboard."""
+    """List attributed runs in a leaderboard, optionally filtered by record ID."""
     _validate_json_options(json_output, pretty)
     if ascending and descending:
         raise ValidationError("--ascending and --descending are mutually exclusive")
     if (ascending or descending) and sort is None:
         raise ValidationError("A sort direction requires --sort")
-    leaderboard = Leaderboard.load(state.project, name)
+    leaderboard = Leaderboard.load(state.project, leaderboard_name)
     runs = leaderboard.list_runs(
         state.project,
         record_id=record_id,
