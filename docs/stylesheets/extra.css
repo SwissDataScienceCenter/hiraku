@@ -90,6 +90,20 @@
   margin: 0.75rem 0;
 }
 
+.md-typeset .sdsc-home-hero .sdsc-home-hero-subtitle {
+  margin: 0.75rem 0;
+  color: var(--sdsc-panel-heading);
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+body:has(.sdsc-home-hero) .md-nav__item:has(
+  > a[href$="#home-subtitle"]
+) {
+  display: none;
+}
+
 .md-typeset .sdsc-home-hero > p:last-child {
   display: flex;
   flex-wrap: wrap;
