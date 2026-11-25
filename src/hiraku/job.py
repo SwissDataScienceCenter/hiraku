@@ -545,6 +545,60 @@ def observe_submission(entry: Submission, project: Project) -> dict[str, Any]:
     return entry.model_dump(mode="json")
 
 
+def wait_for_submissions(
+    entries: Sequence[Submission],
+    *,
+    project: Project,
+    any_final: bool = False,
+    timeout: timedelta | None = None,
+) -> bool:
+    """Block until the submissions are final, saving each final status.
+
+    Args:
+        entries: Submissions to wait for; they are updated in place.
+        project: Project whose history receives the observed statuses.
+        any_final: Return as soon as one submission is final instead of all.
+        timeout: Return after this long even if the condition is not met.
+
+    Returns:
+        Whether the condition was met before the timeout. Submissions that are
+        still running are synced and saved like ``hiraku job status``.
+    """
+    if timeout is not None and timeout < timedelta(0):
+        raise ValidationError("Timeout must not be negative")
+    if any_final and any(entry.status.final for entry in entries):
+        return True
+    # Already-final submissions are never reattached: PSI/J may have consumed the
+    # auxiliary files that hold their exit codes.
+    pending = [
+        (entry, entry.get_psi_job()) for entry in entries if not entry.status.final
+    ]
+    deadline = None if timeout is None else time.monotonic() + timeout.total_seconds()
+
+    def record(items: Sequence[tuple[Submission, psij.Job]]) -> None:
+        for entry, job in items:
+            entry.sync(job)
+            entry.save(project)
+
+    while pending:
+        for item in list(pending):
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
+                record(pending)
+                return False
+            # Short slices let several jobs be watched in turn; PSI/J's own
+            # status polling runs in the background either way.
+            step = 1.0 if remaining is None else min(1.0, remaining)
+            if item[1].wait(timeout=timedelta(seconds=step)) is None:
+                continue
+            record([item])
+            pending.remove(item)
+            if any_final:
+                record(pending)
+                return True
+    return True
+
+
 def _follow_streams(job: psij.Job) -> None:
     directory = job.spec.directory or Path.cwd()
     with ExitStack() as stack:

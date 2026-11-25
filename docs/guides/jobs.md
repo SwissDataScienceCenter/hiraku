@@ -67,6 +67,32 @@ hiraku job logs JOB_ID --json
 hiraku job cancel JOB_ID
 ```
 
+## Wait for jobs
+
+`hiraku job wait` blocks until submitted jobs reach a final state, saves their
+final status to the submission history, and then shows them like
+`hiraku job status`. It works for every executor and needs no repeated
+`job status` calls:
+
+```bash
+hiraku job wait JOB_ID
+hiraku job wait JOB_ID OTHER_JOB_ID --any --timeout 30m --json
+```
+
+By default it waits for all given jobs; `--any` returns as soon as one of them
+is final. `--timeout` (seconds, or a number ending in `s`, `m` or `h`) returns
+earlier, with the current status of jobs that are still running. `--json`
+prints a list with one submission per job. The exit code is 0 when the final
+jobs completed successfully, 1 when one of them failed or was canceled, and 124
+when the timeout was reached first. Jobs that are already final are answered
+from history without contacting the executor.
+
+Only the calling process blocks: the jobs and other `hiraku` commands are not
+affected, and the command can be run again if it is interrupted. Agents can run
+it in the background and continue when it ends, instead of polling `job status`.
+There is no MCP equivalent, because a blocking tool call would hold the agent's
+turn until the job ends.
+
 ## Submission history
 
 Each accepted submission is saved locally to `.hiraku/jobs/<id>.json`.
