@@ -1,5 +1,7 @@
 # Workflow
 
+[View source on GitHub](https://github.com/SwissDataScienceCenter/hiraku/blob/main/src/hiraku/workflows/langgraph.py)
+
 See [Workflows](../../guides/workflows.md) for a graph and CLI walkthrough.
 
 ::: hiraku.workflows.langgraph.workflow_ids

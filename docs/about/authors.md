@@ -1,4 +1,4 @@
-`Hiraku` has been developed at the Swiss Data Science Center.
+`Hiraku` is developed at the Swiss Data Science Center.
 
 Developers and contributors:
 

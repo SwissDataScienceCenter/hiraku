@@ -2,8 +2,11 @@
 
 [![Latest release][release-badge]](https://swissdatasciencecenter.github.io/hiraku/about/changelog/)
 [![Documentation](https://img.shields.io/badge/docs-read-2563EB)](https://swissdatasciencecenter.github.io/hiraku/)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://swissdatasciencecenter.github.io/hiraku/installation/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://swissdatasciencecenter.github.io/hiraku/quickstart/installation/)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](https://swissdatasciencecenter.github.io/hiraku/about/license/)
+
+> [!WARNING]
+> **Beta release.** Hiraku is in active development. Features and interfaces may change between releases. Please provide feedback and report issues on [GitHub](https://github.com/SwissDataScienceCenter/hiraku/issues).
 
 ## Collaborative data science, with agents.
 
@@ -27,10 +30,10 @@ To initialize Hiraku on a new or existing project, run:
 cd my-project
 hiraku init .
 ```
-See the [installation guide](https://swissdatasciencecenter.github.io/hiraku/installation/) for
+See the [installation guide](https://swissdatasciencecenter.github.io/hiraku/quickstart/installation/) for
 optional dependencies and other ways to install Hiraku.
 
-Follow the [first experiment walkthrough](https://swissdatasciencecenter.github.io/hiraku/first_experiment/) to record a
+Follow the [first experiment walkthrough](https://swissdatasciencecenter.github.io/hiraku/quickstart/first_experiment/) to record a
 research goal, evaluate a baseline twice, and compare the runs.
 
 ## Features
@@ -40,13 +43,13 @@ Human and agents operate on a shared structure and interface. Hiraku provides:
 - **[Projects](https://swissdatasciencecenter.github.io/hiraku/guides/)** — initialize Hiraku in a new or existing
   project, with configuration in `hiraku.yml` and project data under `hiraku/`
   by default.
-- **[Research records](https://swissdatasciencecenter.github.io/hiraku/guides/experiment-branches/)** — document research
+- **[Research records](https://swissdatasciencecenter.github.io/hiraku/guides/records/)** — document research
   tasks, experiments, and results in Markdown with YAML metadata, following the [Open Knowledge Format](https://github.com/open-knowledge-format/open-knowledge-format). Connect
   related records, runs and code behind each experiment.
 - **[Jobs](https://swissdatasciencecenter.github.io/hiraku/guides/jobs/)** — run commands or submit
   them to PSI/J executors, including local, Renku, and Slurm execution. Pass
   record and job IDs to your scripts so they can attribute results.
-- **[Leaderboards](https://swissdatasciencecenter.github.io/hiraku/tracking/)** — read runs from CSV, MLflow, or
+- **[Leaderboards](https://swissdatasciencecenter.github.io/hiraku/guides/leaderboards/)** — read runs from CSV, MLflow, or
   Weights & Biases, choose comparison metrics, and review results across
   experiments.
 - **[Workflows](https://swissdatasciencecenter.github.io/hiraku/guides/workflows/)** — define project-specific LangGraph
@@ -69,9 +72,9 @@ Explore a larger project in the
 ## Documentation
 
 Read the [Hiraku documentation](https://swissdatasciencecenter.github.io/hiraku/)
-for [core concepts](https://swissdatasciencecenter.github.io/hiraku/concepts/), [user guides](https://swissdatasciencecenter.github.io/hiraku/guides/), and
+for [core concepts](https://swissdatasciencecenter.github.io/hiraku/quickstart/concepts/), [user guides](https://swissdatasciencecenter.github.io/hiraku/guides/), and
 the [Python API reference](https://swissdatasciencecenter.github.io/hiraku/api/). The guides cover
-[leaderboards](https://swissdatasciencecenter.github.io/hiraku/tracking/), the [dashboard](https://swissdatasciencecenter.github.io/hiraku/guides/dashboard/),
+[leaderboards](https://swissdatasciencecenter.github.io/hiraku/guides/leaderboards/), the [dashboard](https://swissdatasciencecenter.github.io/hiraku/guides/dashboard/),
 [MCP](https://swissdatasciencecenter.github.io/hiraku/guides/mcp/), and [workflows](https://swissdatasciencecenter.github.io/hiraku/guides/workflows/).
 
 ## Contributing

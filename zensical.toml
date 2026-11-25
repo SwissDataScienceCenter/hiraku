@@ -13,27 +13,32 @@ dev_addr = "localhost:8000"
 nav = [
   { "Introduction" = [
       { "Hiraku" = "index.md" },
-      { "Concepts" = "concepts.md" },
+      { "Changelog" = "about/changelog.md" },
+      { "Contributing" = "about/contributing.md" },
+      { "License" = "about/license.md" },
+      { "About" = "about/authors.md" },
   ] },
-  { "Getting started" = [
-      { "Installation" = "installation.md" },
-      { "First experiment" = "first_experiment.md" },
+  { "Quickstart" = [
+      { "1. Installation" = "quickstart/installation.md" },
+      { "2. Hiraku concepts" = "quickstart/concepts.md" },
+      { "3. First experiment" = "quickstart/first_experiment.md" },
+      { "4. Agentic workflows" = "quickstart/agentic_workflows.md" },
   ] },
-  { "User guide" = [
-      { "Project" = [
-          { "Overview" = "guides/index.md" },
-          { "MCP server" = "guides/mcp.md" },
-      ] },
-      { "Records" = "guides/experiment-branches.md" },
+  { "User Guides" = [
+      { "Overview" = "guides/index.md" },
+      { "Records" = "guides/records.md" },
       { "Jobs" = "guides/jobs.md" },
       { "Leaderboards" = [
-          { "Overview" = "tracking.md" },
+          { "Overview" = "guides/leaderboards.md" },
           { "CSV" = "guides/tracking-csv.md" },
           { "MLflow" = "guides/tracking-mlflow.md" },
           { "Weights & Biases" = "guides/tracking-wandb.md" },
       ] },
-      { "Dashboard" = "guides/dashboard.md" },
       { "Workflows" = "guides/workflows.md" },
+      { "User Interfaces" = [
+        { "MCP server" = "guides/mcp.md" },
+        { "Dashboard" = "guides/dashboard.md" },
+      ] },
   ] },
   { "Examples" = [
       { "Overview" = "examples/index.md" },
@@ -47,12 +52,6 @@ nav = [
       { "Leaderboard" = "api/python/leaderboards.md" },
       { "Workflow" = "api/python/workflows.md" },
   ] },
-  { "About" = [
-      { "Authors" = "about/authors.md" },
-      { "Contributing" = "about/contributing.md" },
-      { "Changelog" = "about/changelog.md" },
-      { "License" = "about/license.md" },
-  ]},
 ]
 
 extra_css = ["stylesheets/extra.css"]
@@ -165,6 +164,9 @@ pymdownx.tilde = {}
 
 [project.plugins.search]
 
+[project.plugins.mkdocstrings]
+custom_templates = "docs-templates"
+
 [project.plugins.mkdocstrings.handlers.python]
 paths = ["src"]
 
@@ -183,9 +185,3 @@ filters = ["!^_"]
 
 [project.plugins.minify]
 minify_html = true
-
-[project.plugins.redirects.redirect_maps]
-"getting_started.md" = "installation.md"
-"api/cli.md" = "api/index.md"
-"api/python/index.md" = "api/index.md"
-"workflow.md" = "guides/workflows.md"

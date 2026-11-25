@@ -1,13 +1,22 @@
 # Connect a coding agent
 
-Run `hiraku init` in your project to configure the Hiraku MCP server for Claude Code, Codex, and Pi. After cloning an initialized project, run `hiraku mcp install` to restore missing client entries, including the local Codex configuration.
+For a walkthrough of planning, running, and reviewing an experiment with the
+agent, see [Run an experiment with a coding agent](../quickstart/agentic_workflows.md).
+
+## Set up your client
+
+- **New project.** Run `hiraku init` to configure the Hiraku MCP server for
+  Claude Code, Codex, and Pi.
+- **Cloned project.** Run `hiraku mcp install` from the project root to restore
+  missing client entries, including the local Codex configuration.
 
 The client launches `hiraku mcp serve` from the project directory. Make sure it can find `hiraku` on its PATH. If your client requires you to trust the project or approve its MCP server, do that before opening the tool list.
 
 To configure another client, use `hiraku` as the command and `mcp serve` as its arguments. Set its working directory inside your Hiraku project.
 
-The Codex config is ignored by Git so local MCP tool preferences remain
-private. Run `hiraku mcp install` after cloning to create it on your machine.
+The Codex config is ignored by Git so local MCP tool preferences remain private.
+
+## Client configurations
 
 For reference, initialization creates or merges these host configurations:
 

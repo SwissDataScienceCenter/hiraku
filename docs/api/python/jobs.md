@@ -1,5 +1,7 @@
 # Job
 
+[View source on GitHub](https://github.com/SwissDataScienceCenter/hiraku/blob/main/src/hiraku/job.py)
+
 See [Jobs and executors](../../guides/jobs.md) for command-line and Python
 examples.
 

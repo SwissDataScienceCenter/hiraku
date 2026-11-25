@@ -113,4 +113,7 @@ hiraku record edit binary-classification/threshold-baseline
 
 The leaderboard should show two runs with `param:seed` values of `0` and `1` and a `val/accuracy` score for each. Compare the scores and use the record’s Markdown body to note what you observed.
 
-To use your own evaluation, replace the script and follow the [CSV logging guide](guides/tracking-csv.md). Commit the new code and create a new experiment with `--commit HEAD`.
+To use your own evaluation, replace the script and follow the [CSV logging guide](../guides/tracking-csv.md). Commit the new code and create a new experiment with `--commit HEAD`.
+
+To build on this baseline with a coding agent, continue to
+[Run an experiment with a coding agent](agentic_workflows.md).
