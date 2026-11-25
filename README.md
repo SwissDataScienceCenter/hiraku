@@ -9,7 +9,7 @@
 
 Hiraku is built on a simple premise: **effective collaboration requires a shared structure.**
 
-Designed to support **user-driven development and scalable agentic workflows**, Hiraku provides a standardized workspace for human-agent collaboration.
+Designed to support **user-driven development and scalable agentic workflows**, Hiraku provides a customizable workspace for human-agent collaboration.
 Built on the **open ecosystem**, Hiraku integrates with existing research infrastructure and adapts to *your* project needs.
 
 ## Get started
