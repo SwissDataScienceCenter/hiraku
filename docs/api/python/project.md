@@ -1,5 +1,7 @@
 # Project
 
+[View source on GitHub](https://github.com/SwissDataScienceCenter/hiraku/blob/main/src/hiraku/project.py)
+
 ## Project
 
 ::: hiraku.project.Project

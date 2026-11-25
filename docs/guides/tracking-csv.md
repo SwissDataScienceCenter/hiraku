@@ -17,7 +17,7 @@ id,record_id,hiraku_job_id,timestamp,metric.val/accuracy,param.seed
 run-001,baseline,JOB_ID,2026-01-01T12:00:00Z,0.84,42
 ```
 
-Read `record_id` and `hiraku_job_id` from the `HIRAKU_RECORD_ID` and `HIRAKU_JOB_ID` environment variables. The optional `commit` column can hold the commit reported by your script. See the [First experiment walkthrough](../first_experiment.md) for a working CSV example.
+Read `record_id` and `hiraku_job_id` from the `HIRAKU_RECORD_ID` and `HIRAKU_JOB_ID` environment variables. The optional `commit` column can hold the commit reported by your script. See the [First experiment walkthrough](../quickstart/first_experiment.md) for a working CSV example.
 
 ## Inspect results
 
@@ -25,4 +25,4 @@ Read `record_id` and `hiraku_job_id` from the `HIRAKU_RECORD_ID` and `HIRAKU_JOB
 hiraku leaderboard runs --leaderboard local --sort val/accuracy
 ```
 
-The sort uses the metric name without the `metric.` prefix. See [Leaderboards](../tracking.md) for metric directions and filters.
+The sort uses the metric name without the `metric.` prefix. See [Leaderboards](leaderboards.md) for metric directions and filters.

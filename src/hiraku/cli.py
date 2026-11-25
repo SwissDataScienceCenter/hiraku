@@ -203,7 +203,9 @@ def _extra_status(extra: str, requirements: Sequence[str]) -> str:
         else:
             if not requirement.specifier.contains(version, prereleases=True):
                 incompatible = True
-    return "missing" if missing else "incompatible" if incompatible else "available"
+    if missing:
+        return "not installed"
+    return "incompatible" if incompatible else "available"
 
 
 def _show_version(ctx: click.Context, param: click.Parameter, value: bool) -> None:

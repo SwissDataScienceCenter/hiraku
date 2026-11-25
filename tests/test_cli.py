@@ -48,7 +48,7 @@ def test_version_outside_project(tmp_path, monkeypatch) -> None:
     ("installed", "expected"),
     [
         ({"example": "2.0"}, "available"),
-        ({}, "missing"),
+        ({}, "not installed"),
         ({"example": "1.0"}, "incompatible"),
     ],
 )

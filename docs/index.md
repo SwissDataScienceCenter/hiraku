@@ -1,3 +1,5 @@
+
+
 <div class="sdsc-home-hero" markdown="1">
 # Hiraku
 
@@ -12,13 +14,28 @@ Built on the **open ecosystem**, Hiraku integrates with existing research infras
 ```bash
 uv tool install hiraku
 ```
-[Get started](first_experiment.md){ .md-button .md-button--primary }
-[Install options](installation.md){ .md-button }
-[Explore concepts](concepts.md){ .md-button }
+[Get started](quickstart/first_experiment.md){ .md-button .md-button--primary }
+[Install options](quickstart/installation.md){ .md-button }
+[Explore concepts](quickstart/concepts.md){ .md-button }
+
+!!! warning "Beta release"
+
+    Hiraku is in active development. Features and interfaces may change between releases. 
+    
+    Please provide feedback and report issues on [GitHub](https://github.com/SwissDataScienceCenter/hiraku/issues).
 </div>
 
+## Features
 
-<!-- [Explore the concepts](concepts.md) -->
+Hiraku is a toolkit designed to integrate agentic capabilities into data science projects. It establishes shared conventions and interfaces through which humans and agents can carry out research workflows and share knowledge.
+
+- **Common interfaces:** Humans and agents interact with Hiraku through a common interface accessible via the CLI, MCP, and Python API.
+- **Shared knowledge base:** Markdown records document research progress and serve as a shared documentation layer for humans and agents, following the [Open Knowledge Format](https://github.com/open-knowledge-format/open-knowledge-format).
+- **Job submission:** Hiraku integrates local and HPC backends (e.g. Slurm) for job execution.
+- **Tracking leaderboards:** Hiraku retrieves experiment runs directly from user-managed tracking backends such as MLflow and Weights & Biases.
+- **User-driven development:** Implement your own ideas, follow up on agent experiments, a drive the development of your projects [using your preferred coding agent](quickstart/agentic_workflows.md).
+- **Agentic workflows:** Hiraku supports agentic workflows through LangGraph, which allows users to define project-specific graphs for agentic execution.
+- **Code and data access:** Humans and agents access code and data directly, using standard tools such as version-controlled repositories.
 
 ## Explore further
 

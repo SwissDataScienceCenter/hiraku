@@ -12,7 +12,7 @@ uv tool install --force 'hiraku[dashboard]'
 ```
 
 Include all extras you want to use, for example, when using MLflow or W&B
-`uv tool install --force 'hiraku[dashboard,mlflow]'`. See [installation options](../installation.md).
+`uv tool install --force 'hiraku[dashboard,mlflow]'`. See [installation options](../quickstart/installation.md).
 
 ## Modes
 

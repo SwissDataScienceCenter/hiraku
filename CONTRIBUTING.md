@@ -1,10 +1,8 @@
 # Contributing to Hiraku
 
-## Issues and user stories
+## Feature requests and bug reports
 
 Submit issues and feature requests through the [GitHub issue tracker](https://github.com/SwissDataScienceCenter/hiraku/issues). Bug reports should include the command, a minimal reproduction, Python version, and operating system.
-
-Submit user stories through the [issue tracker](https://github.com/SwissDataScienceCenter/hiraku/issues/new?labels=%22user%20story%22). Describe the problem, intended workflow, desired outcome, and relevant context.
 
 ## Development setup
 

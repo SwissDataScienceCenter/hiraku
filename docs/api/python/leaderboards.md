@@ -1,6 +1,8 @@
 # Leaderboard
 
-See [Leaderboards](../../tracking.md) for configuration and CLI examples.
+[View source on GitHub](https://github.com/SwissDataScienceCenter/hiraku/blob/main/src/hiraku/tracking/leaderboard.py) · [Run source](https://github.com/SwissDataScienceCenter/hiraku/blob/main/src/hiraku/tracking/base.py)
+
+See [Leaderboards](../../guides/leaderboards.md) for configuration and CLI examples.
 
 ## Leaderboard
 
