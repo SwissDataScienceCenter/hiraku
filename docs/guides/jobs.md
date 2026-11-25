@@ -24,8 +24,8 @@ Hiraku passes `HIRAKU_RECORD_ID` and `HIRAKU_JOB_ID` environment variables to th
 ## Launchers and custom attributes
 
 `run` and `job submit` accept `--launcher NAME` to select an installed PSI/J
-launcher. Omit it to use the executor's default; local execution selects
-`quoted-single`.
+launcher. Hiraku defaults to `quoted-single` for local execution and Slurm
+submissions. Other executors select their own default.
 
 ```bash
 hiraku run --record baseline --launcher quoted-single -- python train.py
@@ -119,6 +119,15 @@ Standard PSI/J job attributes and `ResourceSpec` fields also map to Slurm
 options. The executor requires `sbatch`, `squeue`, and `scancel` where Hiraku
 submits and observes jobs.
 
+Slurm writes command output to `.hiraku/psij/slurm/<id>.stdout` and
+`.hiraku/psij/slurm/<id>.stderr` on the shared project filesystem. Use
+`hiraku job logs <id>` or MCP `job_logs` to read both streams. Hiraku also
+keeps PSI/J's auxiliary files so later status checks can recover the command's
+exit code. Status checks may wait briefly for Slurm's first update after
+attaching. Once Hiraku has saved a terminal status, later checks read it from
+history. With PSI/J 0.9.11, use a project path without spaces so Slurm's
+generated batch script can write its auxiliary files.
+
 ## Renku
 
 The `renku` executor talks directly to the Renku data services API.
@@ -143,7 +152,7 @@ hiraku job status JOB_ID
 ## Python
 
 ```python
-from hiraku.job import Submission, get_executor, prepare_job, run_local
+from hiraku.job import Submission, prepare_job, run_local, submit_job
 from hiraku.project import Project
 
 project = Project.discover()
@@ -151,10 +160,7 @@ job = prepare_job(["python", "train.py"], project=project, record_id="baseline")
 status = run_local(job, project=project)
 
 job = prepare_job(["python", "train.py"], project=project, record_id="baseline")
-executor = get_executor("local-detached", work_directory=project.psij_dir)
-executor.submit(job)
-submission = Submission.from_psi_job(job)
-submission.save(project)
+submission = submit_job(job, project=project, executor="local-detached")
 entries = Submission.list(project, record_id="baseline")
 
 # In another process, attach and explicitly update the saved snapshot:

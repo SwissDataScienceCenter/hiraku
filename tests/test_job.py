@@ -19,6 +19,7 @@ import psij
 import psutil
 import pytest
 from click.testing import CliRunner
+from psij.executors.batch.batch_scheduler_executor import BatchSchedulerExecutor
 
 from hiraku.cli import main
 from hiraku.errors import (
@@ -34,6 +35,7 @@ from hiraku.job import (
     observe_submission,
     prepare_job,
     run_local,
+    submit_job,
     validate_command,
 )
 from hiraku.project import Project
@@ -742,6 +744,111 @@ def test_cli_submit_rejects_native_local(project, monkeypatch):
     assert not (project.root / ".hiraku/jobs").exists()
 
 
+def test_slurm_submission_keeps_logs_and_exit_code(project, monkeypatch):
+    project = Project.create(
+        project.root.parent / "slurm-project", install_skill=False, install_mcp=False
+    )
+    monkeypatch.chdir(project.root)
+    bin_dir = project.root / "bin"
+    bin_dir.mkdir()
+    scontrol = bin_dir / "scontrol"
+    scontrol.write_text("#!/bin/sh\necho node1\n", encoding="utf-8")
+    scontrol.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir), prepend=os.pathsep)
+    monkeypatch.setenv("SLURM_JOB_ID", "42")
+    monkeypatch.delenv("PSIJ_BATCH_KEEP_FILES", raising=False)
+    monkeypatch.setattr(
+        BatchSchedulerExecutor,
+        "_start_queue_poll_thread",
+        lambda self: SimpleNamespace(register_job=lambda job: None),
+    )
+
+    def run_batch_script(self, command):
+        assert self.config.keep_files
+        assert command[0] == "sbatch"
+        subprocess.run(["bash", command[1]], cwd=project.root, check=True)
+        return "Submitted batch job 42"
+
+    monkeypatch.setattr(BatchSchedulerExecutor, "_run_command", run_batch_script)
+    cli = CliRunner()
+    submitted = cli.invoke(
+        main,
+        [
+            "job",
+            "submit",
+            "--executor",
+            "slurm",
+            "--",
+            sys.executable,
+            "-c",
+            "import sys; print('out'); print('err', file=sys.stderr); sys.exit(13)",
+        ],
+        catch_exceptions=False,
+    )
+    assert submitted.exit_code == 0, submitted.output
+    receipt = json.loads(submitted.stdout)
+    job_id = receipt["id"]
+    work = project.psij_dir / "slurm"
+    assert receipt["spec"]["stdout_path"] == str(work / f"{job_id}.stdout")
+    assert receipt["spec"]["stderr_path"] == str(work / f"{job_id}.stderr")
+    assert receipt["spec"]["launcher"] == "quoted-single"
+    logs = cli.invoke(main, ["job", "logs", job_id, "--json"])
+    assert logs.exit_code == 0, logs.output
+    assert json.loads(logs.stdout) == {"stdout": "out\n", "stderr": "err\n"}
+
+    def finish_observation(job, *, timeout, target_states):
+        assert job.status.state == psij.JobState.NEW
+        assert timeout == timedelta(seconds=8)
+        assert target_states == psij.JobState.QUEUED
+        assert job.executor.config.keep_files
+        job.executor._set_job_status(job, psij.JobStatus(psij.JobState.COMPLETED))
+        return job.status
+
+    status_args = ["job", "status", job_id, "--json"]
+    stale = Submission.load(project, job_id)
+    monkeypatch.setattr(psij.Job, "wait", lambda *args, **kwargs: None)
+    timed_out = cli.invoke(main, status_args)
+    assert timed_out.exit_code == 0, timed_out.output
+    assert json.loads(timed_out.stdout) == receipt
+    assert Submission.load(project, job_id) == stale
+
+    monkeypatch.setattr(psij.Job, "wait", finish_observation)
+    observed = cli.invoke(main, status_args)
+    assert observed.exit_code == 0, observed.output
+    final = json.loads(observed.stdout)
+    assert final["status"]["state"] == "FAILED"
+    assert final["status"]["exit_code"] == 13
+    assert (work / "42.ec").read_text(encoding="utf-8").strip() == "13"
+
+    stale.save(project)
+    assert stale.status.exit_code == 13
+    assert Submission.load(project, job_id).model_dump(mode="json") == final
+    monkeypatch.setattr(
+        BatchSchedulerExecutor,
+        "attach",
+        lambda *args: pytest.fail("Final job reattached"),
+    )
+    cached = cli.invoke(main, status_args)
+    assert cached.exit_code == 0, cached.output
+    assert json.loads(cached.stdout) == final
+
+
+def test_slurm_submission_preserves_explicit_paths_and_launcher(project, monkeypatch):
+    def submit(self, job):
+        job.executor = self
+        job._native_id = "42"
+        job.status = psij.JobStatus(psij.JobState.QUEUED)
+
+    monkeypatch.setattr(BatchSchedulerExecutor, "submit", submit)
+    job = prepare_job(["echo", "hello"], project=project, launcher="srun")
+    job.spec.stdout_path = Path("stdout.log")
+    job.spec.stderr_path = Path("stderr.log")
+    entry = submit_job(job, project=project, executor="slurm")
+    assert entry.spec["launcher"] == "srun"
+    assert entry.spec["stdout_path"] == "stdout.log"
+    assert entry.spec["stderr_path"] == "stderr.log"
+
+
 @pytest.mark.parametrize("command", [["run"], ["job", "submit"]])
 def test_cli_launcher_and_custom_attributes_are_saved(project, monkeypatch, command):
     # PSI/J's native single cannot source its library from a spaced path.
@@ -1178,8 +1285,12 @@ def test_sync_error_preserves_snapshot_and_other_jobs(
 
     monkeypatch.setattr(psij.JobExecutor, "get_instance", unavailable)
     response = CliRunner().invoke(main, ["job", "status", job.id, "--json"])
-    assert response.exit_code == 1, response.output
-    assert "backend unavailable" in response.stderr
+    if final:
+        assert response.exit_code == 0, response.output
+        assert json.loads(response.stdout) == entry
+    else:
+        assert response.exit_code == 1, response.output
+        assert "backend unavailable" in response.stderr
     assert Submission.load(project, job.id).model_dump(mode="json") == entry
     entries = Submission.list(project)
     assert [item.id for item in entries] == [other.id, job.id]

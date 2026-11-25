@@ -587,8 +587,8 @@ def test_submit_and_status_use_native_executor(
         path = config.root / ".hiraku/jobs" / f"{cached['id']}.json"
         before = path.read_bytes()
         monkeypatch.setattr("hiraku.job.Submission.get_psi_job", unavailable)
-        with pytest.raises(ToolError, match="backend unavailable"):
-            await server.call_tool("job_status", {"job_id": cached["id"]})
+        result = await server.call_tool("job_status", {"job_id": cached["id"]})
+        assert result.structured_content == cached
         assert path.read_bytes() == before
         listed = await server.call_tool("job_list", {})
         assert {
@@ -629,11 +629,11 @@ def test_submit_exposes_expected_backend_errors(
         from types import SimpleNamespace
 
         monkeypatch.setattr(
-            "hiraku.mcp.get_executor",
+            "hiraku.job.get_executor",
             lambda *args, **kwargs: SimpleNamespace(submit=fail),
         )
     else:
-        monkeypatch.setattr("hiraku.mcp.get_executor", fail)
+        monkeypatch.setattr("hiraku.job.get_executor", fail)
 
     async def exercise():
         with pytest.raises(ToolError) as caught:
