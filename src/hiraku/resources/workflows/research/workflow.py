@@ -99,6 +99,7 @@ class ResearchState(TypedDict, total=False):
     arguments: dict[str, Any]
     run_id: str
     task: str
+    leaderboard: str | None
     command: list[str]
     max_experiments: int
     max_depth: int
@@ -124,6 +125,12 @@ class ResearchInput(BaseModel):
         default=None,
         min_length=1,
         description="Task record ID. Omit it to draft a new task with the user.",
+    )
+    leaderboard: str | None = Field(
+        default=None,
+        min_length=1,
+        description="Leaderboard to read runs from; required when the project "
+        "defines more than one.",
     )
     command: list[str] = Field(
         min_length=1, description="Command to run an experiment."
@@ -434,6 +441,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
         return Command(
             update={
                 "task": task or "",
+                "leaderboard": arguments.leaderboard,
                 "command": validate_command(arguments.command),
                 "max_experiments": arguments.max_experiments,
                 "max_depth": arguments.max_depth,
@@ -471,7 +479,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             "done",
         ]
     ]:
-        problems = _setup_problems(project)
+        problems = _setup_problems(project, leaderboard=state.get("leaderboard"))
         if problems:
             return Command(update={"step": "setup"}, goto="setup")
         task_id = state.get("task") or ""
@@ -479,7 +487,13 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             return Command(update={"task": "", "step": "draft"}, goto="draft")
 
         _task(task_id, project)
-        tree = _tree(task_id, project, state["max_depth"], _reviews(state))
+        tree = _tree(
+            task_id,
+            project,
+            state["max_depth"],
+            _reviews(state),
+            leaderboard=state.get("leaderboard"),
+        )
         if len(tree) > state["max_experiments"]:
             # Existing studies are never hidden or truncated by a new session.
             remaining = 0
@@ -532,7 +546,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
 
     def setup(state: ResearchState) -> Command[Literal["setup", "select", "done"]]:
         data = {
-            "problems": _setup_problems(project),
+            "problems": _setup_problems(project, leaderboard=state.get("leaderboard")),
             "slurm": shutil.which("sbatch") is not None,
             "job_scripts": _job_scripts(project.root),
             "leaderboards": Leaderboard.list(project),
@@ -546,7 +560,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             ["filesystem.read", "filesystem.write", "workflow.user_input"],
             approval=_approval(state),
         )
-        problems = _setup_problems(project)
+        problems = _setup_problems(project, leaderboard=state.get("leaderboard"))
         if problems:
             return Command(
                 update={"feedback": "Still to fix: " + "; ".join(problems)},
@@ -572,7 +586,13 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
 
     def design(state: ResearchState) -> Command[Literal["design", "select"]]:
         parent = project.vault.load(state["current"])
-        tree = _tree(state["task"], project, state["max_depth"], _reviews(state))
+        tree = _tree(
+            state["task"],
+            project,
+            state["max_depth"],
+            _reviews(state),
+            leaderboard=state.get("leaderboard"),
+        )
         remaining = max(state["max_experiments"] - len(tree), 0)
         depth = _record_depth(parent, state["task"], project)
         data = {
@@ -706,14 +726,24 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
         waiting = [
             item
             for item in _tree(
-                state["task"], project, state["max_depth"], _reviews(state)
+                state["task"],
+                project,
+                state["max_depth"],
+                _reviews(state),
+                leaderboard=state.get("leaderboard"),
             )
             if item["step"] == "waiting"
         ]
         left_out = {
             item["id"]: stray
             for item in waiting
-            if (stray := _left_out_runs(project.vault.load(item["id"]), project))
+            if (
+                stray := _left_out_runs(
+                    project.vault.load(item["id"]),
+                    project,
+                    leaderboard=state.get("leaderboard"),
+                )
+            )
         }
         response = _ask(
             markdown,
@@ -740,12 +770,22 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
                 )
             _failed(response.record_id, response.reason, state, project)
             return Command(update={"feedback": ""}, goto="select")
-        fresh = _tree(state["task"], project, state["max_depth"], _reviews(state))
+        fresh = _tree(
+            state["task"],
+            project,
+            state["max_depth"],
+            _reviews(state),
+            leaderboard=state.get("leaderboard"),
+        )
         if any(item["step"] == "waiting" for item in fresh) and not any(
             item["step"] in WORK_PRIORITIES for item in fresh
         ):
             stray = {
-                item["id"]: _left_out_runs(project.vault.load(item["id"]), project)
+                item["id"]: _left_out_runs(
+                    project.vault.load(item["id"]),
+                    project,
+                    leaderboard=state.get("leaderboard"),
+                )
                 for item in fresh
                 if item["step"] == "waiting"
             }
@@ -784,7 +824,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
         experiment = project.vault.load(state["current"])
         parent = project.vault.load(str(experiment.parent_id))
         task = _task(state["task"], project)
-        runs = _matching_runs(experiment, project)
+        runs = _matching_runs(experiment, project, leaderboard=state.get("leaderboard"))
         usable = [run for run in runs if run.metrics]
         data = {
             "experiment": _describe(experiment),
@@ -835,7 +875,13 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             "metrics": _metrics(task),
             "parent": _describe(parent),
             "experiments": [_describe(item) for item in batch],
-            "tree": _tree(state["task"], project, state["max_depth"], _reviews(state)),
+            "tree": _tree(
+                state["task"],
+                project,
+                state["max_depth"],
+                _reviews(state),
+                leaderboard=state.get("leaderboard"),
+            ),
         }
         response = _ask(
             markdown,
@@ -927,7 +973,7 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             "verdict": plan.pop("verdict", None),
             "conclusion": plan.pop("conclusion", None),
         }
-        evidence = _evidence(experiment, project)
+        evidence = _evidence(experiment, project, leaderboard=state.get("leaderboard"))
         data = {
             "experiment": plan,
             "parent": _describe(parent) if parent.type == "experiment" else None,
@@ -973,7 +1019,9 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
         if not fixing.get("snapshot"):
             # Taken once, before the question: a resumed node runs again from the
             # top, and by then the author's changes are in place.
-            fixing["snapshot"] = _snapshot(experiment, project)
+            fixing["snapshot"] = _snapshot(
+                experiment, project, leaderboard=state.get("leaderboard")
+            )
             experiment.fixing = fixing
             project.vault.save(experiment, overwrite=True)
         snapshot = fixing["snapshot"]
@@ -986,10 +1034,18 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             "findings": fixing["findings"],
             "thread": _thread(experiment),
             "command": state["command"],
-            "tree": _tree(state["task"], project, state["max_depth"], _reviews(state)),
+            "tree": _tree(
+                state["task"],
+                project,
+                state["max_depth"],
+                _reviews(state),
+                leaderboard=state.get("leaderboard"),
+            ),
         }
         if kind in ("result", "acceptance"):
-            data.update(_evidence(experiment, project))
+            data.update(
+                _evidence(experiment, project, leaderboard=state.get("leaderboard"))
+            )
         if kind == "code":
             parent = project.vault.load(str(experiment.parent_id))
             base = parent.commit if parent.type == "experiment" else None
@@ -1015,7 +1071,14 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
         if given != wanted:
             return retry("Answer every finding exactly once: " + ", ".join(wanted))
         experiment = project.vault.load(state["current"])
-        problem = _apply_fix(project, experiment, kind, response, snapshot)
+        problem = _apply_fix(
+            project,
+            experiment,
+            kind,
+            response,
+            snapshot,
+            leaderboard=state.get("leaderboard"),
+        )
         if problem:
             project.vault.save(experiment, overwrite=True)
             return retry(problem)
@@ -1044,7 +1107,13 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             "task": _describe(task),
             "metrics": _metrics(task),
             "project_setup": _project_setup(project),
-            "tree": _tree(state["task"], project, state["max_depth"], _reviews(state)),
+            "tree": _tree(
+                state["task"],
+                project,
+                state["max_depth"],
+                _reviews(state),
+                leaderboard=state.get("leaderboard"),
+            ),
             "parent": _describe(parent),
             "experiment": _describe(experiment),
             "open_findings": pending["findings"],
@@ -1053,7 +1122,9 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
         }
         evidence = None
         if kind == "result":
-            evidence = _evidence(experiment, project)
+            evidence = _evidence(
+                experiment, project, leaderboard=state.get("leaderboard")
+            )
             data.update(evidence)
         if kind == "code":
             base = parent.commit if parent.type == "experiment" else None
@@ -1098,7 +1169,13 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
             "experiment": _describe(experiment),
             "question": experiment.researcher,
             "thread": _thread(experiment),
-            "tree": _tree(state["task"], project, state["max_depth"], _reviews(state)),
+            "tree": _tree(
+                state["task"],
+                project,
+                state["max_depth"],
+                _reviews(state),
+                leaderboard=state.get("leaderboard"),
+            ),
         }
         response = _ask(
             markdown,
@@ -1116,12 +1193,20 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
 
     def summarize(state: ResearchState) -> Command[Literal["summarize", "select"]]:
         task = _task(state["task"], project)
-        tree = _tree(state["task"], project, state["max_depth"], _reviews(state))
+        tree = _tree(
+            state["task"],
+            project,
+            state["max_depth"],
+            _reviews(state),
+            leaderboard=state.get("leaderboard"),
+        )
         data = {
             "task": _describe(task),
             "metrics": _metrics(task),
             "tree": tree,
-            "best_results": _best_results(state["task"], project),
+            "best_results": _best_results(
+                state["task"], project, leaderboard=state.get("leaderboard")
+            ),
             "disputed": _disputed_events(tree),
             "provisional": _provisional(tree),
             "reopened": int(getattr(task, "acceptance_rounds", 0) or 0),
@@ -1144,10 +1229,18 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
 
     def accept(state: ResearchState) -> Command[Literal["accept", "select"]]:
         task = _task(state["task"], project)
-        tree = _tree(state["task"], project, state["max_depth"], _reviews(state))
+        tree = _tree(
+            state["task"],
+            project,
+            state["max_depth"],
+            _reviews(state),
+            leaderboard=state.get("leaderboard"),
+        )
         experiments = [project.vault.load(item["id"]) for item in tree]
         evidence = {
-            item.id: _evidence(item, project) for item in experiments if item.commit
+            item.id: _evidence(item, project, leaderboard=state.get("leaderboard"))
+            for item in experiments
+            if item.commit
         }
         data = {
             "task": _describe(task),
@@ -1221,7 +1314,13 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
 
     def triage(state: ResearchState) -> Command[Literal["triage", "select"]]:
         experiment = project.vault.load(state["current"])
-        tree = _tree(state["task"], project, state["max_depth"], _reviews(state))
+        tree = _tree(
+            state["task"],
+            project,
+            state["max_depth"],
+            _reviews(state),
+            leaderboard=state.get("leaderboard"),
+        )
         depth = _record_depth(experiment, state["task"], project)
         remaining = max(state["max_experiments"] - len(tree), 0)
         can_follow_up = depth < state["max_depth"] and remaining > 0
@@ -1254,11 +1353,21 @@ def build_graph(checkpointer: BaseCheckpointSaver[Any], *, project: Project) -> 
 
     def done(state: ResearchState) -> dict[str, str]:
         tree = (
-            _tree(state["task"], project, state["max_depth"], _reviews(state))
+            _tree(
+                state["task"],
+                project,
+                state["max_depth"],
+                _reviews(state),
+                leaderboard=state.get("leaderboard"),
+            )
             if state.get("task")
             else []
         )
-        best = _best_results(state["task"], project) if state.get("task") else []
+        best = (
+            _best_results(state["task"], project, leaderboard=state.get("leaderboard"))
+            if state.get("task")
+            else []
+        )
         task = _task(state["task"], project) if state.get("task") else None
         return {
             "final": markdown.section("## Done").replace(
@@ -1356,7 +1465,7 @@ def _next(
     return Command(update={**update, "agents": agents}, goto=goto)
 
 
-def _setup_problems(project: Project) -> list[str]:
+def _setup_problems(project: Project, *, leaderboard: str | None = None) -> list[str]:
     problems = []
     contexts = project.vault.list()
     if not any(
@@ -1365,10 +1474,21 @@ def _setup_problems(project: Project) -> list[str]:
         problems.append(
             "no `project-setup` context says how experiments run in this project"
         )
-    if not Leaderboard.list(project):
+    leaderboards = Leaderboard.list(project)
+    if not leaderboards:
         problems.append(
             "no leaderboard defines where runs are tracked; "
             "create one with `hiraku leaderboard create`"
+        )
+    elif leaderboard is not None and leaderboard not in leaderboards:
+        problems.append(
+            f"the leaderboard {leaderboard!r} does not exist (available: "
+            f"{', '.join(leaderboards)}); start the study again with one of them"
+        )
+    elif leaderboard is None and len(leaderboards) > 1:
+        problems.append(
+            f"several leaderboards ({', '.join(leaderboards)}); start the study "
+            "again with the `leaderboard` argument to choose one, or keep only one"
         )
     return problems
 
@@ -1386,13 +1506,21 @@ def _metrics(task: Record) -> list[dict[str, Any]]:
     return [dict(item) for item in getattr(task, "metrics", None) or []]
 
 
+def _sequence(record: Record) -> int:
+    """A record's position among its siblings; 0 when missing or not a number."""
+    try:
+        return int(getattr(record, "sequence", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _children(project: Project) -> dict[str, list[Record]]:
     result: dict[str, list[Record]] = {}
     for record in project.vault.list():
         if record.type == "experiment" and record.parent_id:
             result.setdefault(record.parent_id, []).append(record)
     for records in result.values():
-        records.sort(key=lambda item: (int(getattr(item, "sequence", 0) or 0), item.id))
+        records.sort(key=lambda item: (_sequence(item), item.id))
     return result
 
 
@@ -1443,6 +1571,7 @@ def _batch(state: ResearchState, project: Project) -> list[Record]:
         for item in siblings
         if item.commit is None
         and getattr(item, "design_review", None) is None
+        and not getattr(item, "review_failed", None)
         and not _held(item)
     ] or [current]
 
@@ -1721,11 +1850,16 @@ def _plan_of(experiment: Record) -> dict[str, str]:
     }
 
 
-def _snapshot(experiment: Record, project: Project) -> dict[str, Any]:
+def _snapshot(
+    experiment: Record, project: Project, *, leaderboard: str | None = None
+) -> dict[str, Any]:
     return {
         "commit": experiment.commit,
         "plan": _plan_of(experiment),
-        "runs": sorted(run.id for run in _matching_runs(experiment, project)),
+        "runs": sorted(
+            run.id
+            for run in _matching_runs(experiment, project, leaderboard=leaderboard)
+        ),
         "scope": _scope(project, experiment.id),
     }
 
@@ -1736,6 +1870,8 @@ def _apply_fix(
     kind: str,
     response: FixResponse,
     snapshot: dict[str, Any],
+    *,
+    leaderboard: str | None = None,
 ) -> str:
     """Apply the author's fix and route on what changed; return an error or ''.
 
@@ -1749,12 +1885,14 @@ def _apply_fix(
         and _plan_of(experiment) != snapshot["plan"]
     ):
         plan = snapshot["plan"]
+        experiment.summary = plan["summary"]
         experiment.hypothesis = plan["hypothesis"]
         experiment.expected = plan["expected"]
         experiment.markdown = plan["change"] + "\n"
         return (
-            "The hypothesis, the expected outcome and the change are frozen once "
-            "runs exist; they were restored. Open a new experiment for a new idea."
+            "The summary, the hypothesis, the expected outcome and the change are "
+            "frozen once runs exist; they were restored. Open a new experiment for a "
+            "new idea."
         )
     sha = ""
     if response.commit:
@@ -1779,7 +1917,9 @@ def _apply_fix(
             _set_commit(experiment, sha, response)
             changed = True
     else:
-        known = {run.id for run in _all_runs(experiment, project)}
+        known = {
+            run.id for run in _all_runs(experiment, project, leaderboard=leaderboard)
+        }
         unknown = [
             item.run_id for item in response.excluded_runs if item.run_id not in known
         ]
@@ -1794,7 +1934,10 @@ def _apply_fix(
                 {item.run_id: item.model_dump() for item in response.excluded_runs}
             )
             experiment.excluded_runs = list(merged.values())
-        runs = sorted(run.id for run in _matching_runs(experiment, project))
+        runs = sorted(
+            run.id
+            for run in _matching_runs(experiment, project, leaderboard=leaderboard)
+        )
         reset = _restart if not _children(project).get(experiment.id) else _keep_triage
         if sha and sha != snapshot["commit"]:
             _set_commit(experiment, sha, response)
@@ -1897,7 +2040,7 @@ def _step_of(
         and getattr(experiment, "code_review", None) != experiment.commit
     ):
         return "review_code"
-    runs = _matching_runs(experiment, project)
+    runs = _matching_runs(experiment, project, leaderboard=state.get("leaderboard"))
     if any(run.metrics for run in runs):
         return "analyze"
     if runs or experiment.state == "launched":
@@ -1917,13 +2060,21 @@ def _project_setup(project: Project) -> str:
         return ""
 
 
-def _all_runs(experiment: Record, project: Project) -> list[Run]:
+def _all_runs(
+    experiment: Record, project: Project, *, leaderboard: str | None = None
+) -> list[Run]:
     if not Leaderboard.list(project):
         return []
-    return list(Leaderboard.load(project).list_runs(project, record_id=experiment.id))
+    return list(
+        Leaderboard.load(project, leaderboard).list_runs(
+            project, record_id=experiment.id
+        )
+    )
 
 
-def _matching_runs(experiment: Record, project: Project) -> list[Run]:
+def _matching_runs(
+    experiment: Record, project: Project, *, leaderboard: str | None = None
+) -> list[Run]:
     if not experiment.commit:
         return []
     excluded = {
@@ -1931,12 +2082,14 @@ def _matching_runs(experiment: Record, project: Project) -> list[Run]:
     }
     return [
         run
-        for run in _all_runs(experiment, project)
+        for run in _all_runs(experiment, project, leaderboard=leaderboard)
         if run.commit == experiment.commit and run.id not in excluded
     ]
 
 
-def _left_out_runs(experiment: Record, project: Project) -> list[dict[str, Any]]:
+def _left_out_runs(
+    experiment: Record, project: Project, *, leaderboard: str | None = None
+) -> list[dict[str, Any]]:
     """Runs of the record that have metrics but not the experiment's commit.
 
     Such a run never reaches the analysis. A run without a commit usually means
@@ -1947,7 +2100,7 @@ def _left_out_runs(experiment: Record, project: Project) -> list[dict[str, Any]]
         return []
     return [
         {"run_id": run.id, "commit": run.commit}
-        for run in _all_runs(experiment, project)
+        for run in _all_runs(experiment, project, leaderboard=leaderboard)
         if run.metrics and run.commit != experiment.commit
     ]
 
@@ -1982,7 +2135,9 @@ def _run_data(run: Run, reason: str = "") -> dict[str, Any]:
     return {**data, "reason": reason} if reason else data
 
 
-def _evidence(experiment: Record, project: Project) -> dict[str, Any]:
+def _evidence(
+    experiment: Record, project: Project, *, leaderboard: str | None = None
+) -> dict[str, Any]:
     """Every run the tracking source holds for the experiment, raw.
 
     Runs that the analysis leaves out stay visible with the reason, so that a
@@ -1993,7 +2148,7 @@ def _evidence(experiment: Record, project: Project) -> dict[str, Any]:
         for item in getattr(experiment, "excluded_runs", None) or []
     }
     used, left_out = [], []
-    for run in _all_runs(experiment, project):
+    for run in _all_runs(experiment, project, leaderboard=leaderboard):
         if run.id in excluded:
             left_out.append(_run_data(run, excluded[run.id]))
         elif run.commit != experiment.commit:
@@ -2002,7 +2157,9 @@ def _evidence(experiment: Record, project: Project) -> dict[str, Any]:
             used.append(_run_data(run))
     names = Leaderboard.list(project)
     return {
-        "leaderboard": {"name": names[0] if len(names) == 1 else names},
+        "leaderboard": {
+            "name": leaderboard or (names[0] if len(names) == 1 else names)
+        },
         "runs": used,
         "excluded_runs": left_out,
     }
@@ -2024,7 +2181,10 @@ def _check_evidence(items: list[Evidence], evidences: list[dict[str, Any]]) -> s
         value = run["metrics"].get(item.metric)
         if value is None:
             return f"Run {item.run_id!r} has no metric {item.metric!r}."
-        if not math.isclose(value, item.value, rel_tol=1e-6, abs_tol=1e-9):
+        both_nan = math.isnan(value) and math.isnan(item.value)
+        if not both_nan and not math.isclose(
+            value, item.value, rel_tol=1e-6, abs_tol=1e-9
+        ):
             return f"Run {item.run_id!r} has {item.metric} = {value}, not {item.value}."
     return ""
 
@@ -2052,6 +2212,8 @@ def _tree(
     project: Project,
     max_depth: int = 10,
     reviews: Sequence[str] = (),
+    *,
+    leaderboard: str | None = None,
 ) -> list[dict[str, Any]]:
     children = _children(project)
     state: ResearchState = {
@@ -2059,6 +2221,7 @@ def _tree(
         "max_depth": max_depth,
         "autonomous": bool(reviews),
         "reviews": list(reviews),
+        "leaderboard": leaderboard,
     }
     rows = []
     for record, depth in _ordered(task_id, children):
@@ -2067,7 +2230,7 @@ def _tree(
                 "id": record.id,
                 "parent": record.parent_id,
                 "depth": depth,
-                "sequence": int(getattr(record, "sequence", 0) or 0),
+                "sequence": _sequence(record),
                 "step": _step_of(record, depth, state, children, project),
                 "summary": getattr(record, "summary", None),
                 "commit": record.commit,
@@ -2130,14 +2293,16 @@ def _failed(
     project.vault.save(experiment, overwrite=True)
 
 
-def _best_results(task_id: str, project: Project) -> list[dict[str, Any]]:
+def _best_results(
+    task_id: str, project: Project, *, leaderboard: str | None = None
+) -> list[dict[str, Any]]:
     task = _task(task_id, project)
     results = []
     for metric in _metrics(task):
         candidates = []
-        for item in _tree(task_id, project):
+        for item in _tree(task_id, project, leaderboard=leaderboard):
             record = project.vault.load(item["id"])
-            for run in _matching_runs(record, project):
+            for run in _matching_runs(record, project, leaderboard=leaderboard):
                 value = run.metrics.get(metric["name"])
                 try:
                     numeric = float(value)

@@ -391,6 +391,24 @@ def test_research_tree_states_follow_the_evidence_on_records(
     }
 
 
+def test_research_tree_shows_only_experiments_and_tolerates_bad_sequences(
+    tmp_path: Path,
+) -> None:
+    # Only experiments are steps of the study, as in the research workflow, and a
+    # hand-edited sequence must not break the chart.
+    project = Project.create(tmp_path, install_skill=False)
+    vault = project.vault
+    vault.create("t", type="task")
+    vault.create("a", type="experiment", parent_id="t", sequence="1a")
+    vault.create("b", type="experiment", parent_id="t", sequence=2)
+    vault.create("notes", type="context", parent_id="t")
+    runs_df = arrow_frame([], RUN_COLUMNS)
+
+    nodes, _edges = research_tree(vault.list(), runs_df, "t")
+
+    assert set(nodes["id"]) == {"t", "a", "b"}
+
+
 def test_research_tree_shows_review_exits_disputes_and_acceptance(
     tmp_path: Path,
 ) -> None:

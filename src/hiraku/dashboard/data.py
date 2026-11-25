@@ -445,12 +445,22 @@ def _is_nan(value: Any) -> bool:
     return isinstance(value, float) and math.isnan(value)
 
 
+def _sequence(record: Record) -> int:
+    """A record's position among its siblings; 0 when missing or not a number."""
+    try:
+        return int(getattr(record, "sequence", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def research_tree(
     records: Sequence[Record], runs_df: pd.DataFrame, task_id: str | None
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Lay out a task's experiment tree as node and edge tables.
 
-    The task sits at the top and each record below its parent. Leaves get
+    The task sits at the top and each experiment below its parent; other records
+    under the task (context, literature, notes) are not steps of the study and
+    are left out, as in the research workflow. Leaves get
     consecutive ``x`` positions in tree order and a parent sits above the middle
     of its children. Nodes carry ``id``, ``x``, ``y``, ``state`` and
     ``summary``, ``commit``, ``disputed`` (a meta review ruled on it) and a
@@ -466,10 +476,10 @@ def research_tree(
             [], columns=edge_columns
         )
     children: dict[str, list[Record]] = {}
-    for record in sorted(
-        records, key=lambda item: (int(getattr(item, "sequence", 0) or 0), item.id)
-    ):
-        if record.parent_id and record.id != task_id:
+    # Only experiments form the tree, as in the research workflow; other records
+    # under a task (context, notes) are not steps of the study.
+    for record in sorted(records, key=lambda item: (_sequence(item), item.id)):
+        if record.type == "experiment" and record.parent_id and record.id != task_id:
             children.setdefault(record.parent_id, []).append(record)
     runs_by_record: dict[str, list[dict[str, Any]]] = {}
     for run in _records(runs_df):

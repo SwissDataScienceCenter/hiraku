@@ -1078,6 +1078,134 @@ def test_frozen_fields_and_scope_guard_during_a_fix(runner: CliRunner) -> None:
     assert _value(asked)["data"]["question"]["reason"] == "scope"
 
 
+def test_a_frozen_summary_is_restored_so_the_fix_can_go_on(
+    runner: CliRunner,
+) -> None:
+    # The summary is part of the frozen plan; leaving the edit in place would
+    # fail the same check on every later answer.
+    project, session, _ = _autonomous_study()
+    _to_result_review(project, session)
+    _result_review(project, session, "fix", _finding("Weak.", affects="analysis"))
+    experiment = project.vault.load("baseline")
+    original = experiment.summary
+    experiment.summary = "A different idea"
+    project.vault.save(experiment, overwrite=True)
+    frozen = _answer(project, session, "result-1.1", "dispute")
+    assert _step(frozen) == "fix"
+    assert "frozen" in _value(frozen)["feedback"]
+    assert project.vault.load("baseline").summary == original
+    again = _answer(project, session, "result-1.1", "dispute")
+    assert "frozen" not in _value(again).get("feedback", "")
+    assert _step(again) == "review_result"
+
+
+def test_several_leaderboards_are_a_setup_problem(runner: CliRunner) -> None:
+    project = Project.discover()
+    project.vault.create("project-setup", type="context")
+    Leaderboard.create(project, "runs", {"type": "csv", "path": "runs.csv"})
+    Leaderboard.create(project, "other", {"type": "csv", "path": "other.csv"})
+    started = start_workflow(
+        "research", {"command": ["python", "train.py"]}, project=project
+    )
+    value = started["interrupts"][0]["value"]
+    assert value["step"] == "setup"
+    assert any("several leaderboards" in item for item in value["data"]["problems"])
+
+
+def test_the_leaderboard_argument_selects_where_runs_are_read(
+    runner: CliRunner,
+) -> None:
+    project = Project.discover()
+    project.vault.create("project-setup", type="context")
+    Leaderboard.create(project, "runs", {"type": "csv", "path": "runs.csv"})
+    Leaderboard.create(project, "other", {"type": "csv", "path": "other.csv"})
+    task = project.vault.create(
+        "task", type="task", metrics=[{"name": "loss", "direction": "minimize"}]
+    )
+    started = start_workflow(
+        "research",
+        {
+            "task": task.id,
+            "command": ["python", "train.py"],
+            "autonomous": True,
+            "reviews": [],
+            "leaderboard": "other",
+        },
+        project=project,
+    )
+    session = started["workflow_session_id"]
+    assert _step(started) == "design"
+    _design(project, session)
+    _, sha = _implement(project, session, "baseline")
+    resume_workflow(session, {"event": "launched"}, project=project)
+    _write_runs(project, f"run-elsewhere,baseline,{sha},0.9")
+    (project.root / "other.csv").write_text(
+        f"id,record_id,commit,metric.loss\nrun-chosen,baseline,{sha},0.5\n"
+    )
+    analyzing = resume_workflow(session, {"event": "checked"}, project=project)
+    assert _step(analyzing) == "analyze"
+    assert [item["run_id"] for item in _value(analyzing)["data"]["runs"]] == [
+        "run-chosen"
+    ]
+
+
+def test_an_unknown_leaderboard_is_a_setup_problem(runner: CliRunner) -> None:
+    project = Project.discover()
+    project.vault.create("project-setup", type="context")
+    Leaderboard.create(project, "runs", {"type": "csv", "path": "runs.csv"})
+    started = start_workflow(
+        "research",
+        {"command": ["python", "train.py"], "leaderboard": "missing"},
+        project=project,
+    )
+    value = started["interrupts"][0]["value"]
+    assert value["step"] == "setup"
+    assert any("'missing' does not exist" in item for item in value["data"]["problems"])
+
+
+def test_a_concluded_sibling_is_not_reviewed_again(runner: CliRunner) -> None:
+    from hiraku.resources.workflows.research.workflow import _batch
+
+    project = Project.discover()
+    project.vault.create("task", type="task")
+    project.vault.create(
+        "a",
+        type="experiment",
+        parent_id="task",
+        review_failed={"stage": "design", "reason": "Unfixable", "findings": []},
+    )
+    project.vault.create("b", type="experiment", parent_id="task")
+    project.vault.create("c", type="experiment", parent_id="task")
+    batch = _batch({"current": "b"}, project)
+    assert [item.id for item in batch] == ["b", "c"]
+
+
+def test_nan_metrics_can_be_cited_as_evidence() -> None:
+    from hiraku.resources.workflows.research.workflow import (
+        Evidence,
+        _check_evidence,
+    )
+
+    nan = float("nan")
+    data = [{"runs": [{"run_id": "r1", "metrics": {"loss": nan}}], "excluded_runs": []}]
+    assert (
+        _check_evidence([Evidence(run_id="r1", metric="loss", value=nan)], data) == ""
+    )
+    assert "not" in _check_evidence(
+        [Evidence(run_id="r1", metric="loss", value=0.5)], data
+    )
+
+
+def test_a_malformed_sequence_does_not_break_the_tree(runner: CliRunner) -> None:
+    from hiraku.resources.workflows.research.workflow import _children
+
+    project = Project.discover()
+    project.vault.create("task", type="task")
+    project.vault.create("a", type="experiment", parent_id="task", sequence="1a")
+    project.vault.create("b", type="experiment", parent_id="task", sequence=1)
+    assert [item.id for item in _children(project)["task"]] == ["a", "b"]
+
+
 def test_out_of_scope_finding_waits_for_the_researcher_alone(
     runner: CliRunner,
 ) -> None:
