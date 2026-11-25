@@ -356,6 +356,190 @@ def tradeoff_frame(
     return points, len(runs_df) - len(points)
 
 
+# Research tree: the experiments of a task and the step each one needs next.
+# Colours follow the research workflow's steps; finished experiments show
+# their verdict.
+RESEARCH_STATES = {
+    "task": "#5461a6",
+    "to implement": "#848484",
+    "to launch": "#3b82f6",
+    "running": "#eab308",
+    "to analyze": "#8b5cf6",
+    "to review": "#14b8a6",
+    "fixing": "#ec4899",
+    "meta review": "#d946ef",
+    "needs researcher": "#f97316",
+    "to triage": "#06b6d4",
+    "to design follow-ups": "#90ca42",
+    "supports": "#10b981",
+    "refutes": "#ef4444",
+    "inconclusive": "#a3a3a3",
+}
+
+
+def experiment_state(
+    record: Record, *, has_children: bool, runs: Sequence[Mapping[str, Any]]
+) -> str:
+    """Return the step an experiment needs, from the evidence on its record.
+
+    This mirrors the research workflow: a verdict and triage decision settle
+    finished work, otherwise the commit and the runs at that commit say whether
+    the experiment is to be implemented, launched, awaited, or analyzed.
+    An experiment that waits on a review exit (a fix, a meta review, or the
+    researcher) shows that first. Which code and result reviews are due comes from
+    ``review_stages`` on the record; a design review is not shown, because it
+    cannot be told apart from a person's approval before it starts.
+    ``runs`` are rows of the run table for this record.
+    """
+    if getattr(record, "researcher", None):
+        return "needs researcher"
+    # The reviews the experiment was designed under; records from before this
+    # field existed are taken as reviewed in every stage once a review ran.
+    stages = getattr(record, "review_stages", None)
+    if stages is None:
+        stages = (
+            ["design", "code", "result"] if getattr(record, "reviews", None) else []
+        )
+    if getattr(record, "meta_pending", None):
+        return "meta review"
+    if getattr(record, "fixing", None):
+        return "fixing"
+    verdict = getattr(record, "verdict", None)
+    if verdict:
+        if (
+            "result" in stages
+            and record.state == "analyzed"
+            and getattr(record, "result_review", None) is None
+        ):
+            return "to review"
+        triage = getattr(record, "triage", None)
+        if triage is None:
+            return "to triage"
+        if triage == "follow-up" and not has_children:
+            return "to design follow-ups"
+        return verdict if verdict in RESEARCH_STATES else "inconclusive"
+    if not record.commit:
+        return "to implement"
+    if (
+        "code" in stages
+        and record.state == "implemented"
+        and getattr(record, "code_review", None) != record.commit
+    ):
+        return "to review"
+    attributed = [run for run in runs if run.get("commit") == record.commit]
+    if any(_has_metrics(run) for run in attributed):
+        return "to analyze"
+    if attributed or record.state == "launched":
+        return "running"
+    return "to launch"
+
+
+def _has_metrics(run: Mapping[str, Any]) -> bool:
+    return any(
+        name.startswith("metric.") and value is not None and not _is_nan(value)
+        for name, value in run.items()
+    )
+
+
+def _is_nan(value: Any) -> bool:
+    return isinstance(value, float) and math.isnan(value)
+
+
+def research_tree(
+    records: Sequence[Record], runs_df: pd.DataFrame, task_id: str | None
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Lay out a task's experiment tree as node and edge tables.
+
+    The task sits at the top and each record below its parent. Leaves get
+    consecutive ``x`` positions in tree order and a parent sits above the middle
+    of its children. Nodes carry ``id``, ``x``, ``y``, ``state`` and
+    ``summary``, ``commit``, ``disputed`` (a meta review ruled on it) and a
+    ``note`` (the acceptance outcome of the task, or a failed review and the
+    limitations of an experiment);
+    edges carry the coordinates of both ends.
+    """
+    node_columns = ["id", "x", "y", "state", "summary", "commit", "disputed", "note"]
+    edge_columns = ["x", "y", "x2", "y2"]
+    by_id = {record.id: record for record in records}
+    if task_id not in by_id:
+        return pd.DataFrame([], columns=node_columns), pd.DataFrame(
+            [], columns=edge_columns
+        )
+    children: dict[str, list[Record]] = {}
+    for record in sorted(
+        records, key=lambda item: (int(getattr(item, "sequence", 0) or 0), item.id)
+    ):
+        if record.parent_id and record.id != task_id:
+            children.setdefault(record.parent_id, []).append(record)
+    runs_by_record: dict[str, list[dict[str, Any]]] = {}
+    for run in _records(runs_df):
+        runs_by_record.setdefault(str(run.get("record")), []).append(run)
+
+    position: dict[str, tuple[float, int]] = {}
+    leaves = [0]
+
+    def place(record_id: str, depth: int, seen: frozenset[str]) -> None:
+        # ``seen`` keeps a cycle among records from looping forever.
+        kids = [
+            kid
+            for kid in children.get(record_id, [])
+            if kid.id not in seen | {record_id}
+        ]
+        for kid in kids:
+            place(kid.id, depth + 1, seen | {record_id})
+        if kids:
+            x = (position[kids[0].id][0] + position[kids[-1].id][0]) / 2
+        else:
+            x = float(leaves[0])
+            leaves[0] += 1
+        position[record_id] = (x, depth)
+
+    place(task_id, 0, frozenset())
+    nodes, edges = [], []
+    for record_id, (x, depth) in position.items():
+        record = by_id[record_id]
+        if record_id == task_id:
+            state = "task"
+        else:
+            state = experiment_state(
+                record,
+                has_children=bool(children.get(record_id)),
+                runs=runs_by_record.get(record_id, []),
+            )
+        nodes.append(
+            {
+                "id": record_id,
+                "x": x,
+                "y": depth,
+                "state": state,
+                "summary": str(getattr(record, "summary", None) or record.title or ""),
+                "commit": (record.commit or "")[:7],
+                "disputed": bool(getattr(record, "disputed", False)),
+                "note": _research_note(record),
+            }
+        )
+        if record.parent_id in position and record_id != task_id:
+            px, pdepth = position[record.parent_id]
+            edges.append({"x": px, "y": pdepth, "x2": x, "y2": depth})
+    return pd.DataFrame(nodes, columns=node_columns), pd.DataFrame(
+        edges, columns=edge_columns
+    )
+
+
+def _research_note(record: Record) -> str:
+    acceptance = getattr(record, "acceptance", None)
+    if record.type == "task":
+        return f"Acceptance: {acceptance['outcome']}" if acceptance else ""
+    notes = []
+    failed = getattr(record, "review_failed", None)
+    if failed:
+        notes.append(f"Review failed ({failed['stage']})")
+    limitations = getattr(record, "limitations", None) or []
+    if limitations:
+        notes.append(f"{len(limitations)} limitation(s)")
+    return "; ".join(notes)
+
+
 def _records(frame: pd.DataFrame) -> list[dict[str, Any]]:
     """Return the rows of ``frame`` as dicts of Python values, ``None`` if missing."""
     return pa.Table.from_pandas(frame, preserve_index=False).to_pylist()

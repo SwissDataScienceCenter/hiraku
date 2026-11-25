@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -15,6 +16,7 @@ from hiraku.dashboard.data import (
     metric_names,
     plot_frame,
     record_rows,
+    research_tree,
     run_rows,
     run_text,
     safe_url,
@@ -330,3 +332,223 @@ def test_plot_frame_numbers_runs_and_skips_unusable_values(
 )
 def test_safe_url(url: str | None, expected: str | None) -> None:
     assert safe_url(url) == expected
+
+
+def _research_records(project: Project) -> list[Record]:
+    vault = project.vault
+    vault.create("t", type="task")
+
+    def experiment(
+        record_id: str, parent: str, sequence: int, **fields: object
+    ) -> None:
+        vault.create(
+            record_id,
+            type="experiment",
+            parent_id=parent,
+            sequence=sequence,
+            summary=f"Experiment {record_id}",
+            **fields,
+        )
+
+    experiment("a", "t", 1)
+    experiment("b", "t", 2, commit="b" * 40)
+    experiment("c", "t", 3, commit="c" * 40, state="launched")
+    experiment("d", "t", 4, commit="d" * 40)
+    experiment("e", "t", 5, commit="e" * 40, verdict="supports", triage="stop")
+    experiment("f", "t", 6, verdict="refutes", triage="follow-up")
+    experiment("g", "f", 1, verdict="inconclusive")
+    experiment("h", "t", 7, verdict="supports", triage="follow-up")
+    return vault.list()
+
+
+def test_research_tree_states_follow_the_evidence_on_records(
+    tmp_path: Path,
+) -> None:
+    project = Project.create(tmp_path, install_skill=False)
+    records = _research_records(project)
+    runs_df = arrow_frame(
+        [
+            # A run at another commit does not count for b.
+            {"run": "r0", "record": "b", "commit": "0" * 40, "metric.loss": 0.9},
+            {"run": "r1", "record": "d", "commit": "d" * 40, "metric.loss": 0.5},
+        ],
+        RUN_COLUMNS,
+    )
+
+    nodes, _edges = research_tree(records, runs_df, "t")
+
+    states = dict(zip(nodes["id"], nodes["state"], strict=True))
+    assert states == {
+        "t": "task",
+        "a": "to implement",
+        "b": "to launch",
+        "c": "running",
+        "d": "to analyze",
+        "e": "supports",
+        "f": "refutes",
+        "g": "to triage",
+        "h": "to design follow-ups",
+    }
+
+
+def test_research_tree_shows_review_exits_disputes_and_acceptance(
+    tmp_path: Path,
+) -> None:
+    project = Project.create(tmp_path, install_skill=False)
+    vault = project.vault
+    vault.create(
+        "t",
+        type="task",
+        acceptance={"outcome": "accept_with_caveats", "caveats": ["one seed"]},
+    )
+    reviews = [{"kind": "design"}]
+
+    def experiment(record_id: str, sequence: int, **fields: object) -> None:
+        vault.create(
+            record_id,
+            type="experiment",
+            parent_id="t",
+            sequence=sequence,
+            reviews=reviews,
+            **fields,
+        )
+
+    experiment("fix", 1, fixing={"kind": "code", "findings": []})
+    experiment("meta", 2, meta_pending={"kind": "result", "findings": []})
+    experiment("ask", 3, researcher={"stage": "design", "reason": "finding"})
+    experiment("code", 4, commit="c" * 40, state="implemented")
+    experiment(
+        "approved", 5, commit="a" * 40, state="implemented", code_review="a" * 40
+    )
+    experiment("result", 6, verdict="supports", state="analyzed", commit="9" * 40)
+    experiment(
+        "ruled",
+        7,
+        verdict="inconclusive",
+        state="analyzed",
+        result_review="not needed",
+        triage="stop",
+        disputed=True,
+        limitations=[{"id": "result-1.1", "claim": "One seed."}],
+    )
+    experiment(
+        "provisional",
+        8,
+        verdict="supports",
+        state="analyzed",
+        commit="8" * 40,
+        result_review="failed",
+        triage="stop",
+        review_failed={"stage": "result", "reason": "x", "findings": []},
+    )
+
+    nodes, _edges = research_tree(vault.list(), arrow_frame([], RUN_COLUMNS), "t")
+
+    rows = nodes.set_index("id")
+    assert rows["state"].to_dict() == {
+        "t": "task",
+        "fix": "fixing",
+        "meta": "meta review",
+        "ask": "needs researcher",
+        "code": "to review",
+        "approved": "to launch",
+        "result": "to review",
+        "ruled": "inconclusive",
+        "provisional": "supports",
+    }
+    assert rows.loc["ruled", "disputed"]
+    assert not rows.loc["fix", "disputed"]
+    assert rows.loc["ruled", "note"] == "1 limitation(s)"
+    assert rows.loc["provisional", "note"] == "Review failed (result)"
+    assert rows.loc["t", "note"] == "Acceptance: accept_with_caveats"
+
+
+def test_research_tree_shows_only_the_reviews_a_study_runs(tmp_path: Path) -> None:
+    project = Project.create(tmp_path, install_skill=False)
+    project.vault.create("t", type="task")
+    for record_id, stages in (("result_only", ["result"]), ("with_code", ["code"])):
+        project.vault.create(
+            record_id,
+            type="experiment",
+            parent_id="t",
+            commit="a" * 40,
+            state="implemented",
+            review_stages=stages,
+        )
+    project.vault.create(
+        "analyzed",
+        type="experiment",
+        parent_id="t",
+        verdict="supports",
+        state="analyzed",
+        review_stages=["code"],
+    )
+
+    nodes, _edges = research_tree(
+        project.vault.list(), arrow_frame([], RUN_COLUMNS), "t"
+    )
+
+    states = dict(zip(nodes["id"], nodes["state"], strict=True))
+    assert states["result_only"] == "to launch"
+    assert states["with_code"] == "to review"
+    assert states["analyzed"] == "to triage"
+
+
+def test_research_tree_ignores_review_fields_without_reviews(tmp_path: Path) -> None:
+    # A person's study has no reviews on its records: nothing is "to review".
+    project = Project.create(tmp_path, install_skill=False)
+    project.vault.create("t", type="task")
+    project.vault.create(
+        "a",
+        type="experiment",
+        parent_id="t",
+        commit="a" * 40,
+        state="implemented",
+    )
+
+    nodes, _edges = research_tree(
+        project.vault.list(), arrow_frame([], RUN_COLUMNS), "t"
+    )
+
+    assert dict(zip(nodes["id"], nodes["state"], strict=True))["a"] == "to launch"
+
+
+def test_research_tree_layout_places_parents_above_their_children(
+    tmp_path: Path,
+) -> None:
+    project = Project.create(tmp_path, install_skill=False)
+    records = _research_records(project)
+
+    nodes, edges = research_tree(records, arrow_frame([], RUN_COLUMNS), "t")
+
+    placed = nodes.set_index("id")
+    assert placed.loc["t", "y"] == 0
+    assert placed.loc["g", "y"] == 2
+    leaves = ["a", "b", "c", "d", "e", "g", "h"]
+    xs = [placed.loc[leaf, "x"] for leaf in leaves]
+    assert xs == sorted(xs) and len(set(xs)) == len(xs)
+    assert placed.loc["f", "x"] == placed.loc["g", "x"]
+    assert placed.loc["t", "x"] == (placed.loc["a", "x"] + placed.loc["h", "x"]) / 2
+    assert len(edges) == len(nodes) - 1
+    assert placed.loc["a", "summary"] == "Experiment a"
+    assert placed.loc["b", "commit"] == "bbbbbbb"
+
+
+def test_research_tree_handles_unknown_tasks_and_parent_cycles(
+    tmp_path: Path,
+) -> None:
+    project = Project.create(tmp_path, install_skill=False)
+    project.vault.create("t", type="task")
+    project.vault.create("x", type="experiment", parent_id="t")
+    project.vault.create("y", type="experiment", parent_id="x")
+    cyclic = project.vault.load("x")
+    cyclic.parent_id = "y"
+    project.vault.save(cyclic, overwrite=True)
+    records = project.vault.list()
+    runs_df = arrow_frame([], RUN_COLUMNS)
+
+    empty_nodes, empty_edges = research_tree(records, runs_df, "missing")
+    nodes, _edges = research_tree(records, runs_df, "t")
+
+    assert empty_nodes.empty and empty_edges.empty
+    assert list(nodes["id"]) == ["t"]
