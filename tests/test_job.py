@@ -37,6 +37,7 @@ from hiraku.job import (
     run_local,
     submit_job,
     validate_command,
+    wait_for_submissions,
 )
 from hiraku.project import Project
 
@@ -961,6 +962,119 @@ def test_cli_submit_status_and_list(project, detached, monkeypatch, custom_url):
     assert receipt["id"] not in table.output
     submitted = datetime.fromisoformat(receipt["submitted_at"]).astimezone()
     assert submitted.strftime("%Y-%m-%d %H:%M:%S") in table.output
+
+
+def _submit_detached(runner, code):
+    result = runner.invoke(
+        main, ["job", "submit", "--record", "test", "--", sys.executable, "-c", code]
+    )
+    assert result.exit_code == 0, result.output
+    return json.loads(result.output)["id"]
+
+
+def test_cli_wait_returns_final_status_and_exit_code(project, detached, monkeypatch):
+    monkeypatch.chdir(project.root)
+    runner = CliRunner()
+    job_id = _submit_detached(runner, "import time; time.sleep(1); raise SystemExit(7)")
+    waited = runner.invoke(main, ["job", "wait", job_id[:8], "--json"])
+    assert waited.exit_code == 1, waited.output
+    [shown] = json.loads(waited.output)
+    assert shown["id"] == job_id
+    assert shown["status"]["state"] == "FAILED"
+    assert shown["status"]["exit_code"] == 7
+    assert Submission.load(project, job_id).model_dump(mode="json") == shown
+
+    # A final job is answered from history without reattaching.
+    monkeypatch.setattr(
+        Submission, "get_psi_job", lambda self: pytest.fail("Final job reattached")
+    )
+    again = runner.invoke(main, ["job", "wait", job_id])
+    assert again.exit_code == 1, again.output
+    assert "FAILED" in again.output
+
+
+def test_cli_wait_for_several_jobs(project, detached, monkeypatch):
+    monkeypatch.chdir(project.root)
+    runner = CliRunner()
+    first = _submit_detached(runner, "pass")
+    second = _submit_detached(runner, "import time; time.sleep(1)")
+    waited = runner.invoke(main, ["job", "wait", first, second, "--json"])
+    assert waited.exit_code == 0, waited.output
+    shown = json.loads(waited.output)
+    assert [item["id"] for item in shown] == [first, second]
+    assert {item["status"]["state"] for item in shown} == {"COMPLETED"}
+
+
+def test_cli_wait_any_and_timeout(project, detached, monkeypatch):
+    monkeypatch.chdir(project.root)
+    runner = CliRunner()
+    slow = _submit_detached(runner, "import time; time.sleep(60)")
+    fast = _submit_detached(runner, "pass")
+    try:
+        started = time.monotonic()
+        timed_out = runner.invoke(main, ["job", "wait", slow, "--timeout", "1s"])
+        assert timed_out.exit_code == 124, timed_out.output
+        assert time.monotonic() - started < 30
+        assert not Submission.load(project, slow).status.final
+
+        either = runner.invoke(main, ["job", "wait", slow, fast, "--any", "--json"])
+        assert either.exit_code == 0, either.output
+        states = {
+            item["id"]: item["status"]["state"] for item in json.loads(either.output)
+        }
+        assert states[fast] == "COMPLETED"
+        assert states[slow] not in {"COMPLETED", "FAILED", "CANCELED"}
+    finally:
+        runner.invoke(main, ["job", "cancel", slow])
+
+
+@pytest.mark.parametrize("timeout", ["soon", "-1", "1d", "inf"])
+def test_cli_wait_rejects_invalid_timeout(project, timeout):
+    result = CliRunner().invoke(
+        main, ["job", "wait", "0", "--timeout", timeout], catch_exceptions=False
+    )
+    assert result.exit_code == 2
+    assert "--timeout" in result.output
+
+
+def test_wait_rejects_repeated_jobs_and_negative_timeout(
+    project, detached, monkeypatch
+):
+    monkeypatch.chdir(project.root)
+    job = prepare_job([sys.executable, "-c", "pass"], project=project)
+    entry = submit_job(job, project=project, executor="local-detached")
+    result = CliRunner().invoke(main, ["job", "wait", entry.id, entry.id[:8]])
+    assert result.exit_code == 1
+    assert "only once" in result.output
+    with pytest.raises(ValidationError, match="negative"):
+        wait_for_submissions([entry], project=project, timeout=timedelta(seconds=-1))
+
+
+def test_wait_deadline_never_passes_a_zero_timeout(project, detached, monkeypatch):
+    # A sub-microsecond remainder rounds to timedelta(0), which PSI/J's
+    # Job.wait() treats as "wait without a timeout".
+    job = prepare_job([sys.executable, "-c", "pass"], project=project)
+    entry = submit_job(job, project=project, executor="local-detached")
+    entry.status = Status(
+        state="QUEUED", time=0.0, exit_code=None, message=None, metadata=None
+    )
+    timeouts = []
+
+    class Pending:
+        def wait(self, *, timeout):
+            assert timeout > timedelta(0), "a zero timeout would never return"
+            timeouts.append(timeout)
+
+    clock = iter([100.0, 101.0 - 4e-7])
+    monkeypatch.setattr(
+        "hiraku.job.time", SimpleNamespace(monotonic=lambda: next(clock))
+    )
+    monkeypatch.setattr(Submission, "get_psi_job", lambda self: Pending())
+    monkeypatch.setattr(Submission, "sync", lambda self, job=None: None)
+    monkeypatch.setattr(Submission, "save", lambda self, project: None)
+    met = wait_for_submissions([entry], project=project, timeout=timedelta(seconds=1))
+    assert met is False
+    assert timeouts == []
 
 
 def test_interrupting_foreground_cleans_up(project, monkeypatch):

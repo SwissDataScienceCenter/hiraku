@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import runpy
 import shlex
 import shutil
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from importlib.resources import as_file, files
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -36,7 +37,14 @@ from .errors import (
 )
 from .git import GitRepository, init_code_repository, require_git
 from .io import dump_yaml
-from .job import Submission, observe_submission, prepare_job, run_local, submit_job
+from .job import (
+    Submission,
+    observe_submission,
+    prepare_job,
+    run_local,
+    submit_job,
+    wait_for_submissions,
+)
 from .project import Project
 from .record import Record, RecordUpdate, validate_identifier
 from .tracking import Leaderboard, Run
@@ -764,6 +772,63 @@ def job_status(state: CLIContext, job_id: str, json_output: bool) -> None:
     entry = Submission.from_prefix(state.project, job_id)
     entry.refresh(state.project)
     _show_submission(entry.model_dump(mode="json"), json_output)
+
+
+_WAIT_TIMEOUT_EXIT = 124
+_DURATION = re.compile(r"(\d+(?:\.\d+)?)([smh]?)")
+_DURATION_UNITS = {"": 1, "s": 1, "m": 60, "h": 3600}
+
+
+def _parse_duration(
+    ctx: click.Context, param: click.Parameter, value: str | None
+) -> timedelta | None:
+    if value is None:
+        return None
+    match = _DURATION.fullmatch(value.strip())
+    if match is None:
+        raise click.BadParameter("expected seconds or a number ending in s, m or h")
+    return timedelta(seconds=float(match[1]) * _DURATION_UNITS[match[2]])
+
+
+@job_group.command("wait")
+@click.argument("job_ids", nargs=-1, required=True)
+@click.option("--any", "any_final", is_flag=True, help="Return when one job is final.")
+@click.option(
+    "--timeout",
+    callback=_parse_duration,
+    metavar="DURATION",
+    help="Give up after this long (e.g. 90, 30m, 2h); exit code 124.",
+)
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_obj
+def job_wait(
+    state: CLIContext,
+    job_ids: tuple[str, ...],
+    any_final: bool,
+    timeout: timedelta | None,
+    json_output: bool,
+) -> None:
+    """Block until jobs are final, then show them; exit 1 if one failed."""
+    entries = [Submission.from_prefix(state.project, job_id) for job_id in job_ids]
+    if len({entry.id for entry in entries}) != len(entries):
+        raise ValidationError("Each job may be given only once")
+    met = wait_for_submissions(
+        entries, project=state.project, any_final=any_final, timeout=timeout
+    )
+    results = [entry.model_dump(mode="json") for entry in entries]
+    if json_output:
+        _emit_json(results)
+    else:
+        for result in results:
+            _show_submission(result, json_output=False)
+    if not met:
+        raise click.exceptions.Exit(_WAIT_TIMEOUT_EXIT)
+    final = [entry.status for entry in entries if entry.status.final]
+    if any(
+        status.state != "COMPLETED" or status.exit_code not in (None, 0)
+        for status in final
+    ):
+        raise click.exceptions.Exit(1)
 
 
 @job_group.command("logs")
