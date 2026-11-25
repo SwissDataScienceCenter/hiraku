@@ -69,9 +69,10 @@ FIX_CAPABILITIES = [
     "experiment.launch",
     "tracking.run.read",
 ]
-# The reviews on by default: the result and the study as a whole. The design and
-# the code are checked by the smoke test and by the result review that follows.
-DEFAULT_REVIEWS: tuple[ReviewStage, ...] = ("result", "acceptance")
+# The reviews on by default: the design, the result and the study as a whole.
+# The code is checked by the smoke test and by the result review that follows,
+# so its own review is opt-in.
+DEFAULT_REVIEWS: tuple[ReviewStage, ...] = ("design", "result", "acceptance")
 # Where each review kind keeps its approval; an acceptance reopen is a result fix.
 STAGE_FIELDS = {
     "design": "design_review",

@@ -481,7 +481,28 @@ def _dispute_until_meta(project: Project, session: str) -> dict[str, Any]:
     )
 
 
-def test_only_the_result_and_the_study_are_reviewed_by_default(
+def test_design_is_reviewed_by_default(runner: CliRunner) -> None:
+    project = Project.discover()
+    project.vault.create("project-setup", type="context")
+    Leaderboard.create(project, "runs", {"type": "csv", "path": "runs.csv"})
+    task = project.vault.create(
+        "task", type="task", metrics=[{"name": "loss", "direction": "minimize"}]
+    )
+    started = start_workflow(
+        "research",
+        {"task": task.id, "command": ["python", "train.py"], "autonomous": True},
+        project=project,
+    )
+    reviewing = _design(project, started["workflow_session_id"])
+    assert _step(reviewing) == "review_design"
+    assert project.vault.load("baseline").review_stages == [
+        "design",
+        "result",
+        "acceptance",
+    ]
+
+
+def test_only_the_result_and_the_study_are_reviewed_when_chosen(
     runner: CliRunner,
 ) -> None:
     project, session, started = _autonomous_study(reviews=["result", "acceptance"])
@@ -578,7 +599,7 @@ def test_wait_does_not_blame_runs_of_an_earlier_commit(runner: CliRunner) -> Non
 def test_reviews_option_defaults_and_validation(runner: CliRunner) -> None:
     from hiraku.resources.workflows.research.workflow import ResearchInput
 
-    assert ResearchInput(command=["x"]).reviews == ["result", "acceptance"]
+    assert ResearchInput(command=["x"]).reviews == ["design", "result", "acceptance"]
     with pytest.raises(ValueError):
         ResearchInput(command=["x"], reviews=["style"])
 
