@@ -1050,6 +1050,33 @@ def test_wait_rejects_repeated_jobs_and_negative_timeout(
         wait_for_submissions([entry], project=project, timeout=timedelta(seconds=-1))
 
 
+def test_wait_deadline_never_passes_a_zero_timeout(project, detached, monkeypatch):
+    # A sub-microsecond remainder rounds to timedelta(0), which PSI/J's
+    # Job.wait() treats as "wait without a timeout".
+    job = prepare_job([sys.executable, "-c", "pass"], project=project)
+    entry = submit_job(job, project=project, executor="local-detached")
+    entry.status = Status(
+        state="QUEUED", time=0.0, exit_code=None, message=None, metadata=None
+    )
+    timeouts = []
+
+    class Pending:
+        def wait(self, *, timeout):
+            assert timeout > timedelta(0), "a zero timeout would never return"
+            timeouts.append(timeout)
+
+    clock = iter([100.0, 101.0 - 4e-7])
+    monkeypatch.setattr(
+        "hiraku.job.time", SimpleNamespace(monotonic=lambda: next(clock))
+    )
+    monkeypatch.setattr(Submission, "get_psi_job", lambda self: Pending())
+    monkeypatch.setattr(Submission, "sync", lambda self, job=None: None)
+    monkeypatch.setattr(Submission, "save", lambda self, project: None)
+    met = wait_for_submissions([entry], project=project, timeout=timedelta(seconds=1))
+    assert met is False
+    assert timeouts == []
+
+
 def test_interrupting_foreground_cleans_up(project, monkeypatch):
     job = prepare_job(
         [sys.executable, "-c", "import time; time.sleep(30)"], project=project
