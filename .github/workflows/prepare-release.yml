@@ -1,0 +1,84 @@
+name: Prepare release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version component to bump
+        type: choice
+        required: true
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
+
+concurrency:
+  group: prepare-release
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Require main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Run Prepare release from main."
+          exit 1
+
+      - uses: actions/checkout@v7.0.1
+        with:
+          ref: main
+
+      - uses: actions/setup-python@v6.3.0
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v6.8.0
+        with:
+          enable-cache: false
+
+      - name: Prepare release pull request
+        env:
+          BUMP: ${{ inputs.bump }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          uv version --bump "$BUMP"
+          version=$(uv version --short)
+          branch="release/v$version"
+          branch_ref="refs/heads/$branch"
+          title="chore(release): prepare v$version"
+
+          pr_url=$(gh pr list --base main --head "$branch" --state open \
+            --json url --jq '.[0].url // empty')
+          if [[ -n "$pr_url" ]]; then
+            echo "Release pull request: $pr_url" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          python scripts/update_changelog.py
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml uv.lock CHANGELOG.md
+          git commit -m "$title"
+
+          remote_branch=$(git ls-remote --heads origin "$branch_ref")
+          if [[ -z "$remote_branch" ]]; then
+            # Create the branch only if it still does not exist on the remote.
+            git push --force-with-lease="$branch_ref:" origin "HEAD:$branch_ref"
+          else
+            # Resume a prior run that pushed the same changes before PR creation failed.
+            git fetch --no-tags origin "$branch_ref"
+            if [[ "$(git rev-parse FETCH_HEAD^)" != "$(git rev-parse HEAD^)" ]] ||
+               ! git diff --quiet FETCH_HEAD HEAD; then
+              echo "::error::Branch $branch already exists with different changes."
+              exit 1
+            fi
+          fi
+
+          pr_url=$(gh pr create --base main --head "$branch" --title "$title" \
+            --body "Bump Hiraku to v$version and update the changelog.")
+          echo "Release pull request: $pr_url" >> "$GITHUB_STEP_SUMMARY"
