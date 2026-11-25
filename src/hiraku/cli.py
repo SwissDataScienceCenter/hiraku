@@ -4,17 +4,13 @@ from __future__ import annotations
 
 import json
 import os
-import runpy
 import shlex
-import shutil
 import subprocess
 import sys
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 from importlib import metadata
-from importlib.resources import as_file
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import Any
 
 import click
@@ -328,10 +324,6 @@ def example_list_command() -> None:
 @example_group.command("create")
 @click.argument("example")
 @click.argument("path", required=False, type=click.Path(path_type=Path))
-@click.option("--with-generator", is_flag=True, help="Copy the example generator.")
-@click.option(
-    "--generate", is_flag=True, help="Generate example runs after initialization."
-)
 @click.option(
     "--with-results",
     "results",
@@ -345,58 +337,20 @@ def example_create_command(
     example: str,
     path: Path | None,
     results: bool,
-    with_generator: bool,
-    generate: bool,
     init_git: bool,
 ) -> None:
     """Create PATH from a bundled EXAMPLE (default: ./EXAMPLE).
 
     Copies example files without Git history or network access.
     """
-    if generate and results:
-        raise click.UsageError("--generate cannot use --with-results")
     validate_identifier(example, label="example name")
     root = path if path is not None else Path(example)
     if init_git:
         require_git()
-    generator = None
-    if generate:
-        generator = _examples_root() / example / "generate_results.py"
-        if not generator.is_file():
-            raise click.UsageError(f"Example {example!r} has no generator")
-    project = Project.create(
-        root,
-        example=example,
-        results=results,
-        with_generator=with_generator,
-    )
+    project = Project.create(root, example=example, results=results)
     if init_git:
         init_code_repository(project)
     click.echo(f"Initialized Hiraku project at {project.path}")
-    if generator is not None:
-        with as_file(generator) as source:
-            try:
-                namespace = runpy.run_path(str(source))
-                if "generate_results" not in namespace:
-                    namespace["generate"](project)
-                else:
-                    with TemporaryDirectory(prefix="hiraku-generated-") as staging:
-                        overlay = Path(staging) / "results"
-                        namespace["generate_results"](overlay)
-                        generated = Project.load(overlay / "hiraku.yml")
-                        shutil.copytree(
-                            generated.records_dir,
-                            project.records_dir,
-                            dirs_exist_ok=True,
-                        )
-                        for result in overlay.iterdir():
-                            if result.is_file() and result.name != "hiraku.yml":
-                                shutil.copyfile(result, project.root / result.name)
-            except Exception as exc:
-                raise click.ClickException(
-                    "Generation failed; initialized project and completed runs kept: "
-                    f"{exc}"
-                ) from exc
 
 
 @main.group("record")

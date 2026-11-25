@@ -1,42 +1,19 @@
 from __future__ import annotations
 
-import runpy
 import sqlite3
+import subprocess
 import sys
 from collections import Counter
+from math import isfinite
 from pathlib import Path
-
-import pytest
 
 from hiraku import Project
 from hiraku.job import prepare_job, run_local
 from hiraku.tracking import Leaderboard
 
 
-@pytest.fixture
-def generator():
-    path = Path(__file__).parents[2] / "examples/digits/generate_results.py"
-    return runpy.run_path(str(path))
-
-
-def test_digits_refuses_existing_output_and_partial_export(
-    generator, tmp_path, monkeypatch
-):
-    with pytest.raises(FileExistsError):
-        generator["generate_results"](tmp_path)
-
-    def fail(*args, **kwargs):
-        raise RuntimeError("failed training")
-
-    monkeypatch.setitem(generator["generate"].__globals__, "run_local", fail)
-    output = tmp_path / "results"
-    with pytest.raises(RuntimeError, match="failed training"):
-        generator["generate_results"](output)
-    assert not output.exists()
-
-
 def test_bundled_digits_database_is_portable(
-    generator, tmp_path, monkeypatch, mlflow_server_factory
+    tmp_path, monkeypatch, mlflow_server_factory
 ):
     Project.create(tmp_path, example="digits", results=True, install_skill=False)
     project = Project.discover(tmp_path)
@@ -48,11 +25,13 @@ def test_bundled_digits_database_is_portable(
     ids_by_name = {
         record.id.rsplit("/", 1)[-1]: record.id for record in project.vault.list()
     }
-    generator["validate_database"](tmp_path / "mlflow.db", ids_by_name)
     tracking_uri = mlflow_server_factory(tmp_path / "mlflow.db")
     monkeypatch.setenv("MLFLOW_TRACKING_URI", tracking_uri)
     assert not (tmp_path / "generate_results.py").exists()
     with sqlite3.connect(tmp_path / "mlflow.db") as db:
+        assert db.execute(
+            "SELECT status, COUNT(*) FROM runs GROUP BY status"
+        ).fetchall() == [("FINISHED", 6)]
         for (uri,) in db.execute("SELECT artifact_uri FROM runs"):
             assert uri.startswith("mlruns/") and not Path(uri).is_absolute()
         for (uri,) in db.execute("SELECT artifact_location FROM experiments"):
@@ -67,8 +46,18 @@ def test_bundled_digits_database_is_portable(
     from hiraku.dashboard.data import run_rows
 
     leaderboard = Leaderboard.load(project)
+    runs = leaderboard.list_runs(project)
+    for name, alpha in (("weak-l2", 0.0001), ("strong-l2", 1.0)):
+        experiment_runs = [run for run in runs if run.record_id == ids_by_name[name]]
+        assert sorted(run.params["seed"] for run in experiment_runs) == ["1", "2", "3"]
+        for run in experiment_runs:
+            assert float(run.params["alpha"]) == alpha
+            assert run.params["epochs"] == "20"
+            assert isfinite(run.metrics["val/log_loss"])
+            assert isfinite(run.metrics["val/accuracy"])
+
     rows = run_rows(
-        leaderboard.list_runs(project),
+        runs,
         records=project.vault.list(),
         source=leaderboard.source.type,
     )
@@ -79,49 +68,16 @@ def test_bundled_digits_database_is_portable(
     assert {row["source"] for row in rows} == {"mlflow"}
 
 
-def test_generate_relocate_query_and_append(
-    generator, tmp_path, monkeypatch, mlflow_server_factory
+def test_append_run_to_bundled_digits_results(
+    tmp_path, monkeypatch, mlflow_server_factory
 ):
-    pytest.importorskip("mlflow")
-    monkeypatch.setenv("MLFLOW_TRACKING_URI", "https://invalid.example")
-    monkeypatch.setenv("MLFLOW_EXPERIMENT_NAME", "unrelated")
-    monkeypatch.setenv("UV_PROJECT_ENVIRONMENT", sys.prefix)
-    monkeypatch.setenv("UV_NO_SYNC", "1")
-    output = tmp_path / "results"
-    generator["generate_results"](output)
-    assert {
-        p.relative_to(output).as_posix() for p in output.rglob("*") if p.is_file()
-    } == {
-        "hiraku.yml",
-        "hiraku/leaderboards/default.yml",
-        "mlflow.db",
-        *(
-            Project.discover(output)
-            .vault.file_path(record.id)
-            .relative_to(output)
-            .as_posix()
-            for record in Project.discover(output).vault.list()
-        ),
-    }
-    config = Project.create(tmp_path / "moved", example="digits", install_skill=False)
-    import shutil
-
-    shutil.copytree(output, config.root, dirs_exist_ok=True)
-    config = Project.discover(config.root)
+    config = Project.create(
+        tmp_path / "digits", example="digits", results=True, install_skill=False
+    )
     tracking_uri = mlflow_server_factory(config.root / "mlflow.db")
     monkeypatch.setenv("MLFLOW_TRACKING_URI", tracking_uri)
     weak = config.vault.load("digit-classification/weak-l2")
     leaderboard = Leaderboard.load(config)
-    runs = leaderboard.list_runs(config)
-    ids_by_name = {
-        record.id.rsplit("/", 1)[-1]: record.id for record in config.vault.list()
-    }
-    assert Counter(r.record_id for r in runs) == {
-        ids_by_name["weak-l2"]: 3,
-        ids_by_name["strong-l2"]: 3,
-    }
-    import subprocess
-
     for arguments in (
         ["init", "-q"],
         ["add", "."],
