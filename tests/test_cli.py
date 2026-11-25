@@ -591,20 +591,20 @@ def test_runs_require_view_selection_and_discover_parameters(tmp_path, monkeypat
     assert "No leaderboards" in missing.output
     for name in ("a", "b"):
         (project.leaderboards_dir / f"{name}.yml").write_text(
-            "source: {type: csv, path: runs.csv}\n"
+            f"source: {{type: csv, path: {name}.csv}}\n"
         )
     ambiguous = invoke("leaderboard", "runs")
     assert ambiguous.exit_code != 0
-    assert "Select a leaderboard" in ambiguous.output
-    (tmp_path / "runs.csv").write_text(
+    assert "Select a leaderboard by name. Available: a, b" in ambiguous.output
+    (tmp_path / "b.csv").write_text(
         "id,record_id,metric.score,param.seed\nr,unknown,0.9,42\n"
     )
-    result = invoke("leaderboard", "runs", "--leaderboard", "b")
+    result = invoke("leaderboard", "runs", "b")
     assert result.exit_code == 0, result.output
     assert "score" in result.output
     assert "seed" in result.output
     assert "42" in result.output
-    unknown = invoke("leaderboard", "runs", "--leaderboard", "missing")
+    unknown = invoke("leaderboard", "runs", "missing")
     assert unknown.exit_code != 0
     assert "Cannot read YAML" in unknown.output
 
@@ -629,14 +629,7 @@ def test_leaderboard_lifecycle(project):
     assert json.loads(shown.output) == {"source": {"type": "csv", "path": "runs.csv"}}
     source = project.root / "runs.csv"
     source.write_text("id,metric.score\nr,1\n")
-    runs = invoke(
-        "leaderboard",
-        "runs",
-        "--leaderboard",
-        "local",
-        "--include-unattributed",
-        "--json",
-    )
+    runs = invoke("leaderboard", "runs", "local", "--include-unattributed", "--json")
     assert runs.exit_code == 0, runs.output
     assert json.loads(runs.output)[0]["metrics"] == {"score": 1}
     before = path.read_bytes()

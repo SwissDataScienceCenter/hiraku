@@ -22,7 +22,7 @@ Read `record_id` and `hiraku_job_id` from the `HIRAKU_RECORD_ID` and `HIRAKU_JOB
 ## Inspect results
 
 ```bash
-hiraku leaderboard runs --leaderboard local --sort val/accuracy
+hiraku leaderboard runs local --sort val/accuracy
 ```
 
 The sort uses the metric name without the `metric.` prefix. See [Leaderboards](leaderboards.md) for metric directions and filters.
