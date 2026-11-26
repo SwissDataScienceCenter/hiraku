@@ -18,9 +18,9 @@ def test_app_runs_every_cell_against_a_project(
     outputs, definitions = app.run()
 
     rendered = "\n".join(getattr(output, "text", "") for output in outputs)
-    assert "Selected record</h2>" in rendered
+    assert "Record</h2>" in rendered
     assert '<details class="record-runs">' in rendered
-    assert "numbered by execution order." in rendered
+    assert '<span class="leaderboard-run-count">6 runs</span>' in rendered
     assert 'aria-label="Leaderboard filters"' in rendered
 
     assert definitions["selected_record"].id == "root/a/a"
@@ -83,8 +83,8 @@ def test_leaderboard_axes_switch_to_tradeoffs(project, monkeypatch):
     rendered = updated["plot_view"].text
     assert "accuracy (maximize)" in rendered
     assert "loss (minimize)" in rendered
-    assert "strong trade-offs" in rendered
-    assert rendered.index("strong trade-offs") < rendered.index(updated["x_axis"].text)
+    assert "strong trade-offs" not in rendered
+    assert "marimo-table" not in rendered
     assert updated["y_axis"].text in rendered
 
 
@@ -121,9 +121,10 @@ def test_leaderboard_table_shows_runs_across_records(project, monkeypatch):
     assert keys.index("record:root/a/a") + 1 == keys.index("run:r0")
     definitions["include_records"]._update(False)
 
-    for name in ("record", "descendants"):
-        definitions["run_filters"].buttons[name]._update(1)
-    _, filtered = app.run(
+    buttons = definitions["run_filters"].buttons
+    assert set(buttons) == {"record", "unattributed"}
+    buttons["record"]._update(1)
+    outputs, filtered = app.run(
         defs={
             name: definitions[name]
             for name in (
@@ -139,13 +140,13 @@ def test_leaderboard_table_shows_runs_across_records(project, monkeypatch):
         "run:r2",
         "run:r3",
     ]
-    assert "3 runs under" in filtered["plot_view"].text
+    rendered = "\n".join(getattr(output, "text", "") for output in outputs)
+    assert '<span class="leaderboard-run-count">3 runs</span>' in rendered
     filtered["select_key"](None)
-    cleared, scope = filtered["run_filters"].apply(
+    cleared = filtered["run_filters"].apply(
         filtered["all_runs_df"], filtered["records"], "root/a/a"
     )
     assert [f"run:{run}" for run in cleared["run"]] == run_keys
-    assert scope is None
 
 
 def test_clicking_plot_point_selects_run_and_record(project, monkeypatch):
@@ -377,7 +378,8 @@ def test_dashboard_plots_a_leaderboard_without_records(tmp_path, monkeypatch):
     )
     assert [row["key"] for row in definitions["tree"].data] == ["run:r"]
     rendered = "\n".join(getattr(output, "text", "") for output in outputs)
-    assert "1 without a numeric" in rendered
+    assert '<span class="leaderboard-run-count">1 run</span>' in rendered
+    assert "No runs to plot." in rendered
     definitions["tree"]._update(["0"])
     outputs, selected = app.run(
         defs={

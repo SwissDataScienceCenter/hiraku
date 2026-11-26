@@ -378,12 +378,12 @@ def test_tradeoff_plot_handles_empty_or_unusable_inputs(
 
 def test_performance_plot_handles_empty_runs() -> None:
     runs = arrow_frame([], [*RUN_COLUMNS, "metric.loss"])
-    content = hc.performance_plot(runs, scope="root", metric="loss").text
+    content = hc.performance_plot(runs, metric="loss").text
     assert "No runs to plot." in content
 
 
 @pytest.mark.parametrize("plot", [hc.performance_plot, hc.tradeoff_plot])
-def test_independent_plots_render_runs_and_report_excluded_values(plot) -> None:
+def test_independent_plots_render_plottable_runs(plot) -> None:
     runs = arrow_frame(
         [
             {
@@ -404,9 +404,7 @@ def test_independent_plots_render_runs_and_report_excluded_values(plot) -> None:
     )
 
     if plot is hc.performance_plot:
-        content = plot(
-            runs, scope="root", metric="loss", selected_run={"run": "best"}
-        ).text
+        content = plot(runs, metric="loss", selected_run={"run": "best"}).text
     else:
         content = plot(
             runs,
@@ -419,10 +417,9 @@ def test_independent_plots_render_runs_and_report_excluded_values(plot) -> None:
     assert "best" in content
     assert "other" in content
     if plot is hc.performance_plot:
-        assert "3 runs under" in content
-        assert "1 without a numeric" in content
+        assert "numbered by execution order" not in content
         assert "f59e0b" in content
     else:
-        assert "2 comparable runs" in content
-        assert "1 strong trade-offs" in content
-        assert "1 runs excluded" in content
+        assert "diamond" not in content
+        assert "non_dominated" not in content
+        assert "comparable runs" not in content

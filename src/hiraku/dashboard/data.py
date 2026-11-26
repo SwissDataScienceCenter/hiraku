@@ -206,28 +206,23 @@ def filter_leaderboard_runs(
     records: Sequence[Record],
     record_id: str | None,
     *,
-    include_record: bool,
-    include_descendants: bool,
     include_unattributed: bool,
 ) -> pd.DataFrame:
     """Filter by record ID and explicit lineage, retaining source order."""
     attributed = runs_df["record"].astype("string").fillna("").ne("")
-    if record_id is None or not (include_record or include_descendants):
+    if record_id is None:
         matching = attributed
     else:
         ids = {record_id}
-        if include_descendants:
-            children: dict[str | None, list[str]] = {}
-            for record in records:
-                children.setdefault(record.parent_id, []).append(record.id)
-            pending = [record_id]
-            while pending:
-                for child in children.get(pending.pop(), ()):
-                    if child not in ids:
-                        ids.add(child)
-                        pending.append(child)
-        if not include_record:
-            ids.remove(record_id)
+        children: dict[str | None, list[str]] = {}
+        for record in records:
+            children.setdefault(record.parent_id, []).append(record.id)
+        pending = [record_id]
+        while pending:
+            for child in children.get(pending.pop(), ()):
+                if child not in ids:
+                    ids.add(child)
+                    pending.append(child)
         matching = runs_df["record"].isin(ids)
     if include_unattributed:
         matching |= ~attributed
@@ -361,15 +356,13 @@ def tradeoff_frame(
     runs_df: pd.DataFrame,
     x_metric: str,
     y_metric: str,
-    x_objective: str,
-    y_objective: str,
-) -> tuple[pd.DataFrame, int]:
-    """Return comparable runs with a trade-off highlight and excluded count."""
+) -> pd.DataFrame:
+    """Return runs with finite values for both metrics, in source order."""
     # As floats: Arrow-backed columns hold pd.NA, which math.isfinite rejects.
     x_values = metric_values(runs_df, x_metric)
     y_values = metric_values(runs_df, y_metric)
     valid = x_values.notna() & y_values.notna()
-    points = pd.DataFrame(
+    return pd.DataFrame(
         {
             "run": runs_df.loc[valid, "run"].astype(str).to_numpy(),
             "record": runs_df.loc[valid, "record"].astype(str).to_numpy(),
@@ -377,24 +370,6 @@ def tradeoff_frame(
             "y": y_values.loc[valid].to_numpy(),
         }
     ).reset_index(drop=True)
-    if points.empty:
-        points["non_dominated"] = pd.Series(dtype=bool)
-        return points, len(runs_df)
-
-    x_score = points["x"] * (1 if x_objective == "minimize" else -1)
-    y_score = points["y"] * (1 if y_objective == "minimize" else -1)
-    ordered = points.assign(_x_score=x_score, _y_score=y_score)
-    non_dominated_indices: list[int] = []
-    best_y = math.inf
-    for _, group in ordered.groupby("_x_score", sort=True):
-        group_best_y = group["_y_score"].min()
-        if group_best_y <= best_y:
-            non_dominated_indices.extend(
-                group.index[group["_y_score"] == group_best_y].tolist()
-            )
-            best_y = min(best_y, group_best_y)
-    points["non_dominated"] = points.index.isin(non_dominated_indices)
-    return points, len(runs_df) - len(points)
 
 
 def _records(frame: pd.DataFrame) -> list[dict[str, Any]]:

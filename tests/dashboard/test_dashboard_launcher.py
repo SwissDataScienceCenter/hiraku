@@ -76,7 +76,6 @@ def test_bundled_views_place_all_interactive_cells() -> None:
 
     assert placed <= set(named)
     assert placed == {
-        "project_name",
         "refresh_control",
         "record_details",
         "record_navigation",
@@ -85,8 +84,11 @@ def test_bundled_views_place_all_interactive_cells() -> None:
         "leaderboard_view",
     }
     assert 'role="tablist"' not in view
+    assert "<h1>Hiraku dashboard</h1>" in view
+    assert view.count("Swiss Data Science Center") == 1
     assert "workflow_selection" not in named
     assert "workflow_details" not in named
+    assert "record_editor" not in named
     assert {
         "data_setup",
         "project_data",

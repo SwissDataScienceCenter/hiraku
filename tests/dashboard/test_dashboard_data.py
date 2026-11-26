@@ -41,17 +41,14 @@ def tables(project: Project) -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 @pytest.mark.parametrize(
-    ("direct", "descendants", "unattributed", "expected"),
+    ("scope", "unattributed", "expected"),
     [
-        (False, False, False, ["direct", "child", "other"]),
-        (True, False, False, ["direct"]),
-        (False, True, False, ["child"]),
-        (True, True, True, ["direct", "child", "unattributed"]),
+        (None, False, ["direct", "child", "other"]),
+        ("root/a/a", False, ["direct", "child"]),
+        ("root/a/a", True, ["direct", "child", "unattributed"]),
     ],
 )
-def test_leaderboard_filter_combines_run_sets(
-    project, direct, descendants, unattributed, expected
-):
+def test_leaderboard_filter_combines_run_sets(project, scope, unattributed, expected):
     runs = arrow_frame(
         [
             {"run": "direct", "record": "root/a/a"},
@@ -67,9 +64,7 @@ def test_leaderboard_filter_combines_run_sets(
     filtered = filter_leaderboard_runs(
         runs,
         records,
-        "root/a/a",
-        include_record=direct,
-        include_descendants=descendants,
+        scope,
         include_unattributed=unattributed,
     )
     assert filtered["run"].tolist() == expected
@@ -117,7 +112,7 @@ def test_execution_order_breaks_ties_by_id_and_puts_untimed_runs_last() -> None:
     assert [run.id for run in execution_order(runs)] == ["a", "b", "untimed"]
 
 
-def test_tradeoff_frame_identifies_non_dominated_runs() -> None:
+def test_tradeoff_frame_keeps_all_runs_with_finite_metrics() -> None:
     runs = pd.DataFrame(
         [
             {"run": "best", "record": "a", "metric.cost": 1, "metric.score": 9},
@@ -133,10 +128,9 @@ def test_tradeoff_frame_identifies_non_dominated_runs() -> None:
         ]
     )
 
-    points, excluded = tradeoff_frame(runs, "cost", "score", "minimize", "maximize")
+    points = tradeoff_frame(runs, "cost", "score")
 
-    assert points.loc[points["non_dominated"], "run"].tolist() == ["best", "tradeoff"]
-    assert excluded == 2
+    assert points["run"].tolist() == ["best", "tradeoff", "dominated"]
 
 
 def test_tradeoff_frame_accepts_arrow_metrics_with_missing_values() -> None:
@@ -151,10 +145,9 @@ def test_tradeoff_frame_accepts_arrow_metrics_with_missing_values() -> None:
         }
     )
 
-    points, excluded = tradeoff_frame(runs, "steps", "score", "minimize", "maximize")
+    points = tradeoff_frame(runs, "steps", "score")
 
     assert points["run"].tolist() == ["a", "b"]
-    assert excluded == 1
 
 
 def test_record_rows_list_records_in_tree_order() -> None:

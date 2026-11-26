@@ -44,12 +44,6 @@ def data_setup():
 
 
 @app.cell
-def project_name(project_context):
-    mo.plain_text(project_context.root.name)
-    return
-
-
-@app.cell
 def refresh_control(project_context, requested_leaderboard):
     refresh = mo.ui.button(label="Refresh", value=0, on_click=lambda count: count + 1)
     _names = Leaderboard.list(project_context)
@@ -182,32 +176,13 @@ def record_navigation(
 
 
 @app.cell
-def record_editor(project_context):
-    get_editor_revision, _set_editor_revision = mo.state(0, allow_self_loops=True)
-
-    def save_markdown(record, markdown):
-        record.markdown = markdown
-        project_context.vault.save(record, overwrite=True)
-        return record
-
-    markdown_editor = hc.MarkdownEditor(
-        on_save=save_markdown,
-        on_change=lambda: _set_editor_revision(lambda revision: revision + 1),
-    )
-    return get_editor_revision, markdown_editor
-
-
-@app.cell
 def record_details(
     all_runs_df,
-    get_editor_revision,
-    markdown_editor,
     repository_url,
     selected_record,
     selected_run,
 ):
-    get_editor_revision()
-    _title = "Selected record"
+    _title = "Record"
     if selected_record is None and selected_run is not None:
         _title = "Run details"
         _details = hc.run_details(selected_run)
@@ -221,7 +196,6 @@ def record_details(
         )
         _details = hc.markdown_view(
             selected_record,
-            editor=markdown_editor,
             repository_url=repository_url,
             runs=_runs,
             open_run_id=selected_run["run"] if selected_run is not None else None,
@@ -236,16 +210,15 @@ def leaderboard_filters(
 ):
     get_filter_revision()
     _record_id = selected_record.id if selected_record else None
-    leaderboard_runs, plot_scope = run_filters.apply(all_runs_df, records, _record_id)
-    run_filters.render(_record_id)
-    return leaderboard_runs, plot_scope
+    leaderboard_runs = run_filters.apply(all_runs_df, records, _record_id)
+    run_filters.render(_record_id, len(leaderboard_runs))
+    return (leaderboard_runs,)
 
 
 @app.cell
 def leaderboard_plot(
     leaderboard,
     leaderboard_runs,
-    plot_scope,
     select_key,
     selected_record,
     selected_run,
@@ -261,7 +234,6 @@ def leaderboard_plot(
     if _x is None:
         plot_view = hc.performance_plot(
             leaderboard_runs,
-            scope=plot_scope,
             metric=_y,
             selected_record_id=_record_id,
             selected_run_id=_run_id,

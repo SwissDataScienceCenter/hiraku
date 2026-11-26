@@ -1,15 +1,14 @@
 #app-shell { max-width: 1600px; margin: auto; padding: 0 2.5rem 3rem; }
-.topbar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+.dashboard-heading {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
   align-items: center;
   gap: 1.5rem;
-  margin: 0 -2.5rem 3rem;
-  padding: 0.5rem 2.5rem;
+  padding: 2rem 0 1.5rem;
 }
 .leaderboard { margin-bottom: 1.5rem; }
-h1 { margin: 0 0 1rem; }
-.intro { margin-bottom: 2rem; }
+.dashboard-heading h1 { margin: 0; }
 .dashboard-layout {
   display: grid;
   grid-template-columns: var(--record-sidebar-width, clamp(280px, 27vw, 380px)) 6px minmax(0, 1fr);
@@ -39,24 +38,14 @@ h1 { margin: 0 0 1rem; }
 .dashboard-layout.resizing .dashboard-divider::after { background: var(--primary-color, #5561a6); }
 .dashboard-layout.resizing { user-select: none; cursor: col-resize; }
 .record-navigation { position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow: auto; }
-.record-details { position: relative; margin-top: 1.5rem; }
-.record-details-heading { min-height: 2rem; padding-right: 10rem; }
-.record-details marimo-cell[name="record_details"] .output { position: static; }
-.record-details .hiraku-markdown-controls {
-  position: absolute;
-  top: 1.5rem;
-  right: 1.5rem;
-}
+.record-details { margin-top: 1.5rem; }
 @media (max-width: 900px) {
   .dashboard-layout { grid-template-columns: minmax(0, 1fr); }
   .dashboard-divider { display: none; }
   .record-navigation { position: static; max-height: 45vh; }
   #app-shell { padding: 0 1.5rem 2.5rem; }
-  .topbar { margin: 0 -1.5rem 2rem; padding: 0.5rem 1.5rem; }
 }
 @media (max-width: 600px) {
   #app-shell { padding: 0 1rem 2rem; }
-  .topbar { margin: 0 -1rem 2rem; padding: 0.5rem 1rem; }
   .card { padding: 1rem; }
-  .record-details .hiraku-markdown-controls { top: 1rem; right: 1rem; }
 }

@@ -20,7 +20,7 @@ Run every command from inside a Hiraku project.
 
 | Command | Mode | What it does |
 | --- | --- | --- |
-| `hiraku dashboard serve` | View | Serves the dashboard with record Markdown editing. |
+| `hiraku dashboard serve` | View | Serves the read-only dashboard. |
 | `hiraku dashboard serve --watch` | Watch | Reloads the notebook when it changes on disk. |
 | `hiraku dashboard serve --include-code` | View with code | Same page; marimo's menu can also show each cell's code. |
 | `hiraku dashboard create NAME` | Customize | Creates `hiraku/dashboards/NAME.py` and its Studio view. |
@@ -123,10 +123,10 @@ Choose a leaderboard using the selector, or open one with
 `hiraku dashboard serve --leaderboard NAME`. A sole leaderboard is selected automatically.
 Plot and Table show all attributed runs by default, including runs whose record
 files are missing. Use the **Filter** chips below the Leaderboard title to choose
-runs attributed to the **Selected record**, to its **Descendants**, or to both.
+runs attributed to the **Selected record** and its descendants.
 **Include unattributed** adds runs without a record to any of these views.
-The record chips require a selection. Clearing the selection turns off both
-record chips. Metric names and directions come from the leaderboard, and
+The **Selected record** chip requires a selection. Clearing the selection turns
+it off. Metric names and directions come from the leaderboard, and
 parameters are discovered automatically.
 
 ## Sections
@@ -137,10 +137,9 @@ parameters are discovered automatically.
     metric to see performance in execution order. The plot highlights runs
     attributed to the selected record and enlarges the selected run's point.
     Click a point to select the run and open its details in the record below.
-    Choose a metric on both axes to compare trade-offs among the filtered runs.
-    Diamonds mark runs that no other run improves upon on one metric while
-    matching or improving the other. Metrics use their configured directions
-    and default to minimizing. **Table** shows the filtered runs with their
+    Choose a metric on both axes to compare the filtered runs in a scatter plot.
+    Axis labels show the configured metric directions and default to minimizing.
+    **Table** shows the filtered runs with their
     start time, duration, and first leaderboard metric. Enable **Show records**
     to interleave records with their runs. Select a run row to inspect the run
     and select its owning record.
@@ -178,11 +177,6 @@ parameters are discovered automatically.
     Selecting a plot point or run row
     opens its disclosure. If the run has no available record, its details
     appear directly below the Leaderboard.
-    Click the pen to edit the body, then **Save** to write it back or **Cancel**
-    to discard the draft. Front matter stays read-only. Drafts remain available
-    when switching between records in the same session. Save errors keep the
-    draft open; if the file changed externally, copy your draft before canceling
-    and refreshing to load the latest version.
     Selecting a run shows its owning record and targets it with the active
     Leaderboard record filters.
 
@@ -190,11 +184,11 @@ Use **Refresh** to re-read records and tracking sources after new launches.
 
 ### Reusing plots
 
-`hc.performance_plot(runs, scope=scope, metric="loss", selected_run=selected_run)`
+`hc.performance_plot(runs, metric="loss", selected_run=selected_run)`
 plots one metric over execution order. `hc.tradeoff_plot(runs, x_metric="loss",
 y_metric="accuracy", x_objective="minimize", y_objective="maximize")` compares
-two metrics and lists non-dominated runs. Both accept an already scoped run table
-and create no controls or selection state.
+two metrics in a scatter plot. Both accept an already
+scoped run table and create no controls or selection state.
 
 Place the Leaderboard header and its active view together in Studio:
 
@@ -267,23 +261,11 @@ collapsed metadata labeled with the ID above the body. For example:
 
 ```python
 hc.markdown_view(record)
-hc.markdown_view(record)
 ```
 
 Loading and persistence remain with the caller. The component does not load,
 parse, or save files, and rendering and selection do not change record objects
 or Markdown files. Passing `None` displays the empty selection state.
-
-For editing, create `hc.MarkdownEditor(on_save=Record.save_markdown, on_change=...)` once
-in a notebook cell and call `hc.markdown_view(record, editor=editor)` in a
-separate display cell. Omitting `editor` keeps the viewer read-only.
-Wire `on_change` to a `mo.state` setter with `allow_self_loops=True`, and read
-its getter in the display cell so button actions rerender it. The
-`Record.save_markdown` method saves through the record's own API and rejects
-changes made on disk since editing began. The editor changes
-the displayed object's body only after a successful save. Detached records
-remain read-only until saved to a path. Drafts are held in memory, so reloading
-or closing the session discards them.
 
 ## Run and record tables
 
