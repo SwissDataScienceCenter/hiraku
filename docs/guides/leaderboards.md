@@ -1,8 +1,10 @@
 # Leaderboards
 
-A leaderboard selects one CSV, MLflow, or W&B source and optional comparison
-metrics. Definitions live in `hiraku/leaderboards/<name>.yml`; relative source
-paths resolve from the project root.
+A leaderboard's `source` tells Hiraku where to read runs. Set `source.type` to
+`csv`, `mlflow`, or `wandb` and supply the settings for that backend. Configure
+where runs are logged in your training script. A leaderboard can also select
+metrics to compare. Definitions live in `hiraku/leaderboards/<name>.yml`;
+relative source paths resolve from the project root.
 
 ```bash
 hiraku leaderboard create validation --source mlflow \
