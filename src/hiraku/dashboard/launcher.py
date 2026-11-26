@@ -47,7 +47,7 @@ def list_dashboards(project: Project) -> dict[str, Path]:
     return {
         path.stem: path
         for path in sorted((project.hiraku_dir / "dashboards").glob("*.py"))
-        if path.is_file() and path.stem != "__init__"
+        if path.is_file()
     }
 
 

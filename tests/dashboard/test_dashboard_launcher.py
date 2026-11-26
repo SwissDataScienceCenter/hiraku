@@ -274,10 +274,6 @@ def test_dashboard_cli_requires_subcommand(
     result = runner.invoke(main, ["dashboard"])
     assert result.exit_code == 2
     assert "serve" in result.output
-    removed = runner.invoke(main, ["dashboard", "--init"])
-    assert removed.exit_code == 2
-    assert "No such option" in removed.output
-    assert "--init" in removed.output
     assert not served
     assert not launcher.list_dashboards(project)
 
@@ -338,11 +334,10 @@ def test_named_dashboard_missing_does_not_start_bundled_fallback(project, popen)
     assert not popen
 
 
-def test_dashboard_discovery_uses_the_dashboards_directory(project):
-    other = project.hiraku_dir / "dashboard" / "app.py"
-    other.parent.mkdir()
-    other.touch()
-    assert launcher.list_dashboards(project) == {}
+def test_dunder_init_is_discovered_as_a_dashboard(project):
+    notebook = launcher.init_dashboard(project, "__init__")
+
+    assert launcher.list_dashboards(project) == {"__init__": notebook}
 
 
 def test_dashboard_subcommands_create_list_and_serve(project, popen, monkeypatch):
@@ -455,14 +450,3 @@ def test_dashboard_edit_selects_notebook(project, popen, monkeypatch, name):
     assert "--watch" in popen["command"]
     assert "9002" in popen["command"]
     assert "--headless" in popen["command"]
-
-
-@pytest.mark.parametrize(
-    "arguments", [["dashboard", "--edit"], ["dashboard", "serve", "--edit"]]
-)
-def test_dashboard_rejects_removed_edit_flag(project, monkeypatch, arguments):
-    monkeypatch.chdir(project.root)
-    result = CliRunner().invoke(main, arguments)
-    assert result.exit_code == 2
-    assert "No such option" in result.output
-    assert "--edit" in result.output
