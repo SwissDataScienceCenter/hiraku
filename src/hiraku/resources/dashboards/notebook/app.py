@@ -5,18 +5,24 @@ import marimo
 app = marimo.App()
 
 with app.setup:
+    import os
+
     import marimo as mo
 
-
-@app.cell
-def introduction():
-    mo.md("# Exploration\n\nDescribe your question and dataset here.")
-    return
+    from hiraku.project import Project
 
 
 @app.cell
-def analysis():
-    # Load data and start exploring here.
+def project_data():
+    _root = os.environ.get("HIRAKU_PROJECT_ROOT")
+    project = Project.discover(_root or mo.notebook_dir())
+    records = project.vault.list()
+    return project, records
+
+
+@app.cell
+def introduction(records):
+    mo.md(f"# Exploration\n\n**Project records:** {len(records)}")
     return
 
 

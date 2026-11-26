@@ -363,17 +363,23 @@ def test_dashboard_subcommands_create_list_and_serve(project, popen, monkeypatch
     assert "--watch" in popen["command"]
 
 
-def test_notebook_template_runs_without_studio(project, popen):
+@pytest.mark.parametrize("via_launcher", [False, True])
+def test_notebook_template_runs_without_studio(project, monkeypatch, via_launcher):
     import runpy
 
     notebook = launcher.init_dashboard(project, "exploration", template="notebook")
     assert not (notebook.parent / "studio").exists()
-    outputs, _ = runpy.run_path(str(notebook))["app"].run()
-    assert any(
-        "Describe your question" in getattr(output, "text", "") for output in outputs
-    )
-    launcher.serve_dashboard(project, name="exploration", edit=True)
-    assert popen["notebook"] == notebook
+    record = project.vault.create("example", type="note", title="Example")
+    monkeypatch.delenv("HIRAKU_PROJECT_ROOT", raising=False)
+    if via_launcher:
+        monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
+    outputs, definitions = runpy.run_path(str(notebook))["app"].run()
+    assert definitions["project"].root == project.root
+    records = project.vault.list()
+    assert record in definitions["records"]
+    assert definitions["records"] == records
+    summary = f"<strong>Project records:</strong> {len(records)}"
+    assert any(summary in getattr(output, "text", "") for output in outputs)
     with pytest.raises(ValidationError, match="already exists"):
         launcher.init_dashboard(project, "exploration", template="notebook")
 
