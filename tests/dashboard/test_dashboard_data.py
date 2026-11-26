@@ -10,6 +10,7 @@ from hiraku.dashboard.data import (
     RUN_COLUMNS,
     arrow_frame,
     execution_order,
+    filter_leaderboard_runs,
     find_run,
     format_duration,
     metric_names,
@@ -18,11 +19,8 @@ from hiraku.dashboard.data import (
     run_rows,
     run_text,
     safe_url,
-    selection_scope,
-    subtree,
     tradeoff_frame,
     tree_rows,
-    within,
 )
 from hiraku.project import Project
 from hiraku.record import Record
@@ -43,20 +41,33 @@ def tables(project: Project) -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 @pytest.mark.parametrize(
-    ("key", "expected"),
+    ("scope", "unattributed", "expected"),
     [
-        ("record:root/b/b", "root/b/b"),
-        ("run:r2", "root/a/a"),
-        ("run:r1", "root/b/b"),
-        (None, None),
+        (None, False, ["direct", "child", "other"]),
+        ("root/a/a", False, ["direct", "child"]),
+        ("root/a/a", True, ["direct", "child", "unattributed"]),
     ],
 )
-def test_selection_scope_preserves_subtree_for_descendant_runs(
-    project: Project, key: str | None, expected: str
-) -> None:
-    records, runs = tables(project)
-    paths = dict(zip(records["record"], records["record_path"], strict=True))
-    assert selection_scope(key, "root/a/a", paths, runs) == expected
+def test_leaderboard_filter_combines_run_sets(project, scope, unattributed, expected):
+    runs = arrow_frame(
+        [
+            {"run": "direct", "record": "root/a/a"},
+            {"run": "child", "record": "root/a/a1/a1"},
+            {"run": "other", "record": "root/b/b"},
+            {"run": "unattributed", "record": None},
+        ],
+        RUN_COLUMNS,
+    )
+    records = project.vault.list()
+    for record in records:
+        record.title = "Same title"
+    filtered = filter_leaderboard_runs(
+        runs,
+        records,
+        scope,
+        include_unattributed=unattributed,
+    )
+    assert filtered["run"].tolist() == expected
 
 
 def test_run_rows_keep_runs_without_matching_records() -> None:
@@ -101,7 +112,7 @@ def test_execution_order_breaks_ties_by_id_and_puts_untimed_runs_last() -> None:
     assert [run.id for run in execution_order(runs)] == ["a", "b", "untimed"]
 
 
-def test_tradeoff_frame_identifies_non_dominated_runs() -> None:
+def test_tradeoff_frame_keeps_all_runs_with_finite_metrics() -> None:
     runs = pd.DataFrame(
         [
             {"run": "best", "record": "a", "metric.cost": 1, "metric.score": 9},
@@ -117,10 +128,9 @@ def test_tradeoff_frame_identifies_non_dominated_runs() -> None:
         ]
     )
 
-    points, excluded = tradeoff_frame(runs, "cost", "score", "minimize", "maximize")
+    points = tradeoff_frame(runs, "cost", "score")
 
-    assert points.loc[points["non_dominated"], "run"].tolist() == ["best", "tradeoff"]
-    assert excluded == 2
+    assert points["run"].tolist() == ["best", "tradeoff", "dominated"]
 
 
 def test_tradeoff_frame_accepts_arrow_metrics_with_missing_values() -> None:
@@ -135,10 +145,9 @@ def test_tradeoff_frame_accepts_arrow_metrics_with_missing_values() -> None:
         }
     )
 
-    points, excluded = tradeoff_frame(runs, "steps", "score", "minimize", "maximize")
+    points = tradeoff_frame(runs, "steps", "score")
 
     assert points["run"].tolist() == ["a", "b"]
-    assert excluded == 1
 
 
 def test_record_rows_list_records_in_tree_order() -> None:
@@ -183,6 +192,7 @@ def test_tree_rows_nest_runs_under_records_in_execution_order(
     project: Project,
 ) -> None:
     records_df, runs_df = tables(project)
+    runs_df["param.dataset"] = "iris"
 
     rows = tree_rows(records_df, runs_df, "loss")
 
@@ -199,8 +209,12 @@ def test_tree_rows_nest_runs_under_records_in_execution_order(
         ("run:r5", 0),
     ]
     assert rows[0]["loss"] == ""
+    assert rows[0]["param.dataset"] is None
     assert rows[2]["loss"] == 0.9
+    assert rows[2]["param.dataset"] == "iris"
     assert rows[2]["Type"] == "run"
+    assert rows[2]["Record / run"] == "r0"
+    assert rows[-1]["Record / run"] == "r5"
     assert rows[2]["Started"] == "2026-10-14 10:00:00"
     assert rows[-2]["Started"] == ""
     assert [row["Duration"] for row in rows] == [
@@ -279,16 +293,6 @@ def test_find_run_and_run_text(project: Project) -> None:
     )
 
 
-def test_subtree_selects_descendants_by_record_id(project: Project) -> None:
-    _, runs_df = tables(project)
-
-    assert subtree(runs_df, "root/a")["run"].tolist() == ["r0", "r2", "r3"]
-    assert subtree(runs_df, "root/b")["run"].tolist() == ["r1", "r4"]
-    assert subtree(runs_df, None).equals(runs_df)
-    # A sibling whose ID extends another's is not its descendant.
-    assert not within("root/ab", "root/a")
-
-
 def test_plot_frame_numbers_runs_and_skips_unusable_values(
     project: Project,
 ) -> None:
@@ -311,7 +315,7 @@ def test_plot_frame_numbers_runs_and_skips_unusable_values(
     assert plot_frame(runs_df, "accuracy")[1] == 5
     # A subtree keeps its original row labels; numbering restarts at 1.
     _, project_runs = tables(project)
-    scoped, _ = plot_frame(subtree(project_runs, "root/b"), "loss")
+    scoped, _ = plot_frame(project_runs[project_runs["record"] == "root/b/b"], "loss")
     assert scoped[["number", "run"]].values.tolist() == [[1, "r1"], [2, "r4"]]
     assert scoped["duration"].tolist() == ["1 m 15 s", ""]
 

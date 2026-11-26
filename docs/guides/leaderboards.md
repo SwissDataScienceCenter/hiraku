@@ -39,7 +39,7 @@ hiraku leaderboard show validation --json
 hiraku leaderboard runs validation --sort accuracy
 hiraku leaderboard runs validation --include-unattributed
 hiraku leaderboard runs validation --record baseline
-hiraku dashboard --leaderboard validation
+hiraku dashboard serve --leaderboard validation
 hiraku leaderboard delete validation
 ```
 

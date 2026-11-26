@@ -9,6 +9,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Removed
 
 - **Breaking:** Remove the top-level `hiraku status` command.
+- **Breaking:** Use `hiraku dashboard serve` to open the dashboard and
+  `hiraku dashboard create` to copy the bundled dashboard to
+  `hiraku/dashboards/dashboard.py`.
 
 ### Changed
 
@@ -40,6 +43,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Training code or its environment configures logging destinations.
 
 - Render human-readable CLI tables with Rich; JSON output remains available for programmatic use ([PR #112](https://github.com/SwissDataScienceCenter/hiraku/pull/112)).
+- Add `hiraku dashboard --watch` to reload the read-only notebook when it changes.
 - Separate dashboard performance and trade-off plots into independently placeable components and named cells with their own controls, removing the analysis mode selector.
 - Exclude generated Marimo and Studio session/build caches from distribution archives.
 - Extract reusable dashboard widgets and rendering into `hiraku.dashboard.components`, keeping notebook cells focused on data and reactive selection wiring.

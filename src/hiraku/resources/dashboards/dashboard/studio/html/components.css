@@ -1,0 +1,211 @@
+/* Reusable component styles shared by the notebook and Studio view. */
+.record-metadata { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 5px 18px; font: 13px/1.5 system-ui; margin: 0 0 16px; }
+.record-metadata dt { opacity: 0.65; }
+.record-metadata dd { margin: 0; overflow-wrap: anywhere; }
+.record-runs, .record-raw { margin: 10px 0; font: 13px/1.5 system-ui; }
+.record-runs:has(+ .record-raw) { margin-bottom: 4px; }
+.record-runs + .record-raw { margin-top: 0; }
+.record-runs summary, .record-raw summary { cursor: pointer; }
+.record-runs > ul { list-style: none; margin: 6px 0 0; padding-left: 1rem; }
+.record-run { margin: 4px 0; }
+.record-run .run-link { margin-left: 0.5rem; }
+.record-run > .run-provenance { margin: 6px 0 10px 1rem; }
+.record-raw pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+.record-markdown { font: 14px/1.55 system-ui; }
+.record-markdown p { margin: 0 0 0.65em; }
+.record-markdown h1, .record-markdown h2, .record-markdown h3 { margin: 1em 0 0.4em; }
+.record-markdown ul, .record-markdown ol { margin: 0.4em 0 0.8em; padding-left: 1.5em; }
+.record-navigation-header, .dashboard-block-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.record-navigation-header h2, .dashboard-block-header h2 { margin: 0; font: 600 18px/1.4 system-ui, sans-serif; }
+.record-navigation-mode, .dashboard-block-mode { display: flex; justify-content: flex-end; margin-left: auto; }
+:host(marimo-tabs) [role="tablist"] {
+  gap: 1px;
+  padding: 2px;
+  height: auto;
+  min-height: 0;
+  border: 1px solid var(--border, #e2e4e8);
+  border-radius: 6px;
+  background: color-mix(in srgb, currentColor 3%, transparent);
+}
+:host(marimo-tabs) [role="tab"] {
+  padding: 3px 8px;
+  height: auto;
+  min-height: 0;
+  border-radius: 4px;
+  font: 11px/1.3 system-ui, sans-serif;
+  color: inherit;
+  opacity: 0.65;
+  box-shadow: none;
+}
+:host(marimo-tabs) [role="tab"][aria-selected="true"] {
+  background: var(--background, #fff);
+  opacity: 1;
+  box-shadow: 0 1px 3px #00000012;
+}
+:host(marimo-tabs) [role="tab"] .markdown,
+:host(marimo-tabs) [role="tab"] .paragraph { font: inherit; margin: 0; }
+
+:host(marimo-dropdown) label .paragraph {
+  margin: 0;
+  font: 12px/1.4 system-ui, sans-serif;
+}
+:host(marimo-dropdown) select {
+  max-width: 100%;
+  height: auto;
+  min-height: 28px;
+  padding: 3px 8px;
+  border: 1px solid var(--border, #e2e4e8);
+  border-radius: 6px;
+  background: color-mix(in srgb, currentColor 3%, transparent);
+  color: inherit;
+  box-shadow: none;
+  font: 12px/1.4 system-ui, sans-serif;
+}
+:host(marimo-dropdown) select:focus-visible {
+  outline: 2px solid var(--primary-color, #5561a6);
+  outline-offset: 2px;
+}
+:host(marimo-dropdown) [part="label"]:has(.leaderboard-selector-label) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.record-tree { display: block; }
+.record-tree ul { list-style: none; margin: 0; padding: 0; }
+.record-tree ul ul {
+  margin-left: 12px;
+  padding-left: 10px;
+  border-left: 1px solid color-mix(in srgb, currentColor 12%, transparent);
+}
+.record-tree .record-row { border-radius: 5px; }
+.record-tree .record-row:hover,
+.record-tree summary:hover { background: color-mix(in srgb, currentColor 4%, transparent); }
+.record-tree .record-context { opacity: 0.55; }
+.record-tree .record-row[aria-current="true"] {
+  background: color-mix(in srgb, var(--primary-color, #5561a6) 10%, transparent);
+}
+.record-row > marimo-ui-element,
+.record-row > marimo-ui-element > marimo-button { display: block; width: 100%; }
+.record-tree summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+  list-style: none;
+  font: 500 12px/1.5 system-ui, sans-serif;
+}
+.record-tree summary::-webkit-details-marker { display: none; }
+.record-tree summary::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: rotate(-45deg);
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+.record-tree details[open] > summary::before { transform: rotate(45deg); }
+.record-folder-name { overflow-wrap: anywhere; }
+.record-filter-group { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-bottom: 12px; }
+.record-filter-label { margin-right: 4px; font: 11px/1.4 system-ui, sans-serif; opacity: 0.65; }
+.leaderboard-run-count { margin-left: auto; font: 12px/1.4 system-ui, sans-serif; white-space: nowrap; }
+button:has(.record-filter-chip) {
+  height: auto !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+button:has(.record-filter-chip) .paragraph { margin: 0 !important; }
+.record-filter-chip {
+  display: inline-block;
+  padding: 3px 9px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  font: 10px/1.5 system-ui, sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  background: color-mix(in srgb, currentColor 5%, transparent);
+  color: inherit;
+}
+.record-filter-chip.active,
+:host(marimo-checkbox) .mo-label:has([aria-checked="true"]) .show-records-chip {
+  border-color: var(--primary-color, #5561a6);
+  background: color-mix(in srgb, var(--primary-color, #5561a6) 15%, transparent);
+}
+:host(marimo-checkbox) .mo-label:has(.show-records-chip) [role="checkbox"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  clip-path: inset(50%);
+}
+:host(marimo-checkbox) .show-records-chip { cursor: pointer; }
+:host(marimo-checkbox) .mo-label:has([role="checkbox"]:focus-visible) .show-records-chip {
+  outline: 2px solid var(--primary-color, #5561a6);
+  outline-offset: 2px;
+}
+button:has(.record-filter-chip):focus-visible {
+  outline: 2px solid var(--primary-color, #5561a6) !important;
+  border-radius: 14px;
+}
+button:disabled:has(.record-filter-chip) { opacity: 0.45; }
+
+button:has(.hiraku-record-node) {
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: stretch;
+  width: 100%;
+  height: auto !important;
+  min-height: 24px;
+  padding: 3px 8px !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: inherit !important;
+  text-align: left;
+}
+
+button:has(.hiraku-record-node) :is(.markdown, .paragraph) {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin: 0 !important;
+  line-height: 1.4;
+}
+
+.hiraku-record-node {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 6px;
+  min-width: 0;
+}
+
+.hiraku-record-node .record-title {
+  font: 500 13px/1.4 system-ui, sans-serif;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hiraku-record-node .record-type {
+  justify-self: end;
+  font: 10px/1.6 system-ui, sans-serif;
+  text-transform: uppercase;
+  background: var(--hiraku-record-badge-background, #f1f3f2);
+  border-radius: 12px;
+  padding: 1px 7px;
+  color: var(--hiraku-record-badge-foreground, #61716d);
+  white-space: nowrap;
+}
+
+button:has(.hiraku-record-node):focus-visible {
+  outline: 2px solid var(--primary-color, #5561a6) !important;
+}

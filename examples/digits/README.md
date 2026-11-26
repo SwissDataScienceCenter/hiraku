@@ -55,11 +55,12 @@ dashboard:
 
 ```bash
 export MLFLOW_TRACKING_URI="http://127.0.0.1:5000"
-hiraku dashboard --record digit-classification
+hiraku dashboard serve --record digit-classification
 ```
 
-Use `hiraku dashboard --init --edit --record digit-classification` to copy the
-notebook into the project and edit it. Run details link to the MLflow UI when
+Use `hiraku dashboard create` to copy the notebook into the project,
+then open it with `hiraku dashboard edit --record digit-classification`.
+Run details link to the MLflow UI when
 the dashboard is configured with its URL. See the dashboard guide for details.
 
 MLflow creates `mlflow.db` in the project root on the first launch. The training
@@ -138,7 +139,7 @@ Or browse them, with a per-run plot and links into the MLflow UI, in the
 See that guide to add a UI link to a custom project. Then open the dashboard:
 
 ```bash
-hiraku dashboard --record digit-classification
+hiraku dashboard serve --record digit-classification
 ```
 
 ??? info "Example run results"

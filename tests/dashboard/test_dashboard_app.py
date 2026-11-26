@@ -2,11 +2,38 @@ from __future__ import annotations
 
 import pytest
 
-from hiraku.dashboard.data import tree_rows
 from hiraku.project import Project
 
 pytest.importorskip("marimo")
 pytest.importorskip("altair")
+
+
+def _rerun(app, previous):
+    # Preserve the session while executing view cells against updated state.
+    names = (
+        "project_context",
+        "repository_url",
+        "leaderboard_names",
+        "get_source",
+        "set_source",
+        "get_selection",
+        "select_key",
+        "select_record",
+        "select_run",
+        "get_run_filters",
+        "toggle_run_filter",
+        "get_record_filters",
+        "toggle_record_filter",
+        "get_leaderboard_mode",
+        "set_leaderboard_mode",
+        "get_record_mode",
+        "set_record_mode",
+        "get_axes",
+        "set_axes",
+        "get_show_records",
+        "set_show_records",
+    )
+    return app.run(defs={name: previous[name] for name in names})
 
 
 def test_app_runs_every_cell_against_a_project(
@@ -14,15 +41,18 @@ def test_app_runs_every_cell_against_a_project(
 ) -> None:
     monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
     monkeypatch.setenv("HIRAKU_DASHBOARD_RECORD", "root/a/a")
-    from hiraku.dashboard.app import app
+    from hiraku.resources.dashboards.dashboard.app import app
 
     outputs, definitions = app.run()
 
     rendered = "\n".join(getattr(output, "text", "") for output in outputs)
-    assert "Select a run in the tree to see its details." in rendered
-    assert "numbered by execution order." in rendered
+    assert '<h2 class="record-details-heading">a</h2>' in rendered
+    assert 'data-copy-record-id="root/a/a"' in rendered
+    assert "<dt>id</dt>" not in rendered
+    assert '<details class="record-runs">' in rendered
+    assert '<span class="leaderboard-run-count">6 runs</span>' in rendered
+    assert 'aria-label="Leaderboard filters"' in rendered
 
-    assert definitions["scope"] == "root/a/a"
     assert definitions["selected_record"].id == "root/a/a"
     assert definitions["selected_run"] is None
     assert definitions["leaderboard_error"] is None
@@ -33,10 +63,11 @@ def test_app_runs_every_cell_against_a_project(
         "root/b/b",
         "root/root",
     ]
-    assert definitions["tree"].value[0]["key"] == "record:root/a/a"
-    assert definitions["metric"].value == "loss"
-    assert "plot_mode" not in definitions
-    assert "Choose two different metrics." in rendered
+    assert definitions["tree"].value == []
+    assert definitions["x_axis"].selected_key == "Run order"
+    assert definitions["x_axis"].value is None
+    assert definitions["y_axis"].value == "loss"
+    assert definitions["leaderboard_mode"].value == "Plot"
     runs_df = definitions["runs_df"]
     assert list(runs_df["run"]) == ["r0", "r1", "r2", "r3", "r5", "r4"]
     assert {"record_path", "metric.loss"} <= set(runs_df.columns)
@@ -49,74 +80,201 @@ def test_app_runs_every_cell_against_a_project(
     ]
 
 
+def test_leaderboard_axes_switch_to_tradeoffs(project, monkeypatch):
+    (project.leaderboards_dir / "default.yml").write_text(
+        "source: {type: csv, path: runs.csv}\n"
+        "metrics: [{name: loss, direction: minimize}, "
+        "{name: accuracy, direction: maximize}]\n"
+    )
+    csv_path = project.root / "runs.csv"
+    header, *rows = csv_path.read_text().splitlines()
+    csv_path.write_text(
+        "\n".join([f"{header},metric.accuracy", *(f"{row},0.8" for row in rows)]) + "\n"
+    )
+    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
+    from hiraku.resources.dashboards.dashboard.app import app
+
+    _, initial = app.run()
+    initial["x_axis"]._update(["accuracy"])
+    _, updated = _rerun(app, initial)
+
+    rendered = updated["plot_view"].text
+    assert "accuracy (maximize)" in rendered
+    assert "loss (minimize)" in rendered
+    assert "strong trade-offs" not in rendered
+    assert "marimo-table" not in rendered
+    assert updated["y_axis"].text in rendered
+
+
+def test_leaderboard_table_shows_runs_across_records(project, monkeypatch):
+    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
+    monkeypatch.setenv("HIRAKU_DASHBOARD_RECORD", "root/a/a")
+    from hiraku.resources.dashboards.dashboard.app import app
+
+    initial_outputs, initial = app.run()
+    header = next(
+        output.text
+        for output in initial_outputs
+        if "<h2>Leaderboard</h2>" in getattr(output, "text", "")
+    )
+    for name in ("leaderboard_selector", "leaderboard_mode"):
+        assert initial[name].text in header
+    mode = initial["leaderboard_mode"]
+    mode._update("1")
+    outputs, definitions = _rerun(app, initial)
+
+    assert definitions["leaderboard_mode"].value == "Table"
+    table = definitions["tree"]
+    rendered = [getattr(output, "text", "") for output in outputs]
+    table_view = next(output for output in rendered if table.text in output)
+    assert definitions["leaderboard_selector"].text not in table_view
+    run_keys = ["run:r0", "run:r1", "run:r2", "run:r3", "run:r5", "run:r4"]
+    assert [row["key"] for row in table.data] == run_keys
+    assert {"Record / run", "Started", "Duration", "loss"} <= table.data[0].keys()
+
+    assert "Show records" in table_view
+    definitions["include_records"]._update(True)
+    _, interleaved = _rerun(app, definitions)
+    keys = [row["key"] for row in interleaved["tree"].data]
+    assert keys.index("record:root/a/a") + 1 == keys.index("run:r0")
+    definitions["include_records"]._update(False)
+
+    buttons = definitions["run_filter_buttons"]
+    assert set(buttons) == {"record", "unattributed"}
+    buttons["record"]._update(1)
+    outputs, filtered = _rerun(app, definitions)
+    assert [row["key"] for row in filtered["tree"].data] == [
+        "run:r0",
+        "run:r2",
+        "run:r3",
+    ]
+    rendered = "\n".join(getattr(output, "text", "") for output in outputs)
+    assert '<span class="leaderboard-run-count">3 runs</span>' in rendered
+    filtered["select_key"](None)
+    _, cleared = _rerun(app, filtered)
+    cleared = cleared["leaderboard_runs"]
+    assert [f"run:{run}" for run in cleared["run"]] == run_keys
+
+
+def test_clicking_plot_point_selects_run_and_record(project, monkeypatch):
+    import marimo as mo
+
+    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
+    monkeypatch.setenv("HIRAKU_DASHBOARD_RECORD", "root/a/a")
+    from hiraku.resources.dashboards.dashboard.app import app
+
+    charts = []
+    altair_chart = mo.ui.altair_chart
+
+    def capture_chart(*args, **kwargs):
+        chart = altair_chart(*args, **kwargs)
+        charts.append(chart)
+        return chart
+
+    monkeypatch.setattr(mo.ui, "altair_chart", capture_chart)
+    _, initial = app.run()
+    chart = charts[-1]
+    assert chart.text in initial["plot_view"].text
+    color = chart._spec["layer"][1]["encoding"]["color"]
+    assert color["condition"]["test"] == "(datum.record === 'root/a/a')"
+    assert "field" not in color
+    chart._update({"picked_run": {"run": ["r1"]}})
+    assert initial["get_selection"]() == "run:r1"
+    _rerun(app, initial)
+    size = charts[-1]._spec["layer"][1]["encoding"]["size"]
+    assert size["condition"]["test"] == "(datum.run === 'r1')"
+    assert size["condition"]["value"] > size["value"]
+
+
 @pytest.mark.parametrize(
-    ("key", "scope", "record_id"),
+    ("key", "record_id"),
     [
-        ("record:root/a/a", "root/a/a", "root/a/a"),
-        ("run:r2", "root/a/a", "root/a/a1/a1"),
-        ("run:r1", "root/b/b", "root/b/b"),
+        ("record:root/a/a", "root/a/a"),
+        ("run:r2", "root/a/a1/a1"),
+        ("run:r1", "root/b/b"),
     ],
 )
-def test_record_details_follow_selection_without_changing_subtree_semantics(
+def test_record_details_follow_selection(
     project: Project,
     monkeypatch: pytest.MonkeyPatch,
     key: str,
-    scope: str,
     record_id: str,
 ) -> None:
     monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
     monkeypatch.setenv("HIRAKU_DASHBOARD_RECORD", "root/a/a")
-    from hiraku.dashboard.app import app
+    from hiraku.resources.dashboards.dashboard.app import app
 
     _, initial = app.run()
-    rows = tree_rows(initial["records_df"], initial["runs_df"], initial["tree_metric"])
+    if key.startswith("record:"):
+        initial["include_records"]._update(True)
+        _, initial = _rerun(app, initial)
+    rows = initial["tree"].data
     index = next(index for index, row in enumerate(rows) if row["key"] == key)
     initial["tree"]._update([str(index)])
-    assert initial["get_selection"]() == (key, scope)
-    outputs, definitions = app.run(
-        defs={
-            name: initial[name]
-            for name in (
-                "get_selection",
-                "initial_record",
-                "metrics",
-                "paths",
-                "select_key",
-                "tree_metric",
-            )
-        }
-    )
+    assert initial["get_selection"]() == key
+    outputs, definitions = _rerun(app, initial)
 
-    assert definitions["scope"] == scope
     assert definitions["selected_record"].id == record_id
     assert definitions["tree"].value[0]["key"] == key
     rendered = "\n".join(getattr(output, "text", "") for output in outputs)
     assert f"type: {definitions['selected_record'].type}" in rendered
+    if key.startswith("run:"):
+        run_id = key.removeprefix("run:")
+        assert '<details class="record-runs" open>' in rendered
+        assert (
+            f'<details class="record-run" open><summary>{run_id}</summary>' in rendered
+        )
+    else:
+        assert '<details class="record-runs" open>' not in rendered
+
+
+def test_navigation_filter_toggles_preserve_selection(project, monkeypatch):
+    record = project.vault.load("root/a/a")
+    record.type = "note"
+    project.vault.save(record, overwrite=True)
+    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
+    monkeypatch.setenv("HIRAKU_DASHBOARD_RECORD", record.id)
+    from hiraku.resources.dashboards.dashboard.app import app
+
+    _, initial = app.run()
+    initial["record_filter_buttons"]["type", "task"]._update(1)
+    _, filtered = _rerun(app, initial)
+    assert record.id not in filtered["file_buttons"]
+    assert filtered["selected_record"].id == record.id
+    assert filtered["record_types"] == ["task"]
+    filtered["record_filter_buttons"]["type", "task"]._update(1)
+    _, cleared = _rerun(app, filtered)
+    assert record.id in cleared["file_buttons"]
+    assert cleared["record_types"] == []
+
+
+def test_navigation_mode_preserves_record_and_scope(project, monkeypatch):
+    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
+    monkeypatch.setenv("HIRAKU_DASHBOARD_RECORD", "root/a/a")
+    from hiraku.resources.dashboards.dashboard.app import app
+
+    _, initial = app.run()
+    initial["record_mode"]._update("1")
+    _, lineage = _rerun(app, initial)
+    assert lineage["selected_record"].id == initial["selected_record"].id
+    assert lineage["record_mode"].value == "Lineage"
+    assert set(lineage["lineage_buttons"]) == {
+        record.id for record in initial["records"]
+    }
 
 
 def test_navigation_selection_updates_table_and_clears_run(
     project: Project, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
-    from hiraku.dashboard.app import app
+    from hiraku.resources.dashboards.dashboard.app import app
 
     _, initial = app.run()
+    initial["include_records"]._update(True)
     initial["select_key"]("run:r1")
-    initial["record_buttons"]["root/a/a"]._update(1)
-    assert initial["get_selection"]() == ("record:root/a/a", "root/a/a")
-    _, definitions = app.run(
-        defs={
-            name: initial[name]
-            for name in (
-                "get_selection",
-                "initial_record",
-                "metrics",
-                "paths",
-                "select_key",
-                "tree_metric",
-            )
-        }
-    )
+    initial["file_buttons"]["root/a/a"]._update(1)
+    assert initial["get_selection"]() == "record:root/a/a"
+    _, definitions = _rerun(app, initial)
     assert definitions["tree"].value[0]["key"] == "record:root/a/a"
     assert definitions["selected_record"].id == "root/a/a"
     assert definitions["selected_run"] is None
@@ -151,29 +309,27 @@ def test_dashboard_plots_a_leaderboard_without_records(tmp_path, monkeypatch):
     monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(tmp_path))
     monkeypatch.delenv("HIRAKU_DASHBOARD_RECORD", raising=False)
     monkeypatch.delenv("HIRAKU_DASHBOARD_LEADERBOARD", raising=False)
-    from hiraku.dashboard.app import app
+    from hiraku.resources.dashboards.dashboard.app import app
 
     outputs, definitions = app.run()
 
-    assert definitions["scope"] is None
     assert definitions["selected_record"] is None
     assert definitions["leaderboard_selector"].value == "local"
     assert definitions["metrics"] == ["missing", "score"]
-    assert definitions["metric"].value == "missing"
+    assert definitions["y_axis"].value == "missing"
     assert definitions["runs_df"].empty
-    assert definitions["include_unattributed"].value is False
-    definitions["include_unattributed"]._update(True)
-    outputs, definitions = app.run(
-        defs={
-            name: definitions[name]
-            for name in ("refresh", "leaderboard_selector", "include_unattributed")
-        }
-    )
-    assert definitions["runs_df"]["run"].tolist() == ["r"]
-    rows = tree_rows(definitions["records_df"], definitions["runs_df"], "score")
-    assert [row["key"] for row in rows] == ["run:r"]
+    assert definitions["leaderboard_runs"].empty
+    definitions["run_filter_buttons"]["unattributed"]._update(1)
+    outputs, definitions = _rerun(app, definitions)
+    assert [row["key"] for row in definitions["tree"].data] == ["run:r"]
     rendered = "\n".join(getattr(output, "text", "") for output in outputs)
-    assert "1 without a numeric" in rendered
+    assert '<span class="leaderboard-run-count">1 run</span>' in rendered
+    assert "No runs to plot." in rendered
+    definitions["tree"]._update(["0"])
+    outputs, selected = _rerun(app, definitions)
+    assert selected["selected_record"] is None
+    assert selected["selected_run"]["run"] == "r"
+    assert any("Run details</h2>" in getattr(output, "text", "") for output in outputs)
 
 
 def test_dashboard_selects_between_leaderboards(project, monkeypatch):
@@ -185,19 +341,13 @@ def test_dashboard_selects_between_leaderboards(project, monkeypatch):
     )
     monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
     monkeypatch.setenv("HIRAKU_DASHBOARD_LEADERBOARD", "other")
-    from hiraku.dashboard.app import app
+    from hiraku.resources.dashboards.dashboard.app import app
 
     _, definitions = app.run()
     assert definitions["leaderboard_selector"].value == "other"
     assert definitions["runs_df"]["run"].tolist() == ["other"]
     definitions["leaderboard_selector"]._update(["default"])
-    _, updated = app.run(
-        defs={
-            "leaderboard_selector": definitions["leaderboard_selector"],
-            "refresh": definitions["refresh"],
-            "include_unattributed": definitions["include_unattributed"],
-        }
-    )
+    _, updated = _rerun(app, definitions)
     assert len(updated["runs_df"]) == 6
 
 
@@ -219,7 +369,7 @@ def test_tracking_errors_preserve_record_navigation(project, monkeypatch, failur
     monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
     monkeypatch.setenv("HIRAKU_DASHBOARD_RECORD", "root/a/a")
     monkeypatch.delenv("HIRAKU_DASHBOARD_LEADERBOARD", raising=False)
-    from hiraku.dashboard.app import app
+    from hiraku.resources.dashboards.dashboard.app import app
 
     outputs, definitions = app.run()
 

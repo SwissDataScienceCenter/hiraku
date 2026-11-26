@@ -84,19 +84,32 @@ def test_markdown_view_handles_missing_or_empty_records() -> None:
     assert "type: record" in empty
 
 
-def test_run_table_retains_initial_record_and_selection_keys() -> None:
+@pytest.mark.parametrize(("metric", "label"), [("loss", "loss"), ("key", "metric.key")])
+def test_run_table_retains_initial_record_and_selection_keys(metric, label) -> None:
     records = arrow_frame(
         [{"record": "root", "record_path": "root", "type": "task"}], RECORD_COLUMNS
     )
     runs = arrow_frame(
-        [{"run": "r1", "record": "root", "metric.loss": 0.5}], RUN_COLUMNS
+        [
+            {
+                "run": "r1",
+                "record": "root",
+                f"metric.{metric}": 0.5,
+                "metric.accuracy": 0.8,
+                "param.seed": 42,
+            }
+        ],
+        RUN_COLUMNS,
     )
 
-    table = hc.run_table(records, runs, "loss", initial_record="root")
+    table = hc.run_table(records, runs, metric, initial_record="root")
 
     assert table.value[0]["key"] == "record:root"
     assert "run:r1" in table.text
     assert "0.5" in table.text
+    hidden = table._component_args["hidden-columns"]
+    assert label not in hidden
+    assert {"metric.accuracy", "param.seed", "source", "url"} <= set(hidden)
 
 
 def test_run_table_accepts_an_empty_project() -> None:
@@ -105,6 +118,129 @@ def test_run_table_accepts_an_empty_project() -> None:
     )
 
     assert table.value == []
+
+
+@pytest.mark.parametrize("renderer", [hc.filesystem_tree, hc.record_tree])
+def test_record_navigation_displays_title_and_type(renderer):
+    record = Record(id="folder/record", title="Friendly title", type="note")
+    tree, buttons = renderer(
+        [record],
+        "folder/record",
+        lambda _: None,
+    )
+    assert "Friendly title" in tree.text
+    assert "folder/record" not in tree.text
+    assert "record-title" in tree.text
+    assert "record-type" in tree.text
+    assert set(buttons) == {"folder/record"}
+    assert "<dt>id</dt><dd>folder/record</dd>" in hc.markdown_view(record).text
+
+
+def test_record_summary_links_and_collapsible_metadata():
+    record = Record(
+        id="example",
+        title="Example",
+        type="task",
+        state="done",
+        commit="a" * 40,
+        branch="feature/test",
+        hypothesis="<check>",
+    )
+    summary = hc.record_summary(
+        record,
+        repository_url="https://github.com/team/repo",
+        runs=[
+            {"run": "r1", "source": "mlflow", "url": "https://mlflow.test/r1"},
+            {"run": "r2", "url": "javascript:alert(1)"},
+        ],
+        open_run_id="r2",
+    ).text
+    assert "https://github.com/team/repo/commit/" + "a" * 40 in summary
+    assert "https://github.com/team/repo/tree/feature%2Ftest" in summary
+    assert "https://mlflow.test/r1" in summary
+    assert "javascript:" not in summary
+    assert "&lt;check&gt;" in summary
+    assert "Runs (2)" in summary
+    assert '<details class="record-runs" open>' in summary
+    assert '<details class="record-run" open><summary>r2</summary>' in summary
+    collapsed_header = summary.split('<details class="record-run"><summary>r1', 1)[1]
+    assert "https://mlflow.test/r1" in collapsed_header.split("</summary>", 1)[0]
+    assert summary.count("https://mlflow.test/r1") == 1
+    assert "<details" in summary and "Raw frontmatter" in summary
+    plain = hc.record_summary(record).text
+    assert "<a " not in plain
+
+
+def test_record_filter_chips_keep_options_and_report_toggle_callbacks():
+    records = [
+        Record(id="a", type="note", state="draft"),
+        Record(id="b", type="task", state="stable"),
+    ]
+    toggles = []
+    filters, buttons = hc.record_filters(
+        records, lambda field, value: toggles.append((field, value)), types=["note"]
+    )
+    assert set(buttons) == {
+        ("type", "note"),
+        ("type", "task"),
+        ("state", "draft"),
+        ("state", "stable"),
+    }
+    assert "record-filter-chip active" in filters.text
+    buttons["type", "note"]._update(1)
+    buttons["state", "stable"]._update(1)
+    assert toggles == [("type", "note"), ("state", "stable")]
+    empty, buttons = hc.record_filters([], lambda *_: None)
+    assert not buttons
+    assert "record-filter-group" not in empty.text
+
+
+def test_filesystem_tree_ignores_lineage_and_preserves_path_selection():
+    records = [
+        Record(id="notes/child", type="note", parent_id="other"),
+        Record(id="other", type="task", parent_id="notes/child"),
+        Record(id="notes", type="task"),
+    ]
+    selections = []
+    tree, buttons = hc.filesystem_tree(records, "notes/child", selections.append)
+    assert set(buttons) == {"notes/child", "other", "notes"}
+    assert 'record-folder-name">notes</span>' in tree.text
+    assert "child" in buttons["notes/child"].text
+    assert 'aria-current="true"' in tree.text
+    buttons["notes/child"]._update(1)
+    assert selections == ["notes/child"]
+
+
+def test_filesystem_tree_filters_local_fields_and_retains_directories():
+    records = [
+        Record(id="group/a", type="note", state="draft"),
+        Record(id="group/nested/b", type="task", state="stable"),
+        Record(id="outside", type="note", state="stable"),
+    ]
+    tree, buttons = hc.filesystem_tree(
+        records, "outside", lambda _: None, types=["task"], states=["stable"]
+    )
+    assert set(buttons) == {"group/nested/b"}
+    assert 'record-folder-name">group</span>' in tree.text
+    assert 'record-folder-name">nested</span>' in tree.text
+    assert "aria-current" not in tree.text
+    empty, buttons = hc.filesystem_tree(
+        records, None, lambda _: None, types=["task"], states=["draft"]
+    )
+    assert not buttons
+    assert "No matching records" in empty.text
+
+
+def test_filesystem_tree_escapes_paths_and_handles_empty_records():
+    tree, _ = hc.filesystem_tree(
+        [Record(id="folder&/file&", type="<type>")], None, lambda _: None
+    )
+    assert "folder&amp;" in tree.text
+    assert "file" in tree.text
+    assert "<type>" not in tree.text
+    empty, buttons = hc.filesystem_tree([], None, lambda _: None)
+    assert "No matching records" in empty.text
+    assert not buttons
 
 
 def test_record_tree_hierarchy_selection_and_callbacks() -> None:
@@ -124,7 +260,7 @@ def test_record_tree_hierarchy_selection_and_callbacks() -> None:
     assert tree.text.count("<ul>") == 2
     assert tree.text.count('aria-current="true"') == 1
     assert "hypothesis" in tree.text
-    assert "drafted" in tree.text
+    assert "drafted" not in tree.text
     assert "deferred" not in tree.text
     assert "<style>" not in tree.text
     assert "justify-content" not in tree.text
@@ -132,6 +268,36 @@ def test_record_tree_hierarchy_selection_and_callbacks() -> None:
     buttons["child"]._update(1)
     buttons["root"]._update(1)
     assert selections == ["child", "root"]
+
+
+def test_lineage_filters_retain_ancestors_and_dim_context():
+    from hiraku.dashboard.data import lineage_records
+
+    records = [
+        Record(id="root", type="task"),
+        Record(id="elsewhere/child", parent_id="root", type="note", state="done"),
+        Record(id="other", type="note", state="draft"),
+        Record(id="cycle-a", parent_id="cycle-b", type="task"),
+        Record(id="cycle-b", parent_id="cycle-a", type="note", state="done"),
+        Record(id="orphan", parent_id="missing", type="note", state="done"),
+    ]
+    filtered = lineage_records(records, types=["note"], states=["done"])
+    assert {record.id for record in filtered} == {
+        "root",
+        "elsewhere/child",
+        "cycle-a",
+        "cycle-b",
+        "orphan",
+    }
+    tree, buttons = hc.record_tree(
+        filtered,
+        "elsewhere/child",
+        lambda _: None,
+        matching_ids={"elsewhere/child", "cycle-b", "orphan"},
+    )
+    assert set(buttons) == {record.id for record in filtered}
+    assert tree.text.count("record-context") == 2
+    assert tree.text.count('aria-current="true"') == 1
 
 
 def test_record_tree_handles_empty_and_deep_hierarchies() -> None:
@@ -201,40 +367,23 @@ def test_run_details_escapes_content_and_only_links_safe_urls(
     assert "javascript:alert" not in details
 
 
-def test_independent_plot_controls_use_declared_defaults() -> None:
-    directions = {"loss": "minimize", "accuracy": "maximize"}
-
-    metric = hc.performance_controls(["loss", "accuracy"], "loss")
-    controls = hc.tradeoff_controls(directions, ["loss", "accuracy"])
-
-    assert metric.value == "loss"
-    assert [control.value for control in controls] == [
-        "loss",
-        "minimize",
-        "accuracy",
-        "maximize",
-    ]
-
-
 @pytest.mark.parametrize(
     ("x_metric", "y_metric", "message"),
     [
         (None, None, "No numeric metrics are available"),
         ("loss", "loss", "Choose two different metrics."),
-        ("loss", "accuracy", "No runs have numeric values"),
+        ("loss", "accuracy", "No runs to plot."),
     ],
 )
-def test_tradeoff_plot_handles_empty_or_unusable_inputs(
+def test_performance_plot_handles_unusable_axes(
     x_metric: str | None, y_metric: str | None, message: str
 ) -> None:
     runs = arrow_frame([], [*RUN_COLUMNS, "metric.loss", "metric.accuracy"])
 
-    content = hc.tradeoff_plot(
+    content = hc.performance_plot(
         runs,
         x_metric=x_metric,
         y_metric=y_metric,
-        x_objective="minimize",
-        y_objective="maximize",
     )
 
     assert message in content.text
@@ -242,12 +391,12 @@ def test_tradeoff_plot_handles_empty_or_unusable_inputs(
 
 def test_performance_plot_handles_empty_runs() -> None:
     runs = arrow_frame([], [*RUN_COLUMNS, "metric.loss"])
-    content = hc.performance_plot(runs, scope="root", metric="loss").text
+    content = hc.performance_plot(runs, y_metric="loss").text
     assert "No runs to plot." in content
 
 
-@pytest.mark.parametrize("plot", [hc.performance_plot, hc.tradeoff_plot])
-def test_independent_plots_render_runs_and_report_excluded_values(plot) -> None:
+@pytest.mark.parametrize("x_metric", [None, "accuracy"])
+def test_performance_plot_renders_both_axis_modes(x_metric) -> None:
     runs = arrow_frame(
         [
             {
@@ -267,26 +416,18 @@ def test_independent_plots_render_runs_and_report_excluded_values(plot) -> None:
         RUN_COLUMNS,
     )
 
-    if plot is hc.performance_plot:
-        content = plot(
-            runs, scope="root", metric="loss", selected_run={"run": "best"}
-        ).text
-    else:
-        content = plot(
-            runs,
-            x_metric="loss",
-            y_metric="accuracy",
-            x_objective="minimize",
-            y_objective="maximize",
-        ).text
+    content = hc.performance_plot(
+        runs,
+        x_metric=x_metric,
+        y_metric="loss",
+        directions={"accuracy": "maximize"},
+        selected_record_id="root",
+        selected_run_id="best",
+    ).text
 
     assert "best" in content
     assert "other" in content
-    if plot is hc.performance_plot:
-        assert "3 runs under" in content
-        assert "1 without a numeric" in content
-        assert "f59e0b" in content
-    else:
-        assert "2 comparable runs" in content
-        assert "1 strong trade-offs" in content
-        assert "1 runs excluded" in content
+    assert "f59e0b" in content
+    assert (
+        "Run number (execution order)" if x_metric is None else "accuracy (maximize)"
+    ) in content

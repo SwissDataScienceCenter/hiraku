@@ -1,324 +1,68 @@
 # Dashboard
 
-`hiraku dashboard` serves a local page for browsing records and the runs
-attributed to them. The page is a [marimo](https://marimo.io) notebook served
-through [Marimo Studio](https://marimo-team.github.io/marimo-studio/). Its
-performance and metric trade-off plots are separate, independently placeable cells.
+The Hiraku dashboard lets you browse project records, inspect their runs, and
+compare metrics in your browser. It runs locally as a [marimo](https://marimo.io)
+notebook with a [Marimo Studio](https://marimo-team.github.io/marimo-studio/) view.
 
-Install the optional dashboard dependencies first:
+Install Hiraku with the dashboard extra:
 
 ```bash
 uv tool install --force 'hiraku[dashboard]'
 ```
 
-Include all extras you want to use, for example, when using MLflow or W&B
-`uv tool install --force 'hiraku[dashboard,mlflow]'`. See [installation options](../quickstart/installation.md).
+Add any tracking extras you use to the same install command. For example, use
+`uv tool install --force 'hiraku[dashboard,mlflow]'` for MLflow.
+See [installation options](../quickstart/installation.md).
 
-## Modes
+## Browse your project
 
-Run every command from inside a Hiraku project.
-
-| Command | Mode | What it does |
-| --- | --- | --- |
-| `hiraku dashboard` | View | Serves the dashboard with record Markdown editing. |
-| `hiraku dashboard --include-code` | View with code | Same page; marimo's menu can also show each cell's code. |
-| `hiraku dashboard --init` | Customize | Copies the notebook to `hiraku/dashboard/app.py` and exits. |
-| `hiraku dashboard --edit` | Edit | Opens that copy in marimo-studio. |
-| `hiraku dashboard --init --edit` | Customize and edit | Both in one step. |
-
-### View
+To open the dashboard, run this from inside your Hiraku project:
 
 ```bash
-hiraku dashboard --record digit-classification
+hiraku dashboard serve
 ```
 
-The page is served on localhost and opens in your browser. Hiraku selects a
-free port automatically, starting at 2718, and prints the URL in the terminal.
-Use `--port` to request a specific port, `--no-browser` to print the URL without
-opening it, and `--record` to select a record when the page opens. Press Ctrl-C
-to stop the server. Viewing never writes to the project.
+Hiraku opens the dashboard in your browser and prints its local URL in the
+terminal. For projects without `hiraku/dashboards/dashboard.py`, it opens the included
+dashboard without writing project files. Press Ctrl-C to stop the server.
 
-Add `--include-code` to send the notebook's code to the page. Open marimo's
-menu (**⋯**, top right) and choose to show the code to see each cell's source
-above its output. The code is read-only here; use the edit mode to change it.
+In the leaderboard's **Table** view, use **Columns** to show more metrics,
+parameters, or run provenance.
 
-### Customize
-
-```bash
-hiraku dashboard --init
-```
-
-Copies the included notebook to `hiraku/dashboard/app.py` and the Studio view,
-including its HTML, CSS, and logos, to `hiraku/dashboard/studio/`. It also adds
-a `.gitignore` for marimo's `__marimo__/` caches and Studio's build state. From
-then on, `hiraku dashboard` serves this copy, so commit it with the project.
-`--init` refuses to overwrite an existing copy. Delete `hiraku/dashboard/` to
-start over from the original version.
-
-The notebook imports data helpers from `hiraku.dashboard.data` and reusable
-widgets and renderers from `hiraku.dashboard.components`. Components build the
-record/run table, run details, metric selectors, and metric-analysis output
-from the loaded tables; they do not query tracking backends. Notebook cells
-own data loading and shared selection, and read widget values explicitly so
-marimo can rerun dependent cells when a selection or metric changes.
-
-Imports live in `app.setup`. Named cells separate project discovery
-(`data_setup`), refresh-triggered loading (`project_data`), selection state,
-and rendering. The Studio view references the output cells by name; data and
-state cells do not need HTML hosts.
-
-Branding and page layout live in `studio/dashboard/index.html` and its CSS and
-assets; edit those files to customize the presentation. To customize a widget
-or plot, replace its component call in the notebook cell. Project copies pick
-up component fixes from the installed Hiraku package.
-
-Studio permits local CSS and JavaScript references in the HTML entry document;
-images must be inline. The included HTML embeds its logos as SVG data URLs.
-Keep replacement images inline when customizing the view.
-
-### Edit
-
-```bash
-hiraku dashboard --edit
-```
-
-Opens the project's copy in marimo-studio, with the notebook beside a live
-preview of the dashboard. It reloads when the file changes on disk, for
-example when an agent edits it. The view's `index.html` places the notebook's
-named cells on the page; add a named cell there to show it on the dashboard. `--edit` requires a copy;
-run `--init` first, or both at once with `hiraku dashboard --init --edit`.
-Saved changes appear the next time you run `hiraku dashboard`.
-
-The notebook editor runs arbitrary code and is protected by marimo's access
-token, included in the URL it prints and opens. You can also open the copy
-without Hiraku's CLI:
-`marimo edit hiraku/dashboard/app.py`; it then finds its project from its own
-location.
-
-## Leaderboards
-
-Choose a leaderboard using the selector, or open one with
-`hiraku dashboard --leaderboard NAME`. A sole leaderboard is selected automatically.
-Plots show attributed runs by default, including runs whose record files are
-missing. Enable **Include unattributed runs** to show the entire source.
-Without an initial `--record`, plots span the selected leaderboard; select
-**Clear record filter** to clear a subtree filter. Metric names and directions
-come from the leaderboard; parameters are discovered automatically.
-
-## Sections
-
-**Record navigation**
-:   An optional, initially collapsed tree of records with type and state
-    badges. Expand it to navigate the hierarchy. Choosing a record
-    selects the same row in the runs table, clears any selected run, and compares
-    that record's subtree. Table selections highlight the corresponding record
-    in the tree; selecting a run highlights its owning record while preserving
-    the current comparison subtree when the run lies within it.
-
-**Runs**
-:   Records and their runs in one indented table. Runs appear under the record
-    they are attributed to, in execution order, with their start time, duration,
-    and the value of the first metric the leaderboard declares or discovers. Select a record to
-    compare its subtree, or a run to inspect it.
-
-**Run**
-:   The selected run's ID, record, commit, start time, duration,
-    parameters, and metrics, plus a link to the run in its tracking backend when
-    one is available.
-
-**Record**
-:   Expandable YAML front matter labeled with the selected record's ID,
-    followed by its Markdown body.
-    Click the pen to edit the body, then **Save** to write it back or **Cancel**
-    to discard the draft. Front matter stays read-only. Drafts remain available
-    when switching between records in the same session. Save errors keep the
-    draft open; if the file changed externally, copy your draft before canceling
-    and refreshing to load the latest version.
-    Selecting a run shows its owning record, while the metric analysis keeps
-    the selected comparison subtree when that run lies within it.
-
-**Performance over runs**
-:   Shows runs in the selected record subtree
-    in execution order, with a metric on the y axis. Colours mark the record
-    and a ring marks the selected run. Choose its y-axis metric independently
-    of the trade-off plot.
-
-**Metric trade-offs**
-:   Compares two metrics in the selected subtree; set whether each should be minimized or
-    maximized. Diamonds mark runs for which no comparable run matches or
-    improves both metrics while improving at least one. Runs without finite
-    numeric values for both metrics are excluded.
-
-Use **Refresh** to re-read records and tracking sources after new launches.
-
-### Reusing plots
-
-`hc.performance_plot(runs, scope=scope, metric="loss", selected_run=selected_run)`
-plots one metric over execution order. `hc.tradeoff_plot(runs, x_metric="loss",
-y_metric="accuracy", x_objective="minimize", y_objective="maximize")` compares
-two metrics and lists non-dominated runs. Both accept an already scoped run table
-and create no controls or selection state.
-
-Use `hc.performance_controls(metrics, default_metric)` for the first plot's
-metric selector and `hc.tradeoff_controls(directions, metrics)` for the second
-plot's four selectors. Keep the returned widgets in notebook variables and pass
-their values to the corresponding plot.
-
-The default notebook displays both plots without a mode selector. Each has its
-own named cell and can be placed, moved, or omitted independently in Studio:
-
-```html
-<marimo-cell name="performance_plot"></marimo-cell>
-<marimo-cell name="tradeoff_plot"></marimo-cell>
-```
-
-### Reusing record navigation
-
-`hc.record_tree(records, selected_id, on_select)` renders record navigation and
-returns `(tree, buttons)`. Keep `buttons` in a notebook variable so their callbacks
-remain live. The component loads no data and owns no selection state. Wire
-`on_select` into the same selection callback used by the run table; the notebook
-uses `select_key("record:" + record_id)` and passes the resulting key to
-`hc.run_table(..., selected_key=key, on_select=select_key)`.
-
-The Studio entry document places the `record_navigation` cell inside a collapsed
-`<details>` element. Remove that element from a project copy to omit navigation;
-table selection and the remaining components continue to work independently.
-
-Reusable component styling lives in `studio/dashboard/components.css` beside the
-Studio view's other stylesheets. The notebook loads it through
-`marimo.App(css_file="studio/dashboard/components.css")` for notebook mode.
-The Studio HTML links the same file with `crossorigin="anonymous"`, allowing
-Marimo to read and adopt its rules into widget shadow roots in the isolated
-presentation. No styles are injected into button labels. `--init` copies the
-stylesheet with the view for customization. Its rules target only record
-navigation buttons; other controls retain their normal styling. The outer
-hierarchy and selection styling remain in the Studio view's `style.css`.
-
-### Reusing Markdown rendering
-
-`hiraku.dashboard.components.markdown_view(record)` accepts a `Record`. It reads
-the ID, front matter, and Markdown body directly from the object, displaying
-collapsed metadata labeled with the ID above the body. For example:
-
-```python
-hc.markdown_view(record)
-hc.markdown_view(record)
-```
-
-Loading and persistence remain with the caller. The component does not load,
-parse, or save files, and rendering and selection do not change record objects
-or Markdown files. Passing `None` displays the empty selection state.
-
-For editing, create `hc.MarkdownEditor(on_save=Record.save_markdown, on_change=...)` once
-in a notebook cell and call `hc.markdown_view(record, editor=editor)` in a
-separate display cell. Omitting `editor` keeps the viewer read-only.
-Wire `on_change` to a `mo.state` setter with `allow_self_loops=True`, and read
-its getter in the display cell so button actions rerender it. The
-`Record.save_markdown` method saves through the record's own API and rejects
-changes made on disk since editing began. The editor changes
-the displayed object's body only after a successful save. Detached records
-remain read-only until saved to a path. Drafts are held in memory, so reloading
-or closing the session discards them.
-
-## Run and record tables
-
-The notebook reads your project once and builds two pandas DataFrames backed
-by Apache Arrow for the run table, run details, and metric analysis. Record
-details use the already loaded record objects to retain complete front matter.
-
-`hd.run_rows(runs, records=records, source=leaderboard.source.type)` converts
-queried runs to rows. Tracking errors leave record navigation available.
-
-`runs_df`
-:   One row per run in execution order: `run`, `record`, `record_path`,
-    `source`, `started`, `commit`, `url`, plus a
-    `metric.<name>` and `param.<name>` column for each metric and parameter.
-
-`records_df`
-:   One row per record in tree order: `record`, `parent`, `record_path`,
-    `type`, `state`, `decision`, `commit`, and `description` (the record's Markdown).
-
-| View | Reads |
+| Option | What it does |
 | --- | --- |
-| Runs table | `records_df` rows, each followed by its runs from `runs_df` |
-| Run details | the selected run's row of `runs_df` |
-| Performance plot | selected record subtree in `runs_df`; choose one metric |
-| Trade-off plot | selected record subtree in `runs_df`; choose two metrics and their objectives |
+| `--record ID`, `--leaderboard NAME` | Select the initial record or leaderboard. |
+| `--port PORT` | Use a specific port. By default, Marimo picks a free port. |
+| `--no-browser` | Print the local URL without opening a browser. |
+| `--watch` | Reload when the notebook file changes. |
+| `--include-code` | Make read-only cell source available from Marimo’s menu. |
 
-`record_path` is the record's ancestry, such as `digits/weak-l2`.
-`subtree(runs_df, "digits")` selects every run of `digits` and the records
-below it. Use these tables in your own cells, or mention `@runs_df` and
-`@records_df` in marimo's AI assistant to ask questions about your runs.
-Values keep the types the tracking backend reports; some backends, such as
-MLflow, report parameters as text, so cast them before comparing numbers, for
-example `runs_df["param.alpha"].astype(float)`.
+## Project dashboards
 
-For example, this cell compares two metrics across all runs, coloured by
-record. Vega-Lite reads `.` in a field name as nesting, so escape it:
-
-```python
-@app.cell
-def _(alt, runs_df):
-    alt.Chart(runs_df).mark_point().encode(
-        x=alt.X(r"metric\.val/log_loss:Q", title="val/log_loss"),
-        y=alt.Y(r"metric\.val/accuracy:Q", title="val/accuracy"),
-        color="record:N",
-        tooltip=["run", "record"],
-    )
-    return
-```
-
-## Tracking backends
-
-Runs, metrics, parameters, and links come from the selected leaderboard's
-CSV, MLflow, or W&B source, queried once per refresh.
-
-A run's link label names its backend, for example **Open in mlflow**. Links
-appear when the backend provides an HTTP(S) URL for the run. For MLflow, set
-`ui_url` when its UI is served separately from the tracking server;
-see [MLflow](tracking-mlflow.md). Without a link, the run details are still
-shown.
-
-## Try it on the Digits example
-
-The Digits example includes three records and six measured MLflow runs,
-so you can try the dashboard without training first. Install both optional
-extras, then create a project with the prepared results (Git is optional):
+Copy the included dashboard into your project to customize the marimo notebook, layout and plots.
 
 ```bash
-uv tool install --force 'hiraku[dashboard,mlflow]'
-hiraku example create digits digits-dashboard --with-results
-cd digits-dashboard
-uv sync
-uv run mlflow server --backend-store-uri sqlite:///mlflow.db \
-  --host 127.0.0.1 --port 5000
+hiraku dashboard create
 ```
 
-Keep the server running. In another terminal in the project directory:
+Edit the cells in `hiraku/dashboards/dashboard.py` directly or open the notebook
+editor with `hiraku dashboard edit`. The Studio layout and styles
+live in `hiraku/dashboards/studio/dashboard/html/`.
+
+To open your copy in the browser, run:
 
 ```bash
-export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
-hiraku dashboard --record digit-classification
+hiraku dashboard serve
 ```
 
-The dashboard reads the six prepared runs through the MLflow server.
-You can also try the other modes in that project:
+Without a name, `serve`, `edit`, and `create` use `dashboard.py`. If it is missing,
+`serve` runs the bundled dashboard and `edit` copies it into the project before
+opening the editor. Pass a name to work with another dashboard. Use
+`hiraku dashboard list` to see the available names.
 
-```bash
-hiraku dashboard --include-code --record digit-classification
-hiraku dashboard --init --edit --record digit-classification
-```
-
-Run details include an **Open in mlflow** link to the server UI. To persist the
-server address, set `tracking_uri` in `hiraku/leaderboards/default.yml`:
-
-```yaml
-source:
-  type: mlflow
-  tracking_uri: http://127.0.0.1:5000
-  experiment_name: hiraku-digits
-```
-
-See the [Digits example](../examples/digits/README.md) to inspect the runs in
-MLflow or generate fresh results.
+For a plain Marimo starter, run
+`hiraku dashboard create exploration --template notebook`. Edit and serve
+`hiraku/dashboards/exploration.py` the same way. The notebook exposes `project`,
+`records`, `leaderboard_names`, the selected `leaderboard`, and its `runs` to
+other cells. It loads the sole leaderboard automatically, or you can use
+the picker or `--leaderboard NAME` to select one.

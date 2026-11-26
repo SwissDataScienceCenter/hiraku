@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Hiraku dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+    <link href="https://api.fontshare.com/v2/css?f[]=switzer@400,500,600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./tokens.css">
+    <link rel="stylesheet" href="./ui.css">
+    <link rel="stylesheet" href="./style.css">
+    <link rel="stylesheet" href="./components.css" crossorigin="anonymous">
+    <script src="./layout.js" defer></script>
+  </head>
+  <body>
+    <main id="app-shell">
+      <div class="dashboard-heading">
+        <h1>Hiraku dashboard</h1>
+        <marimo-cell name="refresh_control"></marimo-cell>
+      </div>
+      <div class="dashboard-layout">
+      <aside id="record-sidebar" class="card record-navigation" aria-label="Record navigation">
+        <marimo-cell name="record_header"></marimo-cell>
+        <marimo-cell name="record_files"></marimo-cell>
+        <marimo-cell name="record_tree"></marimo-cell>
+      </aside>
+      <div class="dashboard-divider" role="separator" tabindex="0"
+        aria-label="Resize record sidebar" aria-orientation="vertical"
+        aria-controls="record-sidebar" title="Drag to resize; arrow keys adjust; double-click resets"></div>
+      <div class="dashboard-content">
+      <section class="card leaderboard">
+        <marimo-cell name="leaderboard_header"></marimo-cell>
+        <marimo-cell name="leaderboard_plot"></marimo-cell>
+        <marimo-cell name="leaderboard_table"></marimo-cell>
+      </section>
+      <section class="card record-details">
+        <marimo-cell name="record_details"></marimo-cell>
+      </section>
+      </div>
+      </div>
+      <footer class="hk-footer">
+        <img src="assets/sdsc-logo-white.svg" alt="Swiss Data Science Center">
+      </footer>
+    </main>
+  </body>
+</html>

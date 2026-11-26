@@ -52,6 +52,12 @@ class GitRepository:
         return self._run("rev-parse", "--verify", f"{ref}^{{commit}}").stdout.strip()
 
     @property
+    def origin_url(self) -> str | None:
+        """Return the configured origin URL without contacting the remote."""
+        result = self._run("remote", "get-url", "origin", check=False)
+        return (result.stdout.strip() or None) if result.returncode == 0 else None
+
+    @property
     def current_branch(self) -> str | None:
         result = self._run("symbolic-ref", "--quiet", "--short", "HEAD", check=False)
         return result.stdout.strip() if result.returncode == 0 else None

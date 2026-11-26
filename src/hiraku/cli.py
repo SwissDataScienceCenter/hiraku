@@ -1044,58 +1044,74 @@ def run_list(
         _print_table(columns, rows)
 
 
-@main.command("dashboard")
+@main.group("dashboard")
+def dashboard_command() -> None:
+    """Serve, edit, and manage project dashboards."""
+
+
+@dashboard_command.command("create")
+@click.argument("name", required=False)
 @click.option(
-    "--leaderboard", "leaderboard_name", help="Leaderboard selected when opening."
-)
-@click.option("--record", "record_id", help="Record selected when the page opens.")
-@click.option(
-    "--port",
-    type=click.IntRange(1, 65535),
-    help="Use this port; otherwise automatically choose a free port from 2718.",
-)
-@click.option("--no-browser", is_flag=True, help="Do not open a browser window.")
-@click.option(
-    "--init",
-    "initialize",
-    is_flag=True,
-    help="Copy the dashboard notebook into the project; exit unless --edit is given.",
-)
-@click.option(
-    "--edit", is_flag=True, help="Open the project's notebook in marimo-studio."
-)
-@click.option(
-    "--include-code",
-    is_flag=True,
-    help="Let the read-only dashboard show its notebook code.",
+    "--template",
+    type=click.Choice(["dashboard", "notebook"]),
+    default="dashboard",
+    show_default=True,
+    help="Bundled starter to copy.",
 )
 @click.pass_obj
-def dashboard_command(
-    state: CLIContext,
-    leaderboard_name: str | None,
-    record_id: str | None,
-    port: int | None,
-    no_browser: bool,
-    initialize: bool,
-    edit: bool,
-    include_code: bool,
-) -> None:
-    """Browse records and tracked runs in a local, read-only dashboard."""
-    from .dashboard.launcher import init_dashboard, serve_dashboard
+def dashboard_create(state: CLIContext, name: str | None, template: str) -> None:
+    """Create a dashboard notebook (default: dashboard.py)."""
+    from .dashboard.launcher import DEFAULT_NAME, init_dashboard
 
-    if initialize:
-        click.echo(f"Created dashboard: {init_dashboard(state.project)}")
-        if not edit:
-            return
-    exit_code = serve_dashboard(
-        state.project,
-        leaderboard_name=leaderboard_name,
-        record_id=record_id,
-        port=port,
-        no_browser=no_browser,
-        edit=edit,
-        include_code=include_code,
+    notebook = init_dashboard(
+        state.project, DEFAULT_NAME if name is None else name, template=template
     )
+    click.echo(f"Created dashboard: {notebook}")
+
+
+@dashboard_command.command("list")
+@click.pass_obj
+def dashboard_list(state: CLIContext) -> None:
+    """List project dashboards."""
+    from .dashboard.launcher import list_dashboards
+
+    dashboards = list_dashboards(state.project)
+    if not dashboards:
+        click.echo("No project dashboards. Use: hiraku dashboard create")
+    for name in sorted(dashboards):
+        click.echo(name)
+
+
+@dashboard_command.command("serve")
+@click.argument("name", required=False)
+@click.option("--leaderboard", "leaderboard_name", help="Initial leaderboard.")
+@click.option("--record", "record_id", help="Initial record.")
+@click.option("--port", type=click.IntRange(1, 65535), help="Server port.")
+@click.option("--no-browser", is_flag=True, help="Do not open a browser window.")
+@click.option("--watch", is_flag=True, help="Reload when the notebook changes.")
+@click.option("--include-code", is_flag=True, help="Include read-only notebook code.")
+@click.pass_obj
+def dashboard_serve(state: CLIContext, name: str | None, **options: Any) -> None:
+    """Serve a dashboard (default: local or bundled dashboard.py)."""
+    from .dashboard.launcher import serve_dashboard
+
+    exit_code = serve_dashboard(state.project, name=name, **options)
+    if exit_code:
+        raise click.exceptions.Exit(exit_code)
+
+
+@dashboard_command.command("edit")
+@click.argument("name", required=False)
+@click.option("--leaderboard", "leaderboard_name", help="Initial leaderboard.")
+@click.option("--record", "record_id", help="Initial record.")
+@click.option("--port", type=click.IntRange(1, 65535), help="Server port.")
+@click.option("--no-browser", is_flag=True, help="Do not open a browser window.")
+@click.pass_obj
+def dashboard_edit(state: CLIContext, name: str | None, **options: Any) -> None:
+    """Edit a dashboard (default: dashboard.py, copied into the project if needed)."""
+    from .dashboard.launcher import serve_dashboard
+
+    exit_code = serve_dashboard(state.project, name=name, edit=True, **options)
     if exit_code:
         raise click.exceptions.Exit(exit_code)
 

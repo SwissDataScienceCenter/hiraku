@@ -17,7 +17,10 @@ from urllib.parse import urlsplit
 import pandas as pd
 import pyarrow as pa
 
+from ..errors import GitError
+from ..git import GitRepository
 from ..io import dump_yaml
+from ..project import Project
 from ..record import Record
 from ..tracking import Run
 
@@ -43,6 +46,43 @@ RECORD_COLUMNS = (
     "commit",
     "description",
 )
+RUN_TABLE_COLUMNS = ("Record / run", "Type", "Commit", "Started", "Duration")
+_RUN_TABLE_PROVENANCE = ("run", "record", "record_path", "source", "url")
+
+
+def github_repository(project: Project) -> str | None:
+    """Resolve a github.com origin to a browser URL; missing Git is optional."""
+    try:
+        origin = GitRepository(project.root).origin_url or ""
+    except GitError:
+        return None
+    if origin.startswith("git@github.com:"):
+        origin = "https://github.com/" + origin.removeprefix("git@github.com:")
+    parsed = urlsplit(origin)
+    if parsed.hostname != "github.com" or parsed.scheme not in {"https", "ssh"}:
+        return None
+    parts = parsed.path.strip("/").removesuffix(".git").split("/")
+    if len(parts) != 2 or not all(parts):
+        return None
+    return "https://github.com/" + "/".join(parts)
+
+
+def lineage_records(
+    records: Sequence[Record], *, types: Sequence[str] = (), states: Sequence[str] = ()
+) -> list[Record]:
+    """Filter local fields while retaining lineage ancestors, tolerating cycles."""
+    by_id = {record.id: record for record in records}
+    visible: set[str] = set()
+    for record in records:
+        if (types and record.type not in types) or (
+            states and record.state not in states
+        ):
+            continue
+        current = record
+        while current is not None and current.id not in visible:
+            visible.add(current.id)
+            current = by_id.get(current.parent_id)
+    return [record for record in records if record.id in visible]
 
 
 def record_paths(records: Iterable[Record]) -> dict[str, str]:
@@ -163,53 +203,96 @@ def metric_names(runs_df: pd.DataFrame) -> list[str]:
     return [name for name in names if metric_values(runs_df, name).notna().any()]
 
 
-def within(path: str, ancestor: str) -> bool:
-    """Return whether record ``path`` is ``ancestor`` or lies below it."""
-    return f"{path}/".startswith(f"{ancestor}/")
+def filter_leaderboard_runs(
+    runs_df: pd.DataFrame,
+    records: Sequence[Record],
+    record_id: str | None,
+    *,
+    include_unattributed: bool,
+) -> pd.DataFrame:
+    """Filter by record ID and explicit lineage, retaining source order."""
+    attributed = runs_df["record"].astype("string").fillna("").ne("")
+    if record_id is None:
+        matching = attributed
+    else:
+        ids = {record_id}
+        children: dict[str | None, list[str]] = {}
+        for record in records:
+            children.setdefault(record.parent_id, []).append(record.id)
+        pending = [record_id]
+        while pending:
+            for child in children.get(pending.pop(), ()):
+                if child not in ids:
+                    ids.add(child)
+                    pending.append(child)
+        matching = runs_df["record"].isin(ids)
+    if include_unattributed:
+        matching |= ~attributed
+    return runs_df[matching]
 
 
-def subtree(runs_df: pd.DataFrame, ancestor: str | None) -> pd.DataFrame:
-    """Return the rows of ``runs_df`` whose record lies in ``ancestor``'s subtree."""
-    if ancestor is None or runs_df.empty:
-        return runs_df
-    return runs_df[runs_df["record_path"].map(lambda path: within(path, ancestor))]
+def run_table_metric_column(metric: str | None) -> str | None:
+    """Keep the metric label short unless it would overwrite another column."""
+    if metric and (
+        metric in (*RUN_TABLE_COLUMNS, *_RUN_TABLE_PROVENANCE, "key", "depth")
+        or metric.startswith(("metric.", "param."))
+    ):
+        return f"metric.{metric}"
+    return metric
 
 
 def tree_rows(
-    records_df: pd.DataFrame, runs_df: pd.DataFrame, metric: str | None
+    records_df: pd.DataFrame,
+    runs_df: pd.DataFrame,
+    metric: str | None,
+    *,
+    include_records: bool = True,
 ) -> list[dict[str, Any]]:
     """Interleave records (in tree order) with their runs as indented table rows.
 
     ``depth`` comes from ``record_path``, and ``metric`` adds one column, named
-    after the metric, with each run's value.
+    after the metric, with each run's value. Other metrics, parameters, and
+    provenance are available as additional columns.
     """
+    metric_column = run_table_metric_column(metric)
+    extra_columns = [
+        *_RUN_TABLE_PROVENANCE,
+        *(
+            name
+            for name in runs_df.columns
+            if name.startswith(("metric.", "param.")) and name != f"metric.{metric}"
+        ),
+    ]
+
+    def run_row(run: dict[str, Any], depth: int) -> dict[str, Any]:
+        row = _row(f"run:{run['run']}", depth, run["run"][:12], run)
+        row["Type"] = "run"
+        if metric_column:
+            row[metric_column] = run["value"]
+        row.update({name: run.get(name) for name in extra_columns})
+        return row
+
     values = metric_values(runs_df, metric).tolist()
     runs_by_record: dict[str, list[dict[str, Any]]] = {}
     for run, value in zip(_records(runs_df), values, strict=True):
         run["value"] = None if math.isnan(value) else value
-        runs_by_record.setdefault(run["record"], []).append(run)
+        owner = run["record"] if include_records else None
+        runs_by_record.setdefault(owner, []).append(run)
 
     rows: list[dict[str, Any]] = []
-    for record in _records(records_df):
+    for record in _records(records_df) if include_records else ():
         depth = record["record_path"].count("/")
         rows.append(
             _row(f"record:{record['record']}", depth, "▾ " + record["record"], record)
         )
-        if metric:
-            rows[-1][metric] = ""
+        if metric_column:
+            rows[-1][metric_column] = ""
+        rows[-1].update(dict.fromkeys(extra_columns))
         for run in runs_by_record.pop(record["record"], ()):
-            rows.append(
-                _row(f"run:{run['run']}", depth + 1, "• " + run["run"][:12], run)
-            )
-            rows[-1]["Type"] = "run"
-            if metric:
-                rows[-1][metric] = run["value"]
+            rows.append(run_row(run, depth + 1))
     for remaining in runs_by_record.values():
         for run in remaining:
-            rows.append(_row(f"run:{run['run']}", 0, "• " + run["run"][:12], run))
-            rows[-1]["Type"] = "run"
-            if metric:
-                rows[-1][metric] = run["value"]
+            rows.append(run_row(run, 0))
     return rows
 
 
@@ -244,27 +327,6 @@ def format_duration(seconds: float | None) -> str:
 def find_run(runs_df: pd.DataFrame, run_id: str) -> dict[str, Any] | None:
     """Return the ``runs_df`` row of ``run_id`` with missing values as ``None``."""
     return next(iter(_records(runs_df[runs_df["run"] == run_id])), None)
-
-
-def selection_scope(
-    key: str | None,
-    current_scope: str | None,
-    paths: Mapping[str, str],
-    runs_df: pd.DataFrame,
-) -> str | None:
-    """Resolve the comparison subtree after a record or run selection."""
-    if key is None:
-        return None
-    kind, _, identifier = key.partition(":")
-    if kind == "record" and identifier in paths:
-        return identifier
-    selected_run = find_run(runs_df, identifier) if kind == "run" else None
-    if selected_run is not None and (
-        current_scope not in paths
-        or not within(selected_run["record_path"], paths[current_scope])
-    ):
-        return selected_run["record"] if selected_run["record"] in paths else None
-    return current_scope
 
 
 def run_text(run: Mapping[str, Any]) -> str:
@@ -320,15 +382,13 @@ def tradeoff_frame(
     runs_df: pd.DataFrame,
     x_metric: str,
     y_metric: str,
-    x_objective: str,
-    y_objective: str,
-) -> tuple[pd.DataFrame, int]:
-    """Return comparable runs with a trade-off highlight and excluded count."""
+) -> pd.DataFrame:
+    """Return runs with finite values for both metrics, in source order."""
     # As floats: Arrow-backed columns hold pd.NA, which math.isfinite rejects.
     x_values = metric_values(runs_df, x_metric)
     y_values = metric_values(runs_df, y_metric)
     valid = x_values.notna() & y_values.notna()
-    points = pd.DataFrame(
+    return pd.DataFrame(
         {
             "run": runs_df.loc[valid, "run"].astype(str).to_numpy(),
             "record": runs_df.loc[valid, "record"].astype(str).to_numpy(),
@@ -336,24 +396,6 @@ def tradeoff_frame(
             "y": y_values.loc[valid].to_numpy(),
         }
     ).reset_index(drop=True)
-    if points.empty:
-        points["non_dominated"] = pd.Series(dtype=bool)
-        return points, len(runs_df)
-
-    x_score = points["x"] * (1 if x_objective == "minimize" else -1)
-    y_score = points["y"] * (1 if y_objective == "minimize" else -1)
-    ordered = points.assign(_x_score=x_score, _y_score=y_score)
-    non_dominated_indices: list[int] = []
-    best_y = math.inf
-    for _, group in ordered.groupby("_x_score", sort=True):
-        group_best_y = group["_y_score"].min()
-        if group_best_y <= best_y:
-            non_dominated_indices.extend(
-                group.index[group["_y_score"] == group_best_y].tolist()
-            )
-            best_y = min(best_y, group_best_y)
-    points["non_dominated"] = points.index.isin(non_dominated_indices)
-    return points, len(runs_df) - len(points)
 
 
 def _records(frame: pd.DataFrame) -> list[dict[str, Any]]:

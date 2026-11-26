@@ -1,8 +1,7 @@
 """Reusable marimo widgets and rendering for Hiraku dashboards.
 
 Components consume prepared tables or Record objects without loading or
-saving project files or querying tracking sources. The notebook owns selection state;
-the optional Markdown editor owns drafts and delegates saves to a callback.
+saving project files or querying tracking sources. The notebook owns selection state.
 Branding stays in the Studio view.
 """
 
@@ -10,150 +9,146 @@ from __future__ import annotations
 
 import html
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
 from typing import Any
+from urllib.parse import quote
 
 import altair as alt
 import marimo as mo
 import pandas as pd
 
-from ..errors import HirakuError
 from ..io import dump_yaml
 from ..record import Record
-from .data import plot_frame, run_text, safe_url, tradeoff_frame, tree_rows
+from .data import (
+    RUN_TABLE_COLUMNS,
+    lineage_records,
+    plot_frame,
+    run_table_metric_column,
+    run_text,
+    safe_url,
+    tradeoff_frame,
+    tree_rows,
+)
+
+
+def record_heading(record: Record) -> mo.Html:
+    """Render the record title and the ID for Studio's copy action."""
+    title = html.escape(record.title or record.id.rsplit("/", 1)[-1])
+    identifier = html.escape(record.id)
+    return mo.Html(
+        '<div class="record-detail-header">'
+        f'<h2 class="record-details-heading">{title}</h2>'
+        '<div class="record-detail-id">'
+        f'<button type="button" data-copy-record-id="{identifier}" '
+        'class="record-copy-button" aria-label="Copy record ID" '
+        f'title="Copy record ID"><code>{identifier}</code>'
+        '<span aria-hidden="true"></span></button>'
+        '<span class="record-copy-status" role="status"></span></div></div>'
+    )
 
 
 def markdown_view(
     record: Record | None,
     *,
-    editor: MarkdownEditor | None = None,
     empty_message: str = "This record has no Markdown.",
+    repository_url: str | None = None,
+    runs: Sequence[Mapping[str, Any]] = (),
+    open_run_id: str | None = None,
+    show_id: bool = True,
 ) -> mo.Html:
-    """Render a Record's front matter and Markdown body.
-
-    Loading, parsing, and persistence belong to the caller. Pass an editor to
-    opt into editing; without one this is a read-only viewer.
-    """
-    if editor is not None:
-        return editor.render(record, empty_message=empty_message)
+    """Render a Record's front matter and Markdown body."""
     if record is None:
         return mo.md("No record selected.")
     body = mo.md(record.markdown if record.markdown.strip() else empty_message)
-    metadata = mo.Html(f"<pre>{html.escape(dump_yaml(record.metadata))}</pre>")
-    return mo.vstack([mo.accordion({record.id: metadata}), body])
+    metadata = record_summary(
+        record,
+        repository_url=repository_url,
+        runs=runs,
+        open_run_id=open_run_id,
+        show_id=show_id,
+    )
+    return mo.vstack(
+        [metadata, mo.Html(f'<div class="record-markdown">{body.text}</div>')]
+    )
 
 
-@dataclass
-class _MarkdownDraft:
-    record: Record
-    markdown: str
-    error: str = ""
-
-
-class MarkdownEditor:
-    """Session-local Markdown drafts with explicit Save and Cancel controls.
-
-    Create once in a notebook cell, then pass to ``markdown_view`` in another.
-    The callback persists a draft and returns the saved record. Only persisted
-    records are editable; front matter remains read-only.
-    """
-
-    def __init__(
-        self,
-        on_save: Callable[[Record, str], Record],
-        on_change: Callable[[], None] = lambda: None,
-    ) -> None:
-        self._on_save = on_save
-        self._on_change = on_change
-        self._drafts: dict[str, _MarkdownDraft] = {}
-        # Marimo's widget registry holds weak references.
-        self._widgets: list[Any] = []
-
-    def _refresh(self) -> None:
-        self._on_change()
-
-    def _start(self, record: Record) -> None:
-        self._drafts[record.id] = _MarkdownDraft(
-            record.model_copy(deep=True), str(record.markdown)
-        )
-        self._refresh()
-
-    def _cancel(self, path: str) -> None:
-        self._drafts.pop(path, None)
-        self._refresh()
-
-    def _save(self, record: Record) -> None:
-        draft = self._drafts[record.id]
-        try:
-            saved = self._on_save(draft.record, draft.markdown)
-        except (HirakuError, OSError, ValueError) as exc:
-            draft.error = str(exc)
-            self._refresh()
-            return
-        record.markdown = saved.markdown
-        self._cancel(record.id)
-
-    def render(
-        self,
-        record: Record | None,
-        *,
-        empty_message: str = "This record has no Markdown.",
-    ) -> mo.Html:
-        """Show the record or its draft, retaining drafts across selections."""
-        if record is None:
-            self._widgets = []
-            return markdown_view(None)
-        draft = self._drafts.get(record.id)
-        if draft is None:
-            edit = mo.ui.button(
-                label="✎",
-                tooltip="Edit Markdown",
-                on_click=lambda _: self._start(record),
+def record_summary(
+    record: Record,
+    *,
+    repository_url: str | None = None,
+    runs: Sequence[Mapping[str, Any]] = (),
+    open_run_id: str | None = None,
+    show_id: bool = True,
+) -> mo.Html:
+    """Render local metadata and expandable details for supplied runs."""
+    rows = []
+    values = {"id": record.id, **record.metadata}
+    for field in (
+        *(("id",) if show_id else ()),
+        "state",
+        "summary",
+        "description",
+        "goal",
+        "hypothesis",
+        "decision",
+        "parent_id",
+        "related_to",
+        "commit",
+        "branch",
+    ):
+        value = values.get(field)
+        if value is None or value == "" or value == []:
+            continue
+        text = ", ".join(map(str, value)) if isinstance(value, list) else str(value)
+        display = html.escape(text)
+        if field in {"commit", "branch"} and safe_url(repository_url):
+            route = "commit" if field == "commit" else "tree"
+            url = f"{repository_url.rstrip('/')}/{route}/{quote(text, safe='')}"
+            display = (
+                f'<a href="{html.escape(url, quote=True)}" target="_blank" '
+                f'rel="noopener noreferrer">{display}</a>'
             )
-            self._widgets = [edit]
-            controls = mo.hstack([edit], justify="end")
-            return mo.vstack(
-                [
-                    mo.Html(f'<div class="hiraku-markdown-controls">{controls}</div>'),
-                    markdown_view(record, empty_message=empty_message),
-                ]
-            )
-        editor = mo.ui.code_editor(
-            value=draft.markdown,
-            language="markdown",
-            min_height=250,
-            on_change=lambda value: setattr(draft, "markdown", value),
+        rows.append(f"<dt>{field}</dt><dd>{display}</dd>")
+    items = []
+    any_open = False
+    for run in runs:
+        label = html.escape(str(run["run"]))
+        is_open = run["run"] == open_run_id
+        any_open |= is_open
+        expanded = " open" if is_open else ""
+        items.append(
+            f'<li><details class="record-run"{expanded}>'
+            f"<summary>{label}{_run_link(run)}</summary>"
+            f"{run_details(run, show_link=False).text}</details></li>"
         )
-        cancel = mo.ui.button(
-            label="Cancel", on_click=lambda _: self._cancel(record.id)
-        )
-        save = mo.ui.button(
-            label="Save", kind="success", on_click=lambda _: self._save(record)
-        )
-        self._widgets = [editor, cancel, save]
-        controls = mo.hstack([cancel, save], justify="end")
-        metadata = mo.Html(
-            f"<pre>{html.escape(dump_yaml(draft.record.metadata))}</pre>"
-        )
-        message = (
-            mo.callout(mo.plain_text(draft.error), kind="danger")
-            if draft.error
-            else mo.md("Draft — changes are saved only when you click Save.")
-        )
-        return mo.vstack(
-            [
-                mo.Html(f'<div class="hiraku-markdown-controls">{controls}</div>'),
-                mo.accordion({record.id: metadata}),
-                editor,
-                message,
-            ]
-        )
+    expanded = " open" if any_open else ""
+    raw = html.escape(dump_yaml(record.metadata))
+    raw_label = "Raw frontmatter"
+    if show_id:
+        raw_label += f" · {html.escape(record.id)}"
+    return mo.Html(
+        f'<dl class="record-metadata">{"".join(rows)}</dl>'
+        f'<details class="record-runs"{expanded}><summary>Runs ({len(items)})</summary>'
+        f"<ul>{''.join(items)}</ul></details>"
+        f'<details class="record-raw"><summary>{raw_label}</summary>'
+        f"<pre>{raw}</pre></details>"
+    )
+
+
+def _record_label(record: Record) -> str:
+    title = html.escape(record.title or record.id.rsplit("/", 1)[-1])
+    return (
+        '<span class="hiraku-record-node">'
+        f'<span class="record-title" title="{title}">{title}</span>'
+        f'<span class="record-type">{html.escape(record.type)}</span></span>'
+    )
 
 
 def record_tree(
     records: Sequence[Record],
     selected_id: str | None,
     on_select: Callable[[str], Any],
+    *,
+    matching_ids: set[str] | None = None,
 ) -> tuple[mo.Html, dict[str, mo.ui.button]]:
     """Render optional record navigation and return its live button references.
 
@@ -176,24 +171,21 @@ def record_tree(
             continue
         if record.id in buttons:
             continue
-        badges = " ".join(
-            f'<span class="badge">{html.escape(value)}</span>'
-            for value in (record.type, record.state)
-            if value
-        )
         button = mo.ui.button(
-            label=(
-                '<span class="hiraku-record-node">'
-                '<span class="dot" aria-hidden="true"></span>'
-                f'<span class="record-id">{html.escape(record.id)}</span> {badges}'
-                "</span>"
-            ),
+            label=_record_label(record),
             full_width=True,
             on_click=lambda _, identifier=record.id: on_select(identifier),
         )
         buttons[record.id] = button
         selected = ' aria-current="true"' if record.id == selected_id else ""
-        fragments.append(f'<li><div class="record-row"{selected}>{button.text}</div>')
+        muted = (
+            " record-context"
+            if matching_ids is not None and record.id not in matching_ids
+            else ""
+        )
+        fragments.append(
+            f'<li><div class="record-row{muted}"{selected}>{button.text}</div>'
+        )
         nested = [
             child for child in children.get(record.id, []) if child.id not in buttons
         ]
@@ -211,6 +203,219 @@ def record_tree(
     )
 
 
+def _filter_chip(
+    label: str,
+    active: bool,
+    on_toggle: Callable[[], Any],
+    *,
+    disabled: bool = False,
+    tooltip: str | None = None,
+) -> mo.ui.button:
+    return mo.ui.button(
+        label=(
+            f'<span class="record-filter-chip{" active" if active else ""}">'
+            f"{'✓ ' if active else ''}{html.escape(label)}</span>"
+        ),
+        disabled=disabled,
+        tooltip=tooltip,
+        on_click=lambda _: on_toggle(),
+    )
+
+
+def record_filters(
+    records: Sequence[Record],
+    on_toggle: Callable[[str, str], Any],
+    *,
+    types: Sequence[str] = (),
+    states: Sequence[str] = (),
+) -> tuple[mo.Html, dict[tuple[str, str], mo.ui.button]]:
+    """Render type/state toggle chips with caller-owned filter state.
+
+    Return live button references. Each callback identifies the field and value
+    to toggle; available values always come from the unfiltered record list.
+    """
+    buttons = {}
+    groups = []
+    for field, selected in (("type", types), ("state", states)):
+        chips = []
+        for value in sorted(
+            {getattr(record, field) for record in records if getattr(record, field)}
+        ):
+            active = value in selected
+            button = _filter_chip(
+                value,
+                active,
+                lambda field=field, value=value: on_toggle(field, value),
+                tooltip=f"{'Remove' if active else 'Add'} {field} filter: {value}",
+            )
+            buttons[field, value] = button
+            chips.append(button.text)
+        if chips:
+            groups.append(
+                f'<div class="record-filter-group" role="group" '
+                f'aria-label="{field.title()} filters">'
+                f'<span class="record-filter-label">{field.title()}</span>'
+                f"{''.join(chips)}</div>"
+            )
+    return mo.Html(f'<div class="record-filters">{"".join(groups)}</div>'), buttons
+
+
+def leaderboard_filters(
+    active: frozenset[str],
+    has_record: bool,
+    run_count: int,
+    on_toggle: Callable[[str], Any],
+) -> tuple[mo.Html, dict[str, mo.ui.button]]:
+    """Render leaderboard filter chips and the filtered run count."""
+    buttons = {}
+    for name, label in (
+        ("record", "Selected record"),
+        ("unattributed", "Include unattributed"),
+    ):
+        disabled = not has_record and name == "record"
+        enabled = name in active and not disabled
+        buttons[name] = _filter_chip(
+            label,
+            enabled,
+            lambda name=name: on_toggle(name),
+            disabled=disabled,
+        )
+    count_label = "run" if run_count == 1 else "runs"
+    return mo.Html(
+        '<div class="record-filter-group leaderboard-filters" role="group" '
+        'aria-label="Leaderboard filters">'
+        '<span class="record-filter-label">Filter</span>'
+        + "".join(button.text for button in buttons.values())
+        + f'<span class="leaderboard-run-count">{run_count:,} {count_label}</span>'
+        + "</div>"
+    ), buttons
+
+
+def filesystem_tree(
+    records: Sequence[Record],
+    selected_id: str | None,
+    on_select: Callable[[str], Any],
+    *,
+    types: Sequence[str] = (),
+    states: Sequence[str] = (),
+) -> tuple[mo.Html, dict[str, mo.ui.button]]:
+    """Navigate bundle-relative Markdown paths, independently of record lineage.
+
+    Filters match local type and state fields; empty filters include all values.
+    Directories retain matching descendants and do not select records. Keep the
+    returned buttons alive and supply selection state from the caller.
+    """
+    children: dict[str, set[tuple[str, bool]]] = {"": set()}
+    by_id = {}
+    for record in records:
+        if (types and record.type not in types) or (
+            states and record.state not in states
+        ):
+            continue
+        by_id[record.id] = record
+        parts = record.id.split("/")
+        parent = ""
+        for part in parts[:-1]:
+            directory = f"{parent}/{part}" if parent else part
+            children.setdefault(parent, set()).add((directory, True))
+            children.setdefault(directory, set())
+            parent = directory
+        children[parent].add((record.id, False))
+
+    buttons: dict[str, mo.ui.button] = {}
+    fragments = ["<ul>"]
+    stack: list[tuple[str, bool] | str] = list(
+        reversed(sorted(children[""], key=lambda item: (not item[1], item[0])))
+    )
+    while stack:
+        node = stack.pop()
+        if isinstance(node, str):
+            fragments.append(node)
+            continue
+        path, directory = node
+        label = html.escape(path.rsplit("/", 1)[-1])
+        if directory:
+            fragments.append(
+                "<li><details open><summary>"
+                f'<span class="record-folder-name">{label}</span></summary><ul>'
+            )
+            stack.append("</ul></details></li>")
+            stack.extend(
+                reversed(
+                    sorted(children[path], key=lambda item: (not item[1], item[0]))
+                )
+            )
+            continue
+        record = by_id[path]
+        button = mo.ui.button(
+            label=_record_label(record),
+            full_width=True,
+            on_click=lambda _, identifier=path: on_select(identifier),
+        )
+        buttons[path] = button
+        selected = ' aria-current="true"' if path == selected_id else ""
+        fragments.append(
+            f'<li><div class="record-row"{selected}>{button.text}</div></li>'
+        )
+    fragments.append("</ul>")
+    content = "".join(fragments) if buttons else "No matching records."
+    return (
+        mo.Html(
+            '<nav class="record-tree filesystem-tree" aria-label="Record files">'
+            f"{content}</nav>"
+        ),
+        buttons,
+    )
+
+
+def lineage_tree(
+    records: Sequence[Record],
+    selected_id: str | None,
+    on_select: Callable[[str], Any],
+    *,
+    types: Sequence[str] = (),
+    states: Sequence[str] = (),
+) -> tuple[mo.Html, dict[str, mo.ui.button]]:
+    """Render matching records and their ancestors in lineage order."""
+    return record_tree(
+        lineage_records(records, types=types, states=states),
+        selected_id,
+        on_select,
+        matching_ids={
+            record.id
+            for record in records
+            if (not types or record.type in types)
+            and (not states or record.state in states)
+        },
+    )
+
+
+def plot_axes(
+    metrics: Sequence[str],
+    x_metric: str | None,
+    y_metric: str | None,
+    set_axes: Callable[..., None],
+) -> tuple[mo.ui.dropdown, mo.ui.dropdown]:
+    """Build axis selectors with callbacks into the caller's axis state."""
+    run_order = "Run order"
+    while run_order in metrics:
+        run_order += " (execution)"
+    return (
+        mo.ui.dropdown(
+            {run_order: None, **{name: name for name in metrics}},
+            value=x_metric or run_order,
+            label="X axis",
+            on_change=lambda value: set_axes(lambda axes: (value, axes[1])),
+        ),
+        mo.ui.dropdown(
+            metrics,
+            value=y_metric,
+            label="Y axis",
+            on_change=lambda value: set_axes(lambda axes: (axes[0], value)),
+        ),
+    )
+
+
 def run_table(
     records_df: pd.DataFrame,
     runs_df: pd.DataFrame,
@@ -219,9 +424,11 @@ def run_table(
     *,
     selected_key: str | None = None,
     on_select: Callable[[str | None], Any] | None = None,
+    include_records: bool = True,
 ) -> mo.ui.table:
     """Build the selectable record/run table, retaining its hidden row keys."""
-    _rows = tree_rows(records_df, runs_df, metric)
+    _rows = tree_rows(records_df, runs_df, metric, include_records=include_records)
+    metric_column = run_table_metric_column(metric)
 
     def _style(row, column):
         style = {"fontWeight": "600"} if row["key"].startswith("record:") else {}
@@ -241,209 +448,161 @@ def run_table(
         on_change=(lambda rows: on_select(rows[0]["key"] if rows else None))
         if on_select
         else None,
-        hidden_columns=["key", "depth"] if _rows else None,
+        visible_columns=[
+            *RUN_TABLE_COLUMNS,
+            *([metric_column] if metric_column else []),
+        ]
+        if _rows
+        else None,
         page_size=50,
         show_column_summaries=False,
         show_data_types=False,
         show_download=False,
         format_mapping={
-            metric: lambda value: f"{value:.4g}" if isinstance(value, float) else value
+            metric_column: (
+                lambda value: f"{value:.4g}" if isinstance(value, float) else value
+            )
         }
-        if metric
+        if metric_column
         else None,
         style_cell=lambda row, column, value: _style(_rows[int(row)], column),
     )
     return tree
 
 
-def run_details(selected_run: Mapping[str, Any] | None) -> mo.Html:
+def _run_link(run: Mapping[str, Any]) -> str:
+    url = safe_url(run.get("url"))
+    if not url:
+        return ""
+    source = html.escape(str(run.get("source") or "tracking backend"))
+    return (
+        f' <a class="run-link" href="{html.escape(url, quote=True)}" target="_blank" '
+        f'rel="noopener noreferrer">Open in {source} ↗</a>'
+    )
+
+
+def run_details(
+    selected_run: Mapping[str, Any] | None, *, show_link: bool = True
+) -> mo.Html:
     """Render run provenance and a safe tracking link, or a selection prompt."""
     if selected_run is None:
-        _content = mo.md("Select a run in the tree to see its details.")
+        _content = mo.md("Select a run in the leaderboard to see its details.")
     else:
-        # The link and the source name come from the run's tracking backend.
-        _url = safe_url(selected_run["url"])
-        _source = selected_run["source"] or "tracking backend"
-        _content = mo.vstack(
-            [
-                mo.md(f"[Open in {_source} ↗]({_url})") if _url else mo.md(""),
-                mo.Html(f"<pre>{html.escape(run_text(selected_run))}</pre>"),
-            ]
+        _link = _run_link(selected_run) if show_link else ""
+        _content = mo.Html(
+            f'<div class="run-provenance">{_link}'
+            f"<pre>{html.escape(run_text(selected_run))}</pre></div>"
         )
     return mo.as_html(_content)
-
-
-def performance_controls(
-    metrics: Sequence[str], default_metric: str | None
-) -> mo.ui.dropdown:
-    """Create the metric selector for the performance plot."""
-    return mo.ui.dropdown(metrics, value=default_metric, label="Metric (y axis)")
-
-
-def tradeoff_controls(
-    directions: Mapping[str, str | None], metrics: Sequence[str]
-) -> tuple[mo.ui.dropdown, mo.ui.dropdown, mo.ui.dropdown, mo.ui.dropdown]:
-    """Create independent metric and objective selectors for the trade-off plot."""
-    x_default = metrics[0] if metrics else None
-    y_default = metrics[1] if len(metrics) > 1 else x_default
-    x_metric = mo.ui.dropdown(metrics, value=x_default, label="X metric")
-    y_metric = mo.ui.dropdown(metrics, value=y_default, label="Y metric")
-
-    def direction(metric_name):
-        return directions.get(metric_name) or "minimize"
-
-    x_objective = mo.ui.dropdown(
-        ["minimize", "maximize"],
-        value=direction(x_default) if x_default else "minimize",
-        label="X objective",
-    )
-    y_objective = mo.ui.dropdown(
-        ["minimize", "maximize"],
-        value=direction(y_default) if y_default else "minimize",
-        label="Y objective",
-    )
-    return x_metric, x_objective, y_metric, y_objective
 
 
 def performance_plot(
     runs_df: pd.DataFrame,
     *,
-    scope: str | None,
-    metric: str | None,
-    selected_run: Mapping[str, Any] | None = None,
+    x_metric: str | None = None,
+    y_metric: str | None,
+    directions: Mapping[str, str | None] | None = None,
+    selected_record_id: str | None = None,
+    selected_run_id: str | None = None,
+    on_run_select: Callable[[str], Any] | None = None,
 ) -> mo.Html:
-    """Plot one metric over execution order for an already scoped run table."""
-    _points, _missing = plot_frame(runs_df, metric)
-    _label = f"under **{scope}**" if scope else "in this leaderboard"
-    _notes = [f"{len(runs_df)} runs {_label}, numbered by execution order."]
-    if _missing:
-        _notes.append(f"{_missing} without a numeric `{metric}` are not shown.")
-    if _points.empty:
-        _chart = mo.md("No runs to plot.")
-    else:
-        _base = alt.Chart(_points).encode(
-            x=alt.X(
-                "number:Q",
-                title="Run number (execution order)",
-                axis=alt.Axis(format="d", tickMinStep=1),
-                scale=alt.Scale(nice=False, padding=16),
-            ),
-            y=alt.Y("value:Q", title=metric, scale=alt.Scale(zero=False)),
+    """Plot a metric against execution order or another metric."""
+    if y_metric is None:
+        return mo.md("No numeric metrics are available to plot.")
+    if x_metric == y_metric:
+        return mo.callout("Choose two different metrics.", kind="info")
+
+    tooltip = [
+        alt.Tooltip("run:N", title="Run"),
+        alt.Tooltip("record:N", title="Record"),
+    ]
+    if x_metric is None:
+        points, _ = plot_frame(runs_df, y_metric)
+        x = alt.X(
+            "number:Q",
+            title="Run number (execution order)",
+            axis=alt.Axis(format="d", tickMinStep=1),
+            scale=alt.Scale(nice=False, padding=16),
         )
-        _line = _base.mark_line(strokeWidth=2, opacity=0.3)
-        _dots = _base.mark_point(filled=True, size=90, opacity=1).encode(
-            color=alt.Color("record:N", title="Record"),
-            tooltip=[
-                alt.Tooltip("number:Q", title="Run #"),
-                alt.Tooltip("run:N", title="Run"),
-                alt.Tooltip("record:N", title="Record"),
+        y = alt.Y("value:Q", title=y_metric, scale=alt.Scale(zero=False))
+        tooltip.extend(
+            [
                 alt.Tooltip("started:N", title="Started"),
                 alt.Tooltip("duration:N", title="Duration"),
-                alt.Tooltip("value:Q", title=metric, format=".4g"),
-            ],
+                alt.Tooltip("value:Q", title=y_metric, format=".4g"),
+            ]
         )
-        _layers = [_line, _dots]
-        if selected_run is not None:
-            _layers.append(
-                _base.transform_filter(alt.datum.run == selected_run["run"]).mark_point(
-                    size=320, strokeWidth=3, color="#f59e0b", filled=False
-                )
-            )
-        _chart = (
-            alt.layer(*_layers)
-            .properties(width="container", height=340)
-            .configure(background="transparent")
-            .configure_view(stroke=None)
-        )
-    _content = mo.vstack([mo.md(" ".join(_notes)), _chart])
-    return mo.as_html(_content)
-
-
-def tradeoff_plot(
-    runs_df: pd.DataFrame,
-    *,
-    x_metric: str | None,
-    y_metric: str | None,
-    x_objective: str = "minimize",
-    y_objective: str = "minimize",
-) -> mo.Html:
-    """Compare two metrics and highlight non-dominated runs in the supplied table."""
-    if not x_metric or not y_metric:
-        _comparison = mo.md("No numeric metrics are available to compare.")
-    elif x_metric == y_metric:
-        _comparison = mo.callout("Choose two different metrics.", kind="info")
     else:
-        _points, _missing = tradeoff_frame(
-            runs_df,
-            x_metric,
-            y_metric,
-            x_objective,
-            y_objective,
+        points = tradeoff_frame(runs_df, x_metric, y_metric)
+        directions = directions or {}
+        x = alt.X(
+            "x:Q",
+            title=f"{x_metric} ({directions.get(x_metric) or 'minimize'})",
+            scale=alt.Scale(zero=False),
         )
-        if _points.empty:
-            _comparison = mo.callout(
-                f"No runs have numeric values for both metrics ({_missing} excluded).",
-                kind="info",
-            )
-        else:
-            _highlighted = _points.loc[_points["non_dominated"]]
-            _note = (
-                f"**{len(_points)} comparable runs** · "
-                f"**{len(_highlighted)} strong trade-offs**"
-            )
-            if _missing:
-                _note += f" · {_missing} runs excluded for missing or non-finite values"
-            _base = alt.Chart(_points).encode(
-                x=alt.X(
-                    "x:Q",
-                    title=f"{x_metric} ({x_objective})",
-                    scale=alt.Scale(zero=False),
-                ),
-                y=alt.Y(
-                    "y:Q",
-                    title=f"{y_metric} ({y_objective})",
-                    scale=alt.Scale(zero=False),
-                ),
-                color=alt.Color("record:N", title="Record"),
-                tooltip=[
-                    alt.Tooltip("run:N", title="Run"),
-                    alt.Tooltip("record:N", title="Record"),
-                    alt.Tooltip("x:Q", title=x_metric, format=".4g"),
-                    alt.Tooltip("y:Q", title=y_metric, format=".4g"),
-                    alt.Tooltip("non_dominated:N", title="Strong trade-off"),
-                ],
-            )
-            _chart = (
-                alt.layer(
-                    _base.mark_circle(size=100, opacity=0.55),
-                    _base.transform_filter(alt.datum.non_dominated).mark_point(
-                        shape="diamond", filled=True, size=220, strokeWidth=1
-                    ),
-                )
-                .properties(width="container", height=420)
-                .interactive()
-                .configure(background="transparent")
-                .configure_view(stroke=None)
-            )
-            _table = _highlighted.drop(columns="non_dominated").rename(
-                columns={
-                    "run": "Run",
-                    "record": "Record",
-                    "x": x_metric,
-                    "y": y_metric,
-                }
-            )
-            _comparison = mo.vstack(
-                [
-                    mo.md(_note),
-                    mo.md(
-                        "A highlighted run has a strong trade-off: no comparable "
-                        "run matches or improves both metrics while improving "
-                        "at least one."
-                    ),
-                    _chart,
-                    mo.ui.table(_table, selection=None, show_download=False),
-                ]
-            )
-    _content = _comparison
-    return mo.as_html(_content)
+        y = alt.Y(
+            "y:Q",
+            title=f"{y_metric} ({directions.get(y_metric) or 'minimize'})",
+            scale=alt.Scale(zero=False),
+        )
+        tooltip.extend(
+            [
+                alt.Tooltip("x:Q", title=x_metric, format=".4g"),
+                alt.Tooltip("y:Q", title=y_metric, format=".4g"),
+            ]
+        )
+    if points.empty:
+        return mo.md("No runs to plot.")
+
+    base = alt.Chart().encode(x=x, y=y)
+    is_selected = alt.datum.run == selected_run_id
+    dots = base.mark_circle(
+        filled=True,
+        opacity=1,
+        stroke="#243449",
+        cursor="pointer" if on_run_select is not None else alt.Undefined,
+    ).encode(
+        color=_run_color(selected_record_id),
+        size=alt.condition(is_selected, alt.value(220), alt.value(90)),
+        strokeWidth=alt.condition(is_selected, alt.value(1.5), alt.value(0)),
+        tooltip=tooltip,
+    )
+    if on_run_select is not None:
+        dots = dots.add_params(_run_selection())
+    if x_metric is None:
+        line = base.mark_line(strokeWidth=2, opacity=0.3)
+        chart = alt.layer(line, dots, data=points)
+    else:
+        chart = dots.properties(data=points).interactive(name="pan_zoom")
+    chart = (
+        chart.properties(width="container", height=340)
+        .configure(background="transparent")
+        .configure_view(stroke=None)
+    )
+    return mo.vstack([_interactive_run_chart(chart, on_run_select)])
+
+
+def _run_color(record_id: str | None):
+    default = alt.value("#4c78a8")
+    if record_id is None:
+        return default
+    return alt.condition(alt.datum.record == record_id, alt.value("#f59e0b"), default)
+
+
+def _run_selection() -> alt.Parameter:
+    return alt.selection_point(name="picked_run", fields=["run"], toggle=False)
+
+
+def _interactive_run_chart(
+    chart: alt.Chart | alt.LayerChart, on_run_select: Callable[[str], Any] | None
+) -> alt.Chart | alt.LayerChart | mo.ui.altair_chart:
+    if on_run_select is None:
+        return chart
+
+    def select(rows: pd.DataFrame) -> None:
+        if not rows.empty:
+            on_run_select(rows["run"].iloc[0])
+
+    return mo.ui.altair_chart(
+        chart, chart_selection=False, legend_selection=False, on_change=select
+    )
