@@ -36,12 +36,13 @@ def test_wheel_contains_all_packaged_example_files(tmp_path: Path) -> None:
         if path.is_file() and "__pycache__" not in path.parts
     }
     expected.update(
-        f"hiraku/examples/{path.relative_to(EXAMPLES).as_posix()}"
+        f"hiraku/resources/examples/{path.relative_to(EXAMPLES).as_posix()}"
         for path in EXAMPLES.rglob("*")
         if path.is_file() and "__pycache__" not in path.parts
     )
     assert any(path.endswith("collaborative/workflow.md") for path in expected)
     expected.add("hiraku/workflows/__init__.py")
+    expected.add("hiraku/examples.py")
     expected.add("hiraku/workflows/langgraph.py")
     expected.update(
         {

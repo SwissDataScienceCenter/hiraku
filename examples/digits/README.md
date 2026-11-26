@@ -1,9 +1,10 @@
 # Digits
 
-Train a small neural network on scikit-learn's bundled Digits dataset (1,797
-8×8 images) and log training and validation cross-entropy and accuracy after
-every epoch to MLflow. The example runs on CPU and compares weak and strong L2
-regularization.
+Train a small neural network on scikit-learn's Digits dataset and
+compare weak and strong L2 regularization using MLflow learning curves.
+
+The dataset contains 1,797 8×8 images. The example runs on CPU and logs training
+and validation cross-entropy and accuracy after every epoch.
 
 The network has one hidden layer of 64 neurons. Each `partial_fit` call performs
 one epoch while preserving optimizer state. Both experiments use the same
@@ -45,6 +46,10 @@ uv run mlflow server --backend-store-uri sqlite:///mlflow.db \
   --host 127.0.0.1 --port 5000
 ```
 
+If you have the Hiraku repository checked out, you can also run `uv sync` and
+start the server directly from `examples/digits/`, which already contains the
+prepared records and database.
+
 In another terminal, point Hiraku to it before querying runs or opening the
 dashboard:
 
@@ -66,8 +71,10 @@ custom tracking store.
 
 ## Create the research root and child records
 
-The example ships with MLflow configured in `hiraku/leaderboards/default.yml`.
-The leaderboard reads results; the training script configures its logging destination.
+The example includes MLflow configuration in
+`hiraku/leaderboards/default.yml`. The leaderboard reads results; the training
+script configures its logging destination. Use `--with-results` to include the
+prepared records and database as well.
 
 ```bash
 hiraku record create digit-classification \

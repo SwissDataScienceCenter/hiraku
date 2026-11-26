@@ -33,10 +33,11 @@ from .errors import (
     HirakuError,
     ValidationError,
 )
+from .examples import Example
 from .git import GitRepository, init_code_repository, require_git
 from .io import dump_yaml
 from .job import Submission, observe_submission, prepare_job, run_local, submit_job
-from .project import Project, _examples_root
+from .project import Project
 from .record import Record, RecordUpdate, validate_identifier
 from .tracking import Leaderboard, Run
 from .tracking.leaderboard import _leaderboard_path
@@ -272,13 +273,11 @@ def mcp_install_command() -> None:
 
 @main.command("init")
 @click.argument("path", required=False, type=click.Path(path_type=Path))
-@click.option("--template", type=click.Path(path_type=Path))
 @click.option(
     "--git", "init_git", is_flag=True, help="Initialize the code Git repository."
 )
 def init_command(
     path: Path | None,
-    template: Path | None,
     init_git: bool,
 ) -> None:
     """Initialize PATH (default: current directory)."""
@@ -294,11 +293,11 @@ def init_command(
             if child.is_dir() and not child.name.startswith(".")
         )
     existing_marker = next((marker for marker in markers if marker.is_file()), None)
-    if existing_marker is not None and template is None:
+    if existing_marker is not None:
         project = Project.load(existing_marker)
         message = "Hiraku project already initialized"
     else:
-        project = Project.create(root, template=template)
+        project = Project.create(root)
         message = "Initialized Hiraku project"
     if init_git:
         init_code_repository(project)
@@ -307,20 +306,17 @@ def init_command(
 
 @main.group("example")
 def example_group() -> None:
-    """List and create bundled examples."""
+    """List and create examples."""
 
 
 @example_group.command("list")
 def example_list_command() -> None:
-    """List available bundled examples."""
-    examples = _examples_root()
+    """List available examples."""
     rows = []
-    for example in sorted(examples.iterdir(), key=lambda item: item.name):
-        manifest = example / "example.yml"
-        if example.is_dir() and manifest.is_file():
-            metadata = yaml.safe_load(manifest.read_text(encoding="utf-8"))
-            rows.append((example.name, metadata.get("description", "")))
-    _print_table(("name", "description"), rows)
+    for name in Example.list():
+        example = Example.load(Example.source(name))
+        rows.append((name, example.title, example.description))
+    _print_table(("name", "title", "description"), rows)
 
 
 @example_group.command("create")
@@ -330,7 +326,7 @@ def example_list_command() -> None:
     "--with-results",
     "results",
     is_flag=True,
-    help="Copy bundled research records and tracked runs.",
+    help="Copy the example's prepared records and tracked runs.",
 )
 @click.option(
     "--git", "init_git", is_flag=True, help="Initialize the code Git repository."
@@ -341,18 +337,19 @@ def example_create_command(
     results: bool,
     init_git: bool,
 ) -> None:
-    """Create PATH from a bundled EXAMPLE (default: ./EXAMPLE).
+    """Create PATH from an available EXAMPLE (default: ./EXAMPLE).
 
-    Copies example files without Git history or network access.
+    Copies example files and sets up agent integrations without network access.
     """
     validate_identifier(example, label="example name")
     root = path if path is not None else Path(example)
     if init_git:
         require_git()
-    project = Project.create(root, example=example, results=results)
+    project = Project.load(Example.create(example, root, with_results=results))
+    project._install_agent_resources()
     if init_git:
         init_code_repository(project)
-    click.echo(f"Initialized Hiraku project at {project.path}")
+    click.echo(f"Copied Hiraku example to {project.root}")
 
 
 @main.group("record")

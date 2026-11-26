@@ -57,7 +57,7 @@ Each workflow must expose an `input_schema()` function from `workflow.py`;
 JSON Schema in `response_schema`, and may include `required_capabilities` to
 describe what the agent needs for that step. The graph remains responsible for
 validating inputs and interrupt responses. Capability names describe needs, not
-specific tools; an executor maps them to its own tools. The bundled workflows
+specific tools; an executor maps them to its own tools. The included workflows
 demonstrate these contracts with Pydantic models.
 
 The collaborative workflow requires an explicit `task` record ID in its

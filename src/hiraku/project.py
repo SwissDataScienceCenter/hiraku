@@ -5,9 +5,7 @@ from __future__ import annotations
 import json
 import shutil
 import tomllib
-from contextlib import ExitStack
 from importlib.resources import as_file, files
-from importlib.resources.abc import Traversable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -22,17 +20,6 @@ from .io import atomic_write, dump_yaml, load_yaml_mapping
 
 if TYPE_CHECKING:
     from .record import Vault
-
-
-def _examples_root() -> Traversable:
-    bundled = files("hiraku") / "examples"
-    if bundled.is_dir():
-        return bundled
-    # Editable installs expose src/ while the examples remain in the checkout.
-    source = Path(__file__).resolve().parents[1]
-    if source.name == "src" and (source.parent / "pyproject.toml").is_file():
-        return source.parent / "examples"
-    return bundled
 
 
 class Project(BaseModel):
@@ -223,19 +210,13 @@ class Project(BaseModel):
         *,
         install_skill: bool = True,
         install_mcp: bool = True,
-        template: Path | str | None = None,
-        example: str | None = None,
-        results: bool = False,
     ) -> Project:
         """Create a project and install its selected resources.
 
         Args:
             root: Directory to initialize.
-            install_skill: Whether to install all bundled Hiraku skills.
+            install_skill: Whether to install all included Hiraku skills.
             install_mcp: Whether to add the project MCP server configuration.
-            template: Optional directory whose contents are copied into the project.
-            example: Optional packaged example name to initialize from.
-            results: Whether to include the example's prepared records and runs.
 
         Returns:
             The initialized project.
@@ -247,98 +228,38 @@ class Project(BaseModel):
         root = Path(root).expanduser().resolve()
         if (root / "hiraku.yml").exists():
             raise ProjectExistsError(f"Hiraku project already exists at {root}")
-        if template and example:
-            raise ValidationError("template and example are mutually exclusive")
-        if results and not example:
-            raise ValidationError("results requires an example")
+        project = cls(root)
+        root.mkdir(parents=True, exist_ok=True)
+        project.records_dir.mkdir(parents=True, exist_ok=True)
+        project.workflows_dir.mkdir(parents=True, exist_ok=True)
+        project.leaderboards_dir.mkdir(parents=True, exist_ok=True)
+        (root / ".hiraku").mkdir(parents=True, exist_ok=True)
 
-        resources = files("hiraku.resources")
-        with ExitStack() as stack:
-            overlay = None
-            result_overlay = None
-            if template is not None:
-                overlay = Path(template).expanduser().resolve()
-            elif example is not None:
-                if (
-                    not example
-                    or example in {".", ".."}
-                    or Path(example).name != example
-                    or "\\" in example
-                ):
-                    raise ValidationError("Invalid example name")
-                examples = _examples_root()
-                bundle = examples / example
-                if not (bundle / "src").is_dir():
-                    try:
-                        available = sorted(
-                            item.name
-                            for item in examples.iterdir()
-                            if (item / "src").is_dir()
-                        )
-                    except OSError:
-                        available = []
-                    names = ", ".join(available) or "none"
-                    raise ValidationError(
-                        f"Unknown example {example!r}; available examples: {names}"
-                    )
-                overlay = stack.enter_context(as_file(bundle / "src"))
-                if results:
-                    if not (bundle / "results").is_dir():
-                        raise ValidationError(
-                            f"Example {example!r} has no results to include"
-                        )
-                    result_overlay = stack.enter_context(as_file(bundle / "results"))
+        with as_file(files("hiraku.resources") / "workflows") as source:
+            shutil.copytree(source, project.workflows_dir, dirs_exist_ok=True)
 
-            data = {}
-            for source in (overlay, result_overlay):
-                if source is not None:
-                    if not source.is_dir():
-                        raise FileNotFoundError(source)
-                    config_file = source / "hiraku.yml"
-                    if config_file.is_file():
-                        data.update(load_yaml_mapping(config_file))
-            try:
-                project = cls(root, **data)
-            except (TypeError, ValueError) as exc:
-                raise ValidationError(f"Invalid project configuration: {exc}") from exc
-            root.mkdir(parents=True, exist_ok=True)
-            project.records_dir.mkdir(parents=True, exist_ok=True)
-            project.workflows_dir.mkdir(parents=True, exist_ok=True)
-            project.leaderboards_dir.mkdir(parents=True, exist_ok=True)
-            (root / ".hiraku").mkdir(parents=True, exist_ok=True)
+        ignore_path = root / ".gitignore"
+        content = ignore_path.read_text() if ignore_path.exists() else ""
+        if "/.hiraku/" not in content.splitlines():
+            separator = "" if not content or content.endswith("\n") else "\n"
+            atomic_write(ignore_path, f"{content}{separator}/.hiraku/\n")
+        project.save()
 
-            with as_file(resources / "workflows") as source:
-                shutil.copytree(source, project.workflows_dir, dirs_exist_ok=True)
+        project._install_agent_resources(
+            install_skill=install_skill, install_mcp=install_mcp
+        )
+        return project
 
-            # Install the bundled Hiraku skills
-            if install_skill:
-                with as_file(resources / "skills") as source:
-                    for destination in (
-                        root / ".agents/skills",  # Generic agents
-                        root / ".claude/skills",  # Claude Code
-                    ):
-                        shutil.copytree(source, destination, dirs_exist_ok=True)
-
-            for source in (overlay, result_overlay):
-                if source is not None:
-                    shutil.copytree(
-                        source,
-                        root,
-                        dirs_exist_ok=True,
-                        ignore=shutil.ignore_patterns("hiraku.yml"),
-                    )
-
-            ignore_path = root / ".gitignore"
-            content = ignore_path.read_text() if ignore_path.exists() else ""
-            if "/.hiraku/" not in content.splitlines():
-                separator = "" if not content or content.endswith("\n") else "\n"
-                atomic_write(ignore_path, f"{content}{separator}/.hiraku/\n")
-            project.save()
-
-            # Install the MCP server configuration in supported project agent configs
-            if install_mcp:
-                project.install_mcp()
-            return project
+    def _install_agent_resources(
+        self, *, install_skill: bool = True, install_mcp: bool = True
+    ) -> None:
+        """Install the packaged skills and configure supported MCP clients."""
+        if install_skill:
+            with as_file(files("hiraku.resources") / "skills") as source:
+                for destination in (".agents/skills", ".claude/skills"):
+                    shutil.copytree(source, self.root / destination, dirs_exist_ok=True)
+        if install_mcp:
+            self.install_mcp()
 
     def _ignore_codex_config(self) -> None:
         """Keep local Codex MCP settings out of the project repository."""
