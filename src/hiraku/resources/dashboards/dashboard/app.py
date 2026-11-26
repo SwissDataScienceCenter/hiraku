@@ -60,13 +60,12 @@ def refresh_control(project_context, requested_leaderboard):
         else (_names[0] if len(_names) == 1 else None),
         label='<span class="leaderboard-selector-label">Leaderboard</span>',
     )
-    include_unattributed = mo.ui.checkbox(label="Include unattributed", value=False)
     mo.hstack([refresh], justify="end")
-    return refresh, leaderboard_selector, include_unattributed
+    return refresh, leaderboard_selector
 
 
 @app.cell
-def project_data(project_context, refresh, leaderboard_selector, include_unattributed):
+def project_data(project_context, refresh, leaderboard_selector):
     _refreshes = refresh.value
     records = project_context.vault.list()
     leaderboard = None
@@ -74,12 +73,10 @@ def project_data(project_context, refresh, leaderboard_selector, include_unattri
     _runs = []
     try:
         leaderboard = Leaderboard.load(project_context, leaderboard_selector.value)
-        _runs = leaderboard.list_runs(
-            project_context, include_unattributed=include_unattributed.value
-        )
+        _runs = leaderboard.list_runs(project_context, include_unattributed=True)
     except Exception as exc:
         leaderboard_error = f"Leaderboard unavailable: {exc}"
-    runs_df = hd.arrow_frame(
+    all_runs_df = hd.arrow_frame(
         hd.run_rows(
             _runs,
             records=records,
@@ -87,14 +84,31 @@ def project_data(project_context, refresh, leaderboard_selector, include_unattri
         ),
         hd.RUN_COLUMNS,
     )
+    runs_df = all_runs_df[all_runs_df["record"].astype("string").fillna("").ne("")]
     records_df = hd.arrow_frame(hd.record_rows(records), hd.RECORD_COLUMNS)
-    return records, leaderboard, leaderboard_error, records_df, runs_df
+    return records, leaderboard, leaderboard_error, records_df, runs_df, all_runs_df
 
 
 @app.cell
-def selection_state(leaderboard, records_df, requested_record, runs_df):
+def leaderboard_filter_state():
+    get_filter_revision, _set_filter_revision = mo.state(0, allow_self_loops=True)
+    run_filters = hc.LeaderboardFilters(
+        on_change=lambda: _set_filter_revision(lambda revision: revision + 1)
+    )
+    return get_filter_revision, run_filters
+
+
+@app.cell
+def selection_state(
+    all_runs_df,
+    leaderboard,
+    records_df,
+    requested_record,
+    run_filters,
+    runs_df,
+):
     paths = dict(zip(records_df["record"], records_df["record_path"], strict=True))
-    metrics = hd.metric_names(runs_df)
+    metrics = hd.metric_names(all_runs_df)
     if leaderboard is not None and leaderboard.metrics is not None:
         metrics = [item.name for item in leaderboard.metrics]
     tree_metric = metrics[0] if metrics else None
@@ -113,6 +127,8 @@ def selection_state(leaderboard, records_df, requested_record, runs_df):
     )
 
     def select_key(key):
+        if key is None:
+            run_filters.clear_record_filters()
         _set_selection(
             lambda previous: (
                 key,
@@ -232,18 +248,30 @@ def run_details(selected_run):
 
 
 @app.cell
-def leaderboard_plot(leaderboard, paths, runs_df, scope, selected_run, x_axis, y_axis):
-    _runs = hd.subtree(runs_df, paths.get(scope))
+def leaderboard_filters(
+    all_runs_df, get_filter_revision, records, run_filters, selected_record
+):
+    get_filter_revision()
+    _record_id = selected_record.id if selected_record else None
+    leaderboard_runs, plot_scope = run_filters.apply(all_runs_df, records, _record_id)
+    run_filters.render(_record_id)
+    return leaderboard_runs, plot_scope
+
+
+@app.cell
+def leaderboard_plot(
+    leaderboard, leaderboard_runs, plot_scope, selected_run, x_axis, y_axis
+):
     _x, _y = x_axis.value, y_axis.value
     if _x is None:
         plot_view = hc.performance_plot(
-            _runs, scope=scope, metric=_y, selected_run=selected_run
+            leaderboard_runs, scope=plot_scope, metric=_y, selected_run=selected_run
         )
     else:
         _configured_metrics = leaderboard.metrics if leaderboard is not None else None
         _directions = {item.name: item.direction for item in _configured_metrics or ()}
         plot_view = hc.tradeoff_plot(
-            _runs,
+            leaderboard_runs,
             x_metric=_x,
             y_metric=_y,
             x_objective=_directions.get(_x) or "minimize",
@@ -256,9 +284,9 @@ def leaderboard_plot(leaderboard, paths, runs_df, scope, selected_run, x_axis, y
 
 
 @app.cell
-def leaderboard_table(runs_df):
+def leaderboard_table(leaderboard_runs):
     raw_leaderboard = mo.ui.table(
-        runs_df.drop(columns="record_path"),
+        leaderboard_runs.drop(columns="record_path"),
         selection=None,
         page_size=50,
         show_column_summaries=False,
@@ -268,11 +296,11 @@ def leaderboard_table(runs_df):
 
 
 @app.cell
-def leaderboard_header(leaderboard_selector, include_unattributed):
+def leaderboard_header(leaderboard_selector):
     leaderboard_mode = mo.ui.tabs({"Plot": "", "Table": ""}, value="Plot")
     mo.Html(
         '<div class="dashboard-block-header"><h2>Leaderboard</h2>'
-        f"{leaderboard_selector.text}{include_unattributed.text}"
+        f"{leaderboard_selector.text}"
         f'<div class="dashboard-block-mode">{leaderboard_mode.text}</div></div>'
     )
     return (leaderboard_mode,)

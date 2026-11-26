@@ -10,6 +10,7 @@ from hiraku.dashboard.data import (
     RUN_COLUMNS,
     arrow_frame,
     execution_order,
+    filter_leaderboard_runs,
     find_run,
     format_duration,
     metric_names,
@@ -40,6 +41,41 @@ def tables(project: Project) -> tuple[pd.DataFrame, pd.DataFrame]:
             run_rows(runs, records=records, source=leaderboard.source.type), RUN_COLUMNS
         ),
     )
+
+
+@pytest.mark.parametrize(
+    ("direct", "descendants", "unattributed", "expected"),
+    [
+        (False, False, False, ["direct", "child", "other"]),
+        (True, False, False, ["direct"]),
+        (False, True, False, ["child"]),
+        (True, True, True, ["direct", "child", "unattributed"]),
+    ],
+)
+def test_leaderboard_filter_combines_run_sets(
+    project, direct, descendants, unattributed, expected
+):
+    runs = arrow_frame(
+        [
+            {"run": "direct", "record": "root/a/a"},
+            {"run": "child", "record": "root/a/a1/a1"},
+            {"run": "other", "record": "root/b/b"},
+            {"run": "unattributed", "record": None},
+        ],
+        RUN_COLUMNS,
+    )
+    records = project.vault.list()
+    for record in records:
+        record.title = "Same title"
+    filtered = filter_leaderboard_runs(
+        runs,
+        records,
+        "root/a/a",
+        include_record=direct,
+        include_descendants=descendants,
+        include_unattributed=unattributed,
+    )
+    assert filtered["run"].tolist() == expected
 
 
 @pytest.mark.parametrize(

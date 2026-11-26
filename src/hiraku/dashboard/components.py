@@ -22,6 +22,7 @@ from ..errors import HirakuError
 from ..io import dump_yaml
 from ..record import Record
 from .data import (
+    filter_leaderboard_runs,
     lineage_records,
     plot_frame,
     run_text,
@@ -345,6 +346,73 @@ def record_filters(
                 f"{''.join(chips)}</div>"
             )
     return mo.Html(f'<div class="record-filters">{"".join(groups)}</div>'), buttons
+
+
+class LeaderboardFilters:
+    """Session-local chips shared by the leaderboard plot and table."""
+
+    def __init__(self, on_change: Callable[[], None]) -> None:
+        self._active: set[str] = set()
+        self._on_change = on_change
+        self.buttons: dict[str, mo.ui.button] = {}
+
+    def _toggle(self, name: str) -> None:
+        self._active ^= {name}
+        self._on_change()
+
+    def clear_record_filters(self) -> None:
+        """Clear the record scopes while retaining the unattributed toggle."""
+        if self._active & {"record", "descendants"}:
+            self._active.difference_update({"record", "descendants"})
+            self._on_change()
+
+    def render(self, record_id: str | None) -> mo.Html:
+        """Render the filter row and retain the live buttons."""
+        self.buttons = {}
+        for name, label in (
+            ("record", "Selected record"),
+            ("descendants", "Descendants"),
+            ("unattributed", "Include unattributed"),
+        ):
+            disabled = record_id is None and name != "unattributed"
+            active = name in self._active and not disabled
+            self.buttons[name] = mo.ui.button(
+                label=(
+                    f'<span class="record-filter-chip{" active" if active else ""}">'
+                    f"{'✓ ' if active else ''}{label}</span>"
+                ),
+                disabled=disabled,
+                on_click=lambda _, name=name: self._toggle(name),
+            )
+        return mo.Html(
+            '<div class="record-filter-group leaderboard-filters" role="group" '
+            'aria-label="Leaderboard filters">'
+            '<span class="record-filter-label">Filter</span>'
+            + "".join(button.text for button in self.buttons.values())
+            + "</div>"
+        )
+
+    def apply(
+        self, runs: pd.DataFrame, records: Sequence[Record], record_id: str | None
+    ) -> tuple[pd.DataFrame, str | None]:
+        """Return the filtered runs and the record scope for the plot caption."""
+        include_record = "record" in self._active
+        include_descendants = "descendants" in self._active
+        include_unattributed = "unattributed" in self._active
+        filtered = filter_leaderboard_runs(
+            runs,
+            records,
+            record_id,
+            include_record=include_record,
+            include_descendants=include_descendants,
+            include_unattributed=include_unattributed,
+        )
+        scope = (
+            record_id
+            if (include_record or include_descendants) and not include_unattributed
+            else None
+        )
+        return filtered, scope
 
 
 def filesystem_tree(

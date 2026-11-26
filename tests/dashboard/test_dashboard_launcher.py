@@ -83,6 +83,7 @@ def test_bundled_views_place_all_interactive_cells() -> None:
         "record_navigation",
         "run_details",
         "leaderboard_header",
+        "leaderboard_filters",
         "leaderboard_view",
     }
     assert 'role="tablist"' not in view

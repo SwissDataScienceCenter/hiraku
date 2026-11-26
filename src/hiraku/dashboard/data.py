@@ -213,6 +213,39 @@ def subtree(runs_df: pd.DataFrame, ancestor: str | None) -> pd.DataFrame:
     return runs_df[runs_df["record_path"].map(lambda path: within(path, ancestor))]
 
 
+def filter_leaderboard_runs(
+    runs_df: pd.DataFrame,
+    records: Sequence[Record],
+    record_id: str | None,
+    *,
+    include_record: bool,
+    include_descendants: bool,
+    include_unattributed: bool,
+) -> pd.DataFrame:
+    """Filter by record ID and explicit lineage, retaining source order."""
+    attributed = runs_df["record"].astype("string").fillna("").ne("")
+    if record_id is None or not (include_record or include_descendants):
+        matching = attributed
+    else:
+        ids = {record_id}
+        if include_descendants:
+            children: dict[str | None, list[str]] = {}
+            for record in records:
+                children.setdefault(record.parent_id, []).append(record.id)
+            pending = [record_id]
+            while pending:
+                for child in children.get(pending.pop(), ()):
+                    if child not in ids:
+                        ids.add(child)
+                        pending.append(child)
+        if not include_record:
+            ids.remove(record_id)
+        matching = runs_df["record"].isin(ids)
+    if include_unattributed:
+        matching |= ~attributed
+    return runs_df[matching]
+
+
 def tree_rows(
     records_df: pd.DataFrame, runs_df: pd.DataFrame, metric: str | None
 ) -> list[dict[str, Any]]:

@@ -123,12 +123,13 @@ location.
 
 Choose a leaderboard using the selector, or open one with
 `hiraku dashboard serve --leaderboard NAME`. A sole leaderboard is selected automatically.
-Plots show attributed runs by default, including runs whose record files are
-missing. Enable **Include unattributed** in the Leaderboard header to show
-the entire source.
-Without an initial `--record`, plots span the selected leaderboard; select
-**Clear selection** in the runs table to clear a subtree filter. Metric names and directions
-come from the leaderboard; parameters are discovered automatically.
+Plot and Table show all attributed runs by default, including runs whose record
+files are missing. Use the **Filter** chips below the Leaderboard title to choose
+runs attributed to the **Selected record**, to its **Descendants**, or to both.
+**Include unattributed** adds runs without a record to any of these views.
+The record chips require a selection. Clearing the selection turns off both
+record chips. Metric names and directions come from the leaderboard, and
+parameters are discovered automatically.
 
 ## Sections
 
@@ -137,11 +138,11 @@ come from the leaderboard; parameters are discovered automatically.
     in **Plot**. The **X axis** defaults to **Run order**. Choose a **Y axis**
     metric to see performance in execution order,
     with colours marking the record and a ring marking the selected run.
-    Choose a metric on both axes to compare trade-offs in the selected subtree.
+    Choose a metric on both axes to compare trade-offs among the filtered runs.
     Diamonds mark runs that no other run improves upon on one metric while
     matching or improving the other. Metrics use their configured directions
-    and default to minimizing. **Table** shows one row per loaded run across the
-    leaderboard, with metrics, parameters, and attribution.
+    and default to minimizing. **Table** shows one row per filtered run, with
+    metrics, parameters, and attribution.
 
 **Record navigation**
 :   Choose the **Files** (default) or **Lineage** tab in the left sidebar.
@@ -163,16 +164,15 @@ come from the leaderboard; parameters are discovered automatically.
     one filter are combined with OR; the two filters are combined with AND.
     Filtering navigation does not change the selected record or run scope.
     Choosing a record
-    selects the same row in the runs table, clears any selected run, and compares
-    that record's subtree. Table selections highlight the corresponding record
-    in the tree; selecting a run highlights its owning record while preserving
-    the current comparison subtree when the run lies within it.
+    selects the same row in the runs table, clears any selected run, and sets
+    the target for the Leaderboard record filters. Table selections highlight
+    the corresponding record in the tree.
 
 **Runs**
 :   Records and their runs in one indented table. Runs appear under the record
     they are attributed to, in execution order, with their start time, duration,
-    and the value of the first metric the leaderboard declares or discovers. Select a record to
-    compare its subtree, or a run to inspect it.
+    and the value of the first metric the leaderboard declares or discovers.
+    Select a record to target it with the Leaderboard filters, or a run to inspect it.
 
 **Run**
 :   The selected run's ID, record, commit, start time, duration,
@@ -189,8 +189,8 @@ come from the leaderboard; parameters are discovered automatically.
     when switching between records in the same session. Save errors keep the
     draft open; if the file changed externally, copy your draft before canceling
     and refreshing to load the latest version.
-    Selecting a run shows its owning record, while the metric analysis keeps
-    the selected comparison subtree when that run lies within it.
+    Selecting a run shows its owning record and targets it with the active
+    Leaderboard record filters.
 
 Use **Refresh** to re-read records and tracking sources after new launches.
 
@@ -211,6 +211,7 @@ Place the Leaderboard header and its active view together in Studio:
 
 ```html
 <marimo-cell name="leaderboard_header"></marimo-cell>
+<marimo-cell name="leaderboard_filters"></marimo-cell>
 <marimo-cell name="leaderboard_view"></marimo-cell>
 ```
 
@@ -317,8 +318,8 @@ queried runs to rows. Tracking errors leave record navigation available.
 | --- | --- |
 | Runs table | `records_df` rows, each followed by its runs from `runs_df` |
 | Run details | the selected run's row of `runs_df` |
-| Performance plot | selected record subtree in `runs_df`; choose one metric |
-| Trade-off plot | selected record subtree in `runs_df`; choose two metrics and their objectives |
+| Performance plot | filtered `leaderboard_runs`; choose one metric |
+| Trade-off plot | filtered `leaderboard_runs`; choose two metrics |
 
 `record_path` is the record's ancestry, such as `digits/weak-l2`.
 `subtree(runs_df, "digits")` selects every run of `digits` and the records

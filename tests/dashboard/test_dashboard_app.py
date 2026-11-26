@@ -21,6 +21,7 @@ def test_app_runs_every_cell_against_a_project(
     rendered = "\n".join(getattr(output, "text", "") for output in outputs)
     assert "Select a run in the tree to see its details." in rendered
     assert "numbered by execution order." in rendered
+    assert 'aria-label="Leaderboard filters"' in rendered
 
     assert definitions["scope"] == "root/a/a"
     assert definitions["selected_record"].id == "root/a/a"
@@ -101,7 +102,7 @@ def test_leaderboard_table_shows_runs_across_records(project, monkeypatch):
         for output in initial_outputs
         if "<h2>Leaderboard</h2>" in getattr(output, "text", "")
     )
-    for name in ("leaderboard_selector", "include_unattributed", "leaderboard_mode"):
+    for name in ("leaderboard_selector", "leaderboard_mode"):
         assert initial[name].text in header
     mode = initial["leaderboard_mode"]
     mode._update("1")
@@ -111,10 +112,30 @@ def test_leaderboard_table_shows_runs_across_records(project, monkeypatch):
     table = definitions["raw_leaderboard"]
     rendered = [getattr(output, "text", "") for output in outputs]
     table_view = next(output for output in rendered if table.text in output)
-    for name in ("leaderboard_selector", "include_unattributed"):
-        assert definitions[name].text not in table_view
+    assert definitions["leaderboard_selector"].text not in table_view
     assert table.data["run"].tolist() == ["r0", "r1", "r2", "r3", "r5", "r4"]
     assert {"record", "metric.loss"} <= set(table.data.columns)
+
+    for name in ("record", "descendants"):
+        definitions["run_filters"].buttons[name]._update(1)
+    _, filtered = app.run(
+        defs={
+            name: definitions[name]
+            for name in (
+                "leaderboard_mode",
+                "get_filter_revision",
+                "run_filters",
+            )
+        }
+    )
+    assert filtered["raw_leaderboard"].data["run"].tolist() == ["r0", "r2", "r3"]
+    assert "3 runs under" in filtered["plot_view"].text
+    filtered["select_key"](None)
+    cleared, scope = filtered["run_filters"].apply(
+        filtered["all_runs_df"], filtered["records"], "root/a/a"
+    )
+    assert list(cleared["run"]) == list(table.data["run"])
+    assert scope is None
 
 
 @pytest.mark.parametrize(
@@ -293,17 +314,14 @@ def test_dashboard_plots_a_leaderboard_without_records(tmp_path, monkeypatch):
     assert definitions["metrics"] == ["missing", "score"]
     assert definitions["y_axis"].value == "missing"
     assert definitions["runs_df"].empty
-    assert definitions["include_unattributed"].value is False
-    definitions["include_unattributed"]._update(True)
+    assert definitions["leaderboard_runs"].empty
+    definitions["run_filters"].buttons["unattributed"]._update(1)
     outputs, definitions = app.run(
         defs={
-            name: definitions[name]
-            for name in ("refresh", "leaderboard_selector", "include_unattributed")
+            name: definitions[name] for name in ("get_filter_revision", "run_filters")
         }
     )
-    assert definitions["runs_df"]["run"].tolist() == ["r"]
-    rows = tree_rows(definitions["records_df"], definitions["runs_df"], "score")
-    assert [row["key"] for row in rows] == ["run:r"]
+    assert definitions["raw_leaderboard"].data["run"].tolist() == ["r"]
     rendered = "\n".join(getattr(output, "text", "") for output in outputs)
     assert "1 without a numeric" in rendered
 
@@ -327,7 +345,6 @@ def test_dashboard_selects_between_leaderboards(project, monkeypatch):
         defs={
             "leaderboard_selector": definitions["leaderboard_selector"],
             "refresh": definitions["refresh"],
-            "include_unattributed": definitions["include_unattributed"],
         }
     )
     assert len(updated["runs_df"]) == 6
