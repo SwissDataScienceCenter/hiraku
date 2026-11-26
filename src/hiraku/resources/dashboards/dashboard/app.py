@@ -233,11 +233,13 @@ def record_details(
     selected_record,
     selected_run,
 ):
-    _title = "Record"
+    _heading = mo.Html('<h2 class="record-details-heading">Record</h2>')
     if selected_record is None and selected_run is not None:
-        _title = "Run details"
+        _heading = mo.Html('<h2 class="record-details-heading">Run details</h2>')
         _details = hc.run_details(selected_run)
     else:
+        if selected_record is not None:
+            _heading = hc.record_heading(selected_record)
         _runs = (
             all_runs_df.loc[all_runs_df["record"] == selected_record.id].to_dict(
                 "records"
@@ -250,8 +252,9 @@ def record_details(
             repository_url=repository_url,
             runs=_runs,
             open_run_id=selected_run["run"] if selected_run is not None else None,
+            show_id=False,
         )
-    mo.vstack([mo.Html(f'<h2 class="record-details-heading">{_title}</h2>'), _details])
+    mo.vstack([_heading, _details])
     return
 
 

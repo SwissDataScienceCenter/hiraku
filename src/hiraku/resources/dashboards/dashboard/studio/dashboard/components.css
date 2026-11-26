@@ -80,19 +80,20 @@
   padding-left: 10px;
   border-left: 1px solid color-mix(in srgb, currentColor 12%, transparent);
 }
-.record-tree .record-row { margin: 2px 0; border-radius: 5px; }
+.record-tree .record-row { border-radius: 5px; }
 .record-tree .record-row:hover,
 .record-tree summary:hover { background: color-mix(in srgb, currentColor 4%, transparent); }
 .record-tree .record-context { opacity: 0.55; }
 .record-tree .record-row[aria-current="true"] {
   background: color-mix(in srgb, var(--primary-color, #5561a6) 10%, transparent);
-  box-shadow: inset 2px 0 var(--primary-color, #5561a6);
 }
+.record-row > marimo-ui-element,
+.record-row > marimo-ui-element > marimo-button { display: block; width: 100%; }
 .record-tree summary {
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 7px 8px;
+  padding: 3px 8px;
   border-radius: 5px;
   cursor: pointer;
   list-style: none;
@@ -112,9 +113,7 @@
 .record-tree details[open] > summary::before { transform: rotate(45deg); }
 .record-folder-name { overflow-wrap: anywhere; }
 .record-filter-group { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-bottom: 12px; }
-.record-filter-label { flex-basis: 100%; font: 11px/1.4 system-ui, sans-serif; opacity: 0.65; }
-.leaderboard-filters .record-filter-label { flex-basis: auto; margin-right: 4px; }
-.leaderboard-filters { align-items: center; }
+.record-filter-label { margin-right: 4px; font: 11px/1.4 system-ui, sans-serif; opacity: 0.65; }
 .leaderboard-run-count { margin-left: auto; font: 12px/1.4 system-ui, sans-serif; white-space: nowrap; }
 button:has(.record-filter-chip) {
   height: auto !important;
@@ -158,57 +157,46 @@ button:has(.record-filter-chip):focus-visible {
 button:disabled:has(.record-filter-chip) { opacity: 0.45; }
 
 button:has(.hiraku-record-node) {
-  justify-content: flex-start !important;
+  display: grid !important;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: stretch;
+  width: 100%;
   height: auto !important;
-  min-height: 32px;
-  padding: 7px 8px !important;
+  min-height: 24px;
+  padding: 3px 8px !important;
   border: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
   color: inherit !important;
   text-align: left;
-  white-space: normal;
 }
 
-button:has(.hiraku-record-node) .paragraph {
+button:has(.hiraku-record-node) :is(.markdown, .paragraph) {
+  display: block;
+  width: 100%;
+  min-width: 0;
   margin: 0 !important;
   line-height: 1.4;
 }
 
 .hiraku-record-node {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  row-gap: 2px;
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 6px;
   min-width: 0;
 }
 
 .hiraku-record-node .record-title {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
   font: 500 13px/1.4 system-ui, sans-serif;
-  overflow-wrap: anywhere;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.hiraku-record-node .record-symbol {
-  flex-shrink: 0;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--primary-color, #5561a6);
-  opacity: 0.55;
-  align-self: center;
-}
-
-.hiraku-record-node .record-id {
-  font: 10px/1.4 ui-monospace, monospace;
-  opacity: 0.65;
-  overflow-wrap: anywhere;
-}
-
-.hiraku-record-node .record-badges { display: flex; flex-wrap: wrap; gap: 4px; }
-
-.hiraku-record-node .badge {
+.hiraku-record-node .record-type {
+  justify-self: end;
   font: 10px/1.6 system-ui, sans-serif;
   text-transform: uppercase;
   background: var(--hiraku-record-badge-background, #f1f3f2);

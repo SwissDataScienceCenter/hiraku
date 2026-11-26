@@ -1,3 +1,19 @@
+document.addEventListener("click", async (event) => {
+  const button = event.composedPath().find(
+    (node) => node instanceof HTMLButtonElement && node.hasAttribute("data-copy-record-id")
+  );
+  if (!button) return;
+
+  const status = button.nextElementSibling;
+  status.textContent = "";
+  try {
+    await navigator.clipboard.writeText(button.dataset.copyRecordId);
+    status.textContent = "Copied";
+  } catch {
+    status.textContent = "Could not copy";
+  }
+});
+
 /* Resize only the presentation layout; notebook state stays independent. */
 (() => {
   const layout = document.querySelector(".dashboard-layout");

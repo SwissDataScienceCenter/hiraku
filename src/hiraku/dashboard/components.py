@@ -28,6 +28,22 @@ from .data import (
 )
 
 
+def record_heading(record: Record) -> mo.Html:
+    """Render the record title and the ID for Studio's copy action."""
+    title = html.escape(record.title or record.id.rsplit("/", 1)[-1])
+    identifier = html.escape(record.id)
+    return mo.Html(
+        '<div class="record-detail-header">'
+        f'<h2 class="record-details-heading">{title}</h2>'
+        '<div class="record-detail-id">'
+        f'<button type="button" data-copy-record-id="{identifier}" '
+        'class="record-copy-button" aria-label="Copy record ID" '
+        f'title="Copy record ID"><code>{identifier}</code>'
+        '<span aria-hidden="true"></span></button>'
+        '<span class="record-copy-status" role="status"></span></div></div>'
+    )
+
+
 def markdown_view(
     record: Record | None,
     *,
@@ -35,13 +51,18 @@ def markdown_view(
     repository_url: str | None = None,
     runs: Sequence[Mapping[str, Any]] = (),
     open_run_id: str | None = None,
+    show_id: bool = True,
 ) -> mo.Html:
     """Render a Record's front matter and Markdown body."""
     if record is None:
         return mo.md("No record selected.")
     body = mo.md(record.markdown if record.markdown.strip() else empty_message)
     metadata = record_summary(
-        record, repository_url=repository_url, runs=runs, open_run_id=open_run_id
+        record,
+        repository_url=repository_url,
+        runs=runs,
+        open_run_id=open_run_id,
+        show_id=show_id,
     )
     return mo.vstack(
         [metadata, mo.Html(f'<div class="record-markdown">{body.text}</div>')]
@@ -54,12 +75,13 @@ def record_summary(
     repository_url: str | None = None,
     runs: Sequence[Mapping[str, Any]] = (),
     open_run_id: str | None = None,
+    show_id: bool = True,
 ) -> mo.Html:
     """Render local metadata and expandable details for supplied runs."""
     rows = []
     values = {"id": record.id, **record.metadata}
     for field in (
-        "id",
+        *(("id",) if show_id else ()),
         "state",
         "summary",
         "description",
@@ -98,28 +120,24 @@ def record_summary(
         )
     expanded = " open" if any_open else ""
     raw = html.escape(dump_yaml(record.metadata))
+    raw_label = "Raw frontmatter"
+    if show_id:
+        raw_label += f" · {html.escape(record.id)}"
     return mo.Html(
         f'<dl class="record-metadata">{"".join(rows)}</dl>'
         f'<details class="record-runs"{expanded}><summary>Runs ({len(items)})</summary>'
         f"<ul>{''.join(items)}</ul></details>"
-        '<details class="record-raw"><summary>Raw frontmatter · '
-        f"{html.escape(record.id)}</summary><pre>{raw}</pre></details>"
+        f'<details class="record-raw"><summary>{raw_label}</summary>'
+        f"<pre>{raw}</pre></details>"
     )
 
 
 def _record_label(record: Record) -> str:
     title = html.escape(record.title or record.id.rsplit("/", 1)[-1])
-    badges = " ".join(
-        f'<span class="badge">{html.escape(value)}</span>'
-        for value in (record.type, record.state)
-        if value
-    )
     return (
         '<span class="hiraku-record-node">'
-        '<span class="record-title">'
-        f'<span class="record-symbol" aria-hidden="true"></span>{title}</span>'
-        f'<span class="record-id">{html.escape(record.id)}</span>'
-        f'<span class="record-badges">{badges}</span></span>'
+        f'<span class="record-title" title="{title}">{title}</span>'
+        f'<span class="record-type">{html.escape(record.type)}</span></span>'
     )
 
 

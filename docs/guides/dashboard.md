@@ -146,8 +146,9 @@ parameters are discovered automatically.
 
 **Record navigation**
 :   Choose the **Files** (default) or **Lineage** tab in the left sidebar.
-    Records show their title above a smaller bundle-relative ID, with type and
-    state badges. Untitled records use the filename stem as their title.
+    Each record row shows its title and type on one line. Untitled records use
+    the filename stem. The Record card header shows the title and full
+    bundle-relative ID with a **Copy** button.
     The view tabs sit beside the Records heading, aligned right. Files and Lineage share
     row styling and indentation; folder names use disclosure chevrons without
     icons or trailing slashes.
@@ -158,7 +159,6 @@ parameters are discovered automatically.
     Switching views preserves record selection and run scope. Both share the
     Type/State filter chips; lineage retains ancestors of matches, dimming
     ancestors that do not themselves match. Missing parents and cycles are tolerated.
-    The filesystem tree has type and state badges.
     Directories follow bundle-relative record paths, independently of lineage.
     Expand or collapse directories, and toggle type and state filter chips. Values within
     one filter are combined with OR; the two filters are combined with AND.

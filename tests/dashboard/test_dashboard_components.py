@@ -108,17 +108,19 @@ def test_run_table_accepts_an_empty_project() -> None:
 
 
 @pytest.mark.parametrize("renderer", [hc.filesystem_tree, hc.record_tree])
-def test_record_navigation_displays_title_and_secondary_id(renderer):
+def test_record_navigation_displays_title_and_type(renderer):
+    record = Record(id="folder/record", title="Friendly title", type="note")
     tree, buttons = renderer(
-        [Record(id="folder/record", title="Friendly title", type="note")],
+        [record],
         "folder/record",
         lambda _: None,
     )
     assert "Friendly title" in tree.text
-    assert "folder/record" in tree.text
+    assert "folder/record" not in tree.text
     assert "record-title" in tree.text
-    assert "record-id" in tree.text
+    assert "record-type" in tree.text
     assert set(buttons) == {"folder/record"}
+    assert "<dt>id</dt><dd>folder/record</dd>" in hc.markdown_view(record).text
 
 
 def test_record_summary_links_and_collapsible_metadata():
@@ -190,7 +192,7 @@ def test_filesystem_tree_ignores_lineage_and_preserves_path_selection():
     tree, buttons = hc.filesystem_tree(records, "notes/child", selections.append)
     assert set(buttons) == {"notes/child", "other", "notes"}
     assert 'record-folder-name">notes</span>' in tree.text
-    assert "notes/child" in tree.text
+    assert "child" in buttons["notes/child"].text
     assert 'aria-current="true"' in tree.text
     buttons["notes/child"]._update(1)
     assert selections == ["notes/child"]
@@ -245,7 +247,7 @@ def test_record_tree_hierarchy_selection_and_callbacks() -> None:
     assert tree.text.count("<ul>") == 2
     assert tree.text.count('aria-current="true"') == 1
     assert "hypothesis" in tree.text
-    assert "drafted" in tree.text
+    assert "drafted" not in tree.text
     assert "deferred" not in tree.text
     assert "<style>" not in tree.text
     assert "justify-content" not in tree.text

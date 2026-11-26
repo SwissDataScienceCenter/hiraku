@@ -39,6 +39,49 @@
 .dashboard-layout.resizing { user-select: none; cursor: col-resize; }
 .record-navigation { position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow: auto; }
 .record-details { margin-top: 1.5rem; }
+.record-detail-header,
+.record-detail-id { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+.record-detail-header .record-details-heading { margin: 0; overflow-wrap: anywhere; }
+.record-detail-id { margin-inline-start: auto; justify-content: flex-end; }
+.record-detail-id code { overflow-wrap: anywhere; }
+.record-detail-id .record-copy-button {
+  all: revert;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 26px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.record-detail-id .record-copy-button:active {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+.record-copy-button span { position: relative; flex: 0 0 14px; height: 14px; }
+.record-copy-button span::before,
+.record-copy-button span::after {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  content: "";
+}
+.record-copy-button span::before { top: 0; left: 0; }
+.record-copy-button span::after { right: 0; bottom: 0; background: var(--card); }
+.record-copy-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 @media (max-width: 900px) {
   .dashboard-layout { grid-template-columns: minmax(0, 1fr); }
   .dashboard-divider { display: none; }

@@ -46,7 +46,9 @@ def test_app_runs_every_cell_against_a_project(
     outputs, definitions = app.run()
 
     rendered = "\n".join(getattr(output, "text", "") for output in outputs)
-    assert "Record</h2>" in rendered
+    assert '<h2 class="record-details-heading">a</h2>' in rendered
+    assert 'data-copy-record-id="root/a/a"' in rendered
+    assert "<dt>id</dt>" not in rendered
     assert '<details class="record-runs">' in rendered
     assert '<span class="leaderboard-run-count">6 runs</span>' in rendered
     assert 'aria-label="Leaderboard filters"' in rendered
