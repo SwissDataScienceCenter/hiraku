@@ -27,11 +27,6 @@
         </div>
         <marimo-cell name="refresh_control"></marimo-cell>
       </header>
-      <nav class="workspace-tabs" role="tablist" aria-label="Dashboard views">
-        <button type="button" role="tab" id="experiment-tab" aria-controls="experiment-panel" aria-selected="true">Experiment Workspace</button>
-        <button type="button" role="tab" id="workflows-tab" aria-controls="workflows-panel" aria-selected="false" tabindex="-1">Workflows</button>
-      </nav>
-      <section id="experiment-panel" role="tabpanel" aria-labelledby="experiment-tab">
       <h1>Inspect runs</h1>
       <p class="intro">Explore records, select a run, and review its provenance and metric history.</p>
       <div class="dashboard-layout">
@@ -66,13 +61,6 @@
       </div>
       </div>
       </div>
-      </section>
-      <section id="workflows-panel" role="tabpanel" aria-labelledby="workflows-tab" hidden>
-        <div class="card">
-          <marimo-cell name="workflow_selection"></marimo-cell>
-          <marimo-cell name="workflow_details"></marimo-cell>
-        </div>
-      </section>
       <footer class="hk-footer">
         <img src="assets/sdsc-logo-white.svg" alt="Swiss Data Science Center">
         <p class="hk-footer-label">Swiss Data Science Center</p>

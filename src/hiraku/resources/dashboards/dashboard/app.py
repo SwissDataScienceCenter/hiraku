@@ -22,14 +22,12 @@ with app.setup:
     import os
     from pathlib import Path
 
-    import frontmatter
     import marimo as mo
 
     from hiraku.dashboard import components as hc
     from hiraku.dashboard import data as hd
     from hiraku.project import Project
     from hiraku.tracking import Leaderboard
-    from hiraku.workflows.langgraph import workflow_ids, workflow_mermaid
 
 
 @app.cell
@@ -260,36 +258,6 @@ def tradeoff_plot(paths, runs_df, scope, x_metric, x_objective, y_metric, y_obje
     mo.vstack(
         [mo.hstack([x_metric, x_objective, y_metric, y_objective], wrap=True), _content]
     )
-    return
-
-
-@app.cell
-def workflow_selection(project_context, refresh):
-    _refreshes = refresh.value
-    _ids = workflow_ids(project=project_context)
-    workflow_picker = mo.ui.dropdown(
-        _ids, value=_ids[0] if _ids else None, label="Workflow"
-    )
-    workflow_picker if _ids else mo.md("No workflows found.")
-    return (workflow_picker,)
-
-
-@app.cell
-def workflow_details(project_context, workflow_picker):
-    _id = workflow_picker.value
-    if _id is None:
-        _view = mo.md("Select a workflow to view its documentation and diagram.")
-    else:
-        _path = project_context.workflows_dir / _id / "workflow.md"
-        _notes = mo.md(
-            frontmatter.load(_path).content if _path.is_file() else "No documentation."
-        )
-        try:
-            _diagram = mo.mermaid(workflow_mermaid(_id, project=project_context))
-        except Exception as _error:
-            _diagram = mo.callout(mo.plain_text(str(_error)), kind="warn")
-        _view = mo.vstack([mo.accordion({"Workflow diagram": _diagram}), _notes])
-    mo.vstack([_view])
     return
 
 

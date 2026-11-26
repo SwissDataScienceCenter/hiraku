@@ -84,9 +84,10 @@ def test_bundled_views_place_all_interactive_cells() -> None:
         "run_details",
         "performance_plot",
         "tradeoff_plot",
-        "workflow_selection",
-        "workflow_details",
     }
+    assert 'role="tablist"' not in view
+    assert "workflow_selection" not in named
+    assert "workflow_details" not in named
     assert {
         "data_setup",
         "project_data",

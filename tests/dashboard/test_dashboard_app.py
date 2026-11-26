@@ -94,28 +94,6 @@ def test_record_details_follow_selection_without_changing_subtree_semantics(
     assert f"type: {definitions['selected_record'].type}" in rendered
 
 
-def test_workflow_browser_shows_documentation_and_handles_diagram_error(
-    project, monkeypatch
-):
-    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
-    folder = project.workflows_dir / "example"
-    folder.mkdir(parents=True)
-    (folder / "workflow.py").write_text("# No graph factory yet\n")
-    (folder / "workflow.md").write_text(
-        "---\ndescription: Example\n---\n# Workflow notes\nUseful documentation.\n"
-    )
-    from hiraku.resources.dashboards.dashboard.app import app
-
-    _, initial = app.run()
-    initial["workflow_picker"]._update(["example"])
-    outputs, definitions = app.run(defs={"workflow_picker": initial["workflow_picker"]})
-    assert definitions["workflow_picker"].value == "example"
-    rendered = "\n".join(getattr(output, "text", "") for output in outputs)
-    assert "Useful documentation" in rendered
-    assert "description: Example" not in rendered
-    assert "Workflow diagram" in rendered
-
-
 def test_navigation_filter_toggles_preserve_selection(project, monkeypatch):
     record = project.vault.load("root/a/a")
     record.type = "note"

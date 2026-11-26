@@ -131,11 +131,6 @@ come from the leaderboard; parameters are discovered automatically.
 
 ## Sections
 
-The main tabs switch between **Experiment Workspace** and **Workflows**.
-Workflows lists local LangGraph workflows and displays their Markdown documentation
-and an expandable diagram. Diagram errors stay within that panel. Browsing does
-not start a workflow; producing a diagram imports the workflow's Python module.
-
 **Record navigation**
 :   Choose the **Files** (default) or **Lineage** tab in the left sidebar.
     Records show their title above a smaller bundle-relative ID, with type and
