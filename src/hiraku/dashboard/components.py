@@ -19,7 +19,6 @@ import pandas as pd
 from ..io import dump_yaml
 from ..record import Record
 from .data import (
-    filter_leaderboard_runs,
     lineage_records,
     plot_frame,
     run_text,
@@ -184,6 +183,25 @@ def record_tree(
     )
 
 
+def _filter_chip(
+    label: str,
+    active: bool,
+    on_toggle: Callable[[], Any],
+    *,
+    disabled: bool = False,
+    tooltip: str | None = None,
+) -> mo.ui.button:
+    return mo.ui.button(
+        label=(
+            f'<span class="record-filter-chip{" active" if active else ""}">'
+            f"{'✓ ' if active else ''}{html.escape(label)}</span>"
+        ),
+        disabled=disabled,
+        tooltip=tooltip,
+        on_click=lambda _: on_toggle(),
+    )
+
+
 def record_filters(
     records: Sequence[Record],
     on_toggle: Callable[[str, str], Any],
@@ -204,14 +222,11 @@ def record_filters(
             {getattr(record, field) for record in records if getattr(record, field)}
         ):
             active = value in selected
-            label = html.escape(value)
-            button = mo.ui.button(
-                label=(
-                    f'<span class="record-filter-chip{" active" if active else ""}">'
-                    f"{'✓ ' if active else ''}{label}</span>"
-                ),
+            button = _filter_chip(
+                value,
+                active,
+                lambda field=field, value=value: on_toggle(field, value),
                 tooltip=f"{'Remove' if active else 'Add'} {field} filter: {value}",
-                on_click=lambda _, field=field, value=value: on_toggle(field, value),
             )
             buttons[field, value] = button
             chips.append(button.text)
@@ -225,63 +240,35 @@ def record_filters(
     return mo.Html(f'<div class="record-filters">{"".join(groups)}</div>'), buttons
 
 
-class LeaderboardFilters:
-    """Session-local chips shared by the leaderboard plot and table."""
-
-    def __init__(self, on_change: Callable[[], None]) -> None:
-        self._active: set[str] = set()
-        self._on_change = on_change
-        self.buttons: dict[str, mo.ui.button] = {}
-
-    def _toggle(self, name: str) -> None:
-        self._active ^= {name}
-        self._on_change()
-
-    def clear_record_filters(self) -> None:
-        """Clear the record scopes while retaining the unattributed toggle."""
-        if "record" in self._active:
-            self._active.remove("record")
-            self._on_change()
-
-    def render(self, record_id: str | None, run_count: int) -> mo.Html:
-        """Render the filter row and retain the live buttons."""
-        self.buttons = {}
-        for name, label in (
-            ("record", "Selected record"),
-            ("unattributed", "Include unattributed"),
-        ):
-            disabled = record_id is None and name != "unattributed"
-            active = name in self._active and not disabled
-            self.buttons[name] = mo.ui.button(
-                label=(
-                    f'<span class="record-filter-chip{" active" if active else ""}">'
-                    f"{'✓ ' if active else ''}{label}</span>"
-                ),
-                disabled=disabled,
-                on_click=lambda _, name=name: self._toggle(name),
-            )
-        return mo.Html(
-            '<div class="record-filter-group leaderboard-filters" role="group" '
-            'aria-label="Leaderboard filters">'
-            '<span class="record-filter-label">Filter</span>'
-            + "".join(button.text for button in self.buttons.values())
-            + f'<span class="leaderboard-run-count">{run_count:,} '
-            + ("run" if run_count == 1 else "runs")
-            + "</span></div>"
+def leaderboard_filters(
+    active: frozenset[str],
+    has_record: bool,
+    run_count: int,
+    on_toggle: Callable[[str], Any],
+) -> tuple[mo.Html, dict[str, mo.ui.button]]:
+    """Render leaderboard filter chips and the filtered run count."""
+    buttons = {}
+    for name, label in (
+        ("record", "Selected record"),
+        ("unattributed", "Include unattributed"),
+    ):
+        disabled = not has_record and name == "record"
+        enabled = name in active and not disabled
+        buttons[name] = _filter_chip(
+            label,
+            enabled,
+            lambda name=name: on_toggle(name),
+            disabled=disabled,
         )
-
-    def apply(
-        self, runs: pd.DataFrame, records: Sequence[Record], record_id: str | None
-    ) -> pd.DataFrame:
-        """Return the runs matching the active filters."""
-        scope = record_id if "record" in self._active else None
-        include_unattributed = "unattributed" in self._active
-        return filter_leaderboard_runs(
-            runs,
-            records,
-            scope,
-            include_unattributed=include_unattributed,
-        )
+    count_label = "run" if run_count == 1 else "runs"
+    return mo.Html(
+        '<div class="record-filter-group leaderboard-filters" role="group" '
+        'aria-label="Leaderboard filters">'
+        '<span class="record-filter-label">Filter</span>'
+        + "".join(button.text for button in buttons.values())
+        + f'<span class="leaderboard-run-count">{run_count:,} {count_label}</span>'
+        + "</div>"
+    ), buttons
 
 
 def filesystem_tree(
@@ -361,67 +348,52 @@ def filesystem_tree(
     )
 
 
-class RecordNavigation:
-    """Session-local navigation controls delegating to the independent renderers.
+def lineage_tree(
+    records: Sequence[Record],
+    selected_id: str | None,
+    on_select: Callable[[str], Any],
+    *,
+    types: Sequence[str] = (),
+    states: Sequence[str] = (),
+) -> tuple[mo.Html, dict[str, mo.ui.button]]:
+    """Render matching records and their ancestors in lineage order."""
+    return record_tree(
+        lineage_records(records, types=types, states=states),
+        selected_id,
+        on_select,
+        matching_ids={
+            record.id
+            for record in records
+            if (not types or record.type in types)
+            and (not states or record.state in states)
+        },
+    )
 
-    Create once, then render in a separate cell. Connect ``on_change`` to a
-    Marimo state setter and read its getter in the display cell.
-    Selection and data loading remain with the caller.
-    """
 
-    def __init__(self, on_change: Callable[[], None] = lambda: None) -> None:
-        self.mode = "Files"
-        self.filters: dict[str, set[str]] = {"type": set(), "state": set()}
-        self._on_change = on_change
-        self.mode_control: mo.ui.tabs | None = None
-        self.record_buttons: dict[str, mo.ui.button] = {}
-        self.filter_buttons: dict[tuple[str, str], mo.ui.button] = {}
-
-    def _set_mode(self, value: str) -> None:
-        self.mode = value
-        self._on_change()
-
-    def _toggle_filter(self, field: str, value: str) -> None:
-        self.filters[field] ^= {value}
-        self._on_change()
-
-    def render(
-        self,
-        records: Sequence[Record],
-        *,
-        selected_id: str | None,
-        on_select: Callable[[str], Any],
-    ) -> mo.Html:
-        """Render the header, filters, and active tree, retaining live widgets."""
-        types = sorted(self.filters["type"])
-        states = sorted(self.filters["state"])
-        self.mode_control = mo.ui.tabs(
-            {"Files": "", "Lineage": ""}, value=self.mode, on_change=self._set_mode
-        )
-        filters, self.filter_buttons = record_filters(
-            records, self._toggle_filter, types=types, states=states
-        )
-        if self.mode == "Lineage":
-            navigation, self.record_buttons = record_tree(
-                lineage_records(records, types=types, states=states),
-                selected_id,
-                on_select,
-                matching_ids={
-                    record.id
-                    for record in records
-                    if (not types or record.type in types)
-                    and (not states or record.state in states)
-                },
-            )
-        else:
-            navigation, self.record_buttons = filesystem_tree(
-                records, selected_id, on_select, types=types, states=states
-            )
-        header = mo.Html(
-            '<div class="record-navigation-header"><h2>Records</h2>'
-            f'<div class="record-navigation-mode">{self.mode_control.text}</div></div>'
-        )
-        return mo.vstack([header, filters, navigation])
+def plot_axes(
+    metrics: Sequence[str],
+    x_metric: str | None,
+    y_metric: str | None,
+    set_axes: Callable[..., None],
+) -> tuple[mo.ui.dropdown, mo.ui.dropdown]:
+    """Build axis selectors with callbacks into the caller's axis state."""
+    run_order = "Run order"
+    while run_order in metrics:
+        run_order += " (execution)"
+    return (
+        mo.ui.dropdown(
+            {run_order: None, **{name: name for name in metrics}},
+            value=x_metric or run_order,
+            label="X axis",
+            on_change=lambda value: set_axes(lambda axes: (value, axes[1])),
+        ),
+        mo.ui.dropdown(
+            metrics,
+            value=y_metric,
+            label="Y axis",
+            on_change=lambda value: set_axes(lambda axes: (axes[0], value)),
+        ),
+    )
 
 
 def run_table(
@@ -499,130 +471,87 @@ def run_details(
 def performance_plot(
     runs_df: pd.DataFrame,
     *,
-    metric: str | None,
-    selected_run: Mapping[str, Any] | None = None,
+    x_metric: str | None = None,
+    y_metric: str | None,
+    directions: Mapping[str, str | None] | None = None,
     selected_record_id: str | None = None,
     selected_run_id: str | None = None,
     on_run_select: Callable[[str], Any] | None = None,
 ) -> mo.Html:
-    """Plot one metric over execution order for an already scoped run table."""
-    _points, _ = plot_frame(runs_df, metric)
-    if _points.empty:
-        _chart = mo.md("No runs to plot.")
-    else:
-        _base = alt.Chart().encode(
-            x=alt.X(
-                "number:Q",
-                title="Run number (execution order)",
-                axis=alt.Axis(format="d", tickMinStep=1),
-                scale=alt.Scale(nice=False, padding=16),
-            ),
-            y=alt.Y("value:Q", title=metric, scale=alt.Scale(zero=False)),
+    """Plot a metric against execution order or another metric."""
+    if y_metric is None:
+        return mo.md("No numeric metrics are available to plot.")
+    if x_metric == y_metric:
+        return mo.callout("Choose two different metrics.", kind="info")
+
+    tooltip = [
+        alt.Tooltip("run:N", title="Run"),
+        alt.Tooltip("record:N", title="Record"),
+    ]
+    if x_metric is None:
+        points, _ = plot_frame(runs_df, y_metric)
+        x = alt.X(
+            "number:Q",
+            title="Run number (execution order)",
+            axis=alt.Axis(format="d", tickMinStep=1),
+            scale=alt.Scale(nice=False, padding=16),
         )
-        _line = _base.mark_line(strokeWidth=2, opacity=0.3)
-        if selected_record_id is None and selected_run is not None:
-            _selected = _points.loc[_points["run"] == selected_run["run"], "record"]
-            if not _selected.empty:
-                selected_record_id = _selected.iloc[0]
-        _cursor = "pointer" if on_run_select is not None else alt.Undefined
-        if selected_run_id is None and selected_run is not None:
-            selected_run_id = selected_run["run"]
-        _is_selected = alt.datum.run == selected_run_id
-        _dots = _base.mark_point(
-            filled=True, opacity=1, cursor=_cursor, stroke="#243449"
-        ).encode(
-            color=_run_color(selected_record_id),
-            size=alt.condition(_is_selected, alt.value(220), alt.value(90)),
-            strokeWidth=alt.condition(_is_selected, alt.value(1.5), alt.value(0)),
-            tooltip=[
-                alt.Tooltip("number:Q", title="Run #"),
-                alt.Tooltip("run:N", title="Run"),
-                alt.Tooltip("record:N", title="Record"),
+        y = alt.Y("value:Q", title=y_metric, scale=alt.Scale(zero=False))
+        tooltip.extend(
+            [
                 alt.Tooltip("started:N", title="Started"),
                 alt.Tooltip("duration:N", title="Duration"),
-                alt.Tooltip("value:Q", title=metric, format=".4g"),
-            ],
+                alt.Tooltip("value:Q", title=y_metric, format=".4g"),
+            ]
         )
-        if on_run_select is not None:
-            _dots = _dots.add_params(_run_selection())
-        _spec = (
-            alt.layer(_line, _dots, data=_points)
-            .properties(width="container", height=340)
-            .configure(background="transparent")
-            .configure_view(stroke=None)
-        )
-        _chart = _interactive_run_chart(_spec, on_run_select)
-    return mo.vstack([_chart])
-
-
-def tradeoff_plot(
-    runs_df: pd.DataFrame,
-    *,
-    x_metric: str | None,
-    y_metric: str | None,
-    x_objective: str = "minimize",
-    y_objective: str = "minimize",
-    selected_record_id: str | None = None,
-    selected_run_id: str | None = None,
-    on_run_select: Callable[[str], Any] | None = None,
-) -> mo.Html:
-    """Plot two metrics for the supplied runs."""
-    if not x_metric or not y_metric:
-        _comparison = mo.md("No numeric metrics are available to compare.")
-    elif x_metric == y_metric:
-        _comparison = mo.callout("Choose two different metrics.", kind="info")
     else:
-        _points = tradeoff_frame(runs_df, x_metric, y_metric)
-        if _points.empty:
-            _comparison = mo.callout(
-                "No runs have numeric values for both metrics.",
-                kind="info",
-            )
-        else:
-            _base = alt.Chart(_points).encode(
-                x=alt.X(
-                    "x:Q",
-                    title=f"{x_metric} ({x_objective})",
-                    scale=alt.Scale(zero=False),
-                ),
-                y=alt.Y(
-                    "y:Q",
-                    title=f"{y_metric} ({y_objective})",
-                    scale=alt.Scale(zero=False),
-                ),
-                color=_run_color(selected_record_id),
-                tooltip=[
-                    alt.Tooltip("run:N", title="Run"),
-                    alt.Tooltip("record:N", title="Record"),
-                    alt.Tooltip("x:Q", title=x_metric, format=".4g"),
-                    alt.Tooltip("y:Q", title=y_metric, format=".4g"),
-                ],
-            )
-            _spec = (
-                _base.mark_circle(
-                    filled=True,
-                    opacity=1,
-                    stroke="#243449",
-                    cursor="pointer" if on_run_select is not None else alt.Undefined,
-                )
-                .encode(
-                    size=alt.condition(
-                        alt.datum.run == selected_run_id, alt.value(340), alt.value(100)
-                    ),
-                    strokeWidth=alt.condition(
-                        alt.datum.run == selected_run_id, alt.value(1.5), alt.value(0)
-                    ),
-                )
-                .properties(width="container", height=420)
-                .interactive(name="pan_zoom")
-                .configure(background="transparent")
-                .configure_view(stroke=None)
-            )
-            if on_run_select is not None:
-                _spec = _spec.add_params(_run_selection())
-            _chart = _interactive_run_chart(_spec, on_run_select)
-            _comparison = mo.vstack([_chart])
-    return _comparison
+        points = tradeoff_frame(runs_df, x_metric, y_metric)
+        directions = directions or {}
+        x = alt.X(
+            "x:Q",
+            title=f"{x_metric} ({directions.get(x_metric) or 'minimize'})",
+            scale=alt.Scale(zero=False),
+        )
+        y = alt.Y(
+            "y:Q",
+            title=f"{y_metric} ({directions.get(y_metric) or 'minimize'})",
+            scale=alt.Scale(zero=False),
+        )
+        tooltip.extend(
+            [
+                alt.Tooltip("x:Q", title=x_metric, format=".4g"),
+                alt.Tooltip("y:Q", title=y_metric, format=".4g"),
+            ]
+        )
+    if points.empty:
+        return mo.md("No runs to plot.")
+
+    base = alt.Chart().encode(x=x, y=y)
+    is_selected = alt.datum.run == selected_run_id
+    dots = base.mark_circle(
+        filled=True,
+        opacity=1,
+        stroke="#243449",
+        cursor="pointer" if on_run_select is not None else alt.Undefined,
+    ).encode(
+        color=_run_color(selected_record_id),
+        size=alt.condition(is_selected, alt.value(220), alt.value(90)),
+        strokeWidth=alt.condition(is_selected, alt.value(1.5), alt.value(0)),
+        tooltip=tooltip,
+    )
+    if on_run_select is not None:
+        dots = dots.add_params(_run_selection())
+    if x_metric is None:
+        line = base.mark_line(strokeWidth=2, opacity=0.3)
+        chart = alt.layer(line, dots, data=points)
+    else:
+        chart = dots.properties(data=points).interactive(name="pan_zoom")
+    chart = (
+        chart.properties(width="container", height=340)
+        .configure(background="transparent")
+        .configure_view(stroke=None)
+    )
+    return mo.vstack([_interactive_run_chart(chart, on_run_select)])
 
 
 def _run_color(record_id: str | None):

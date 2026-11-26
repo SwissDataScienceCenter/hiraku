@@ -8,6 +8,34 @@ pytest.importorskip("marimo")
 pytest.importorskip("altair")
 
 
+def _rerun(app, previous):
+    # Preserve the session while executing view cells against updated state.
+    names = (
+        "project_context",
+        "repository_url",
+        "leaderboard_names",
+        "get_source",
+        "set_source",
+        "get_selection",
+        "select_key",
+        "select_record",
+        "select_run",
+        "get_run_filters",
+        "toggle_run_filter",
+        "get_record_filters",
+        "toggle_record_filter",
+        "get_leaderboard_mode",
+        "set_leaderboard_mode",
+        "get_record_mode",
+        "set_record_mode",
+        "get_axes",
+        "set_axes",
+        "get_show_records",
+        "set_show_records",
+    )
+    return app.run(defs={name: previous[name] for name in names})
+
+
 def test_app_runs_every_cell_against_a_project(
     project: Project, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -66,19 +94,7 @@ def test_leaderboard_axes_switch_to_tradeoffs(project, monkeypatch):
 
     _, initial = app.run()
     initial["x_axis"]._update(["accuracy"])
-    _, updated = app.run(
-        defs={
-            name: initial[name]
-            for name in (
-                "get_selection",
-                "metrics",
-                "select_key",
-                "tree_metric",
-                "x_axis",
-                "y_axis",
-            )
-        }
-    )
+    _, updated = _rerun(app, initial)
 
     rendered = updated["plot_view"].text
     assert "accuracy (maximize)" in rendered
@@ -103,9 +119,9 @@ def test_leaderboard_table_shows_runs_across_records(project, monkeypatch):
         assert initial[name].text in header
     mode = initial["leaderboard_mode"]
     mode._update("1")
-    outputs, definitions = app.run(defs={"leaderboard_mode": mode})
+    outputs, definitions = _rerun(app, initial)
 
-    assert mode.value == "Table"
+    assert definitions["leaderboard_mode"].value == "Table"
     table = definitions["tree"]
     rendered = [getattr(output, "text", "") for output in outputs]
     table_view = next(output for output in rendered if table.text in output)
@@ -116,25 +132,15 @@ def test_leaderboard_table_shows_runs_across_records(project, monkeypatch):
 
     assert "Show records" in table_view
     definitions["include_records"]._update(True)
-    _, interleaved = app.run(defs={"include_records": definitions["include_records"]})
+    _, interleaved = _rerun(app, definitions)
     keys = [row["key"] for row in interleaved["tree"].data]
     assert keys.index("record:root/a/a") + 1 == keys.index("run:r0")
     definitions["include_records"]._update(False)
 
-    buttons = definitions["run_filters"].buttons
+    buttons = definitions["run_filter_buttons"]
     assert set(buttons) == {"record", "unattributed"}
     buttons["record"]._update(1)
-    outputs, filtered = app.run(
-        defs={
-            name: definitions[name]
-            for name in (
-                "leaderboard_mode",
-                "get_filter_revision",
-                "run_filters",
-                "include_records",
-            )
-        }
-    )
+    outputs, filtered = _rerun(app, definitions)
     assert [row["key"] for row in filtered["tree"].data] == [
         "run:r0",
         "run:r2",
@@ -143,9 +149,8 @@ def test_leaderboard_table_shows_runs_across_records(project, monkeypatch):
     rendered = "\n".join(getattr(output, "text", "") for output in outputs)
     assert '<span class="leaderboard-run-count">3 runs</span>' in rendered
     filtered["select_key"](None)
-    cleared = filtered["run_filters"].apply(
-        filtered["all_runs_df"], filtered["records"], "root/a/a"
-    )
+    _, cleared = _rerun(app, filtered)
+    cleared = cleared["leaderboard_runs"]
     assert [f"run:{run}" for run in cleared["run"]] == run_keys
 
 
@@ -173,19 +178,7 @@ def test_clicking_plot_point_selects_run_and_record(project, monkeypatch):
     assert "field" not in color
     chart._update({"picked_run": {"run": ["r1"]}})
     assert initial["get_selection"]() == "run:r1"
-    app.run(
-        defs={
-            name: initial[name]
-            for name in (
-                "get_selection",
-                "metrics",
-                "select_key",
-                "tree_metric",
-                "x_axis",
-                "y_axis",
-            )
-        }
-    )
+    _rerun(app, initial)
     size = charts[-1]._spec["layer"][1]["encoding"]["size"]
     assert size["condition"]["test"] == "(datum.run === 'r1')"
     assert size["condition"]["value"] > size["value"]
@@ -212,25 +205,12 @@ def test_record_details_follow_selection(
     _, initial = app.run()
     if key.startswith("record:"):
         initial["include_records"]._update(True)
-        _, initial = app.run(defs={"include_records": initial["include_records"]})
+        _, initial = _rerun(app, initial)
     rows = initial["tree"].data
     index = next(index for index, row in enumerate(rows) if row["key"] == key)
     initial["tree"]._update([str(index)])
     assert initial["get_selection"]() == key
-    outputs, definitions = app.run(
-        defs={
-            name: initial[name]
-            for name in (
-                "get_selection",
-                "metrics",
-                "select_key",
-                "tree_metric",
-                "x_axis",
-                "y_axis",
-                "include_records",
-            )
-        }
-    )
+    outputs, definitions = _rerun(app, initial)
 
     assert definitions["selected_record"].id == record_id
     assert definitions["tree"].value[0]["key"] == key
@@ -255,25 +235,15 @@ def test_navigation_filter_toggles_preserve_selection(project, monkeypatch):
     from hiraku.resources.dashboards.dashboard.app import app
 
     _, initial = app.run()
-    initial["navigation"].filter_buttons["type", "task"]._update(1)
-    names = (
-        "get_selection",
-        "metrics",
-        "select_key",
-        "tree_metric",
-        "x_axis",
-        "y_axis",
-        "get_navigation_revision",
-        "navigation",
-    )
-    _, filtered = app.run(defs={name: initial[name] for name in names})
-    assert record.id not in filtered["navigation"].record_buttons
+    initial["record_filter_buttons"]["type", "task"]._update(1)
+    _, filtered = _rerun(app, initial)
+    assert record.id not in filtered["file_buttons"]
     assert filtered["selected_record"].id == record.id
-    assert filtered["navigation"].filters["type"] == {"task"}
-    filtered["navigation"].filter_buttons["type", "task"]._update(1)
-    _, cleared = app.run(defs={name: filtered[name] for name in names})
-    assert record.id in cleared["navigation"].record_buttons
-    assert cleared["navigation"].filters["type"] == set()
+    assert filtered["record_types"] == ["task"]
+    filtered["record_filter_buttons"]["type", "task"]._update(1)
+    _, cleared = _rerun(app, filtered)
+    assert record.id in cleared["file_buttons"]
+    assert cleared["record_types"] == []
 
 
 def test_navigation_mode_preserves_record_and_scope(project, monkeypatch):
@@ -282,21 +252,11 @@ def test_navigation_mode_preserves_record_and_scope(project, monkeypatch):
     from hiraku.resources.dashboards.dashboard.app import app
 
     _, initial = app.run()
-    initial["navigation"].mode_control._update("1")
-    names = (
-        "get_selection",
-        "metrics",
-        "select_key",
-        "tree_metric",
-        "x_axis",
-        "y_axis",
-        "get_navigation_revision",
-        "navigation",
-    )
-    _, lineage = app.run(defs={name: initial[name] for name in names})
+    initial["record_mode"]._update("1")
+    _, lineage = _rerun(app, initial)
     assert lineage["selected_record"].id == initial["selected_record"].id
-    assert lineage["navigation"].mode == "Lineage"
-    assert set(lineage["navigation"].record_buttons) == {
+    assert lineage["record_mode"].value == "Lineage"
+    assert set(lineage["lineage_buttons"]) == {
         record.id for record in initial["records"]
     }
 
@@ -310,22 +270,9 @@ def test_navigation_selection_updates_table_and_clears_run(
     _, initial = app.run()
     initial["include_records"]._update(True)
     initial["select_key"]("run:r1")
-    initial["navigation"].record_buttons["root/a/a"]._update(1)
+    initial["file_buttons"]["root/a/a"]._update(1)
     assert initial["get_selection"]() == "record:root/a/a"
-    _, definitions = app.run(
-        defs={
-            name: initial[name]
-            for name in (
-                "get_selection",
-                "metrics",
-                "select_key",
-                "tree_metric",
-                "x_axis",
-                "y_axis",
-                "include_records",
-            )
-        }
-    )
+    _, definitions = _rerun(app, initial)
     assert definitions["tree"].value[0]["key"] == "record:root/a/a"
     assert definitions["selected_record"].id == "root/a/a"
     assert definitions["selected_run"] is None
@@ -370,30 +317,14 @@ def test_dashboard_plots_a_leaderboard_without_records(tmp_path, monkeypatch):
     assert definitions["y_axis"].value == "missing"
     assert definitions["runs_df"].empty
     assert definitions["leaderboard_runs"].empty
-    definitions["run_filters"].buttons["unattributed"]._update(1)
-    outputs, definitions = app.run(
-        defs={
-            name: definitions[name] for name in ("get_filter_revision", "run_filters")
-        }
-    )
+    definitions["run_filter_buttons"]["unattributed"]._update(1)
+    outputs, definitions = _rerun(app, definitions)
     assert [row["key"] for row in definitions["tree"].data] == ["run:r"]
     rendered = "\n".join(getattr(output, "text", "") for output in outputs)
     assert '<span class="leaderboard-run-count">1 run</span>' in rendered
     assert "No runs to plot." in rendered
     definitions["tree"]._update(["0"])
-    outputs, selected = app.run(
-        defs={
-            name: definitions[name]
-            for name in (
-                "get_selection",
-                "metrics",
-                "select_key",
-                "tree_metric",
-                "x_axis",
-                "y_axis",
-            )
-        }
-    )
+    outputs, selected = _rerun(app, definitions)
     assert selected["selected_record"] is None
     assert selected["selected_run"]["run"] == "r"
     assert any("Run details</h2>" in getattr(output, "text", "") for output in outputs)
@@ -414,12 +345,7 @@ def test_dashboard_selects_between_leaderboards(project, monkeypatch):
     assert definitions["leaderboard_selector"].value == "other"
     assert definitions["runs_df"]["run"].tolist() == ["other"]
     definitions["leaderboard_selector"]._update(["default"])
-    _, updated = app.run(
-        defs={
-            "leaderboard_selector": definitions["leaderboard_selector"],
-            "refresh": definitions["refresh"],
-        }
-    )
+    _, updated = _rerun(app, definitions)
     assert len(updated["runs_df"]) == 6
 
 

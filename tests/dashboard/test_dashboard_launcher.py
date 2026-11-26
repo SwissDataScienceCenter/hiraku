@@ -78,10 +78,12 @@ def test_bundled_views_place_all_interactive_cells() -> None:
     assert placed == {
         "refresh_control",
         "record_details",
-        "record_navigation",
+        "record_header",
+        "record_files",
+        "record_tree",
         "leaderboard_header",
-        "leaderboard_filters",
-        "leaderboard_view",
+        "leaderboard_plot",
+        "leaderboard_table",
     }
     assert 'role="tablist"' not in view
     assert "<h1>Hiraku dashboard</h1>" in view
@@ -92,11 +94,14 @@ def test_bundled_views_place_all_interactive_cells() -> None:
     assert {
         "data_setup",
         "project_data",
-        "selection_state",
+        "filtered_runs",
         "selected_context",
+    } <= named
+    assert {name for name in named if name.startswith("leaderboard_")} == {
+        "leaderboard_header",
         "leaderboard_plot",
         "leaderboard_table",
-    } <= named
+    }
 
 
 def test_init_dashboard_copies_the_notebook(project: Project) -> None:

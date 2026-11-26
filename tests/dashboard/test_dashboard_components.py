@@ -357,20 +357,18 @@ def test_run_details_escapes_content_and_only_links_safe_urls(
     [
         (None, None, "No numeric metrics are available"),
         ("loss", "loss", "Choose two different metrics."),
-        ("loss", "accuracy", "No runs have numeric values"),
+        ("loss", "accuracy", "No runs to plot."),
     ],
 )
-def test_tradeoff_plot_handles_empty_or_unusable_inputs(
+def test_performance_plot_handles_unusable_axes(
     x_metric: str | None, y_metric: str | None, message: str
 ) -> None:
     runs = arrow_frame([], [*RUN_COLUMNS, "metric.loss", "metric.accuracy"])
 
-    content = hc.tradeoff_plot(
+    content = hc.performance_plot(
         runs,
         x_metric=x_metric,
         y_metric=y_metric,
-        x_objective="minimize",
-        y_objective="maximize",
     )
 
     assert message in content.text
@@ -378,12 +376,12 @@ def test_tradeoff_plot_handles_empty_or_unusable_inputs(
 
 def test_performance_plot_handles_empty_runs() -> None:
     runs = arrow_frame([], [*RUN_COLUMNS, "metric.loss"])
-    content = hc.performance_plot(runs, metric="loss").text
+    content = hc.performance_plot(runs, y_metric="loss").text
     assert "No runs to plot." in content
 
 
-@pytest.mark.parametrize("plot", [hc.performance_plot, hc.tradeoff_plot])
-def test_independent_plots_render_plottable_runs(plot) -> None:
+@pytest.mark.parametrize("x_metric", [None, "accuracy"])
+def test_performance_plot_renders_both_axis_modes(x_metric) -> None:
     runs = arrow_frame(
         [
             {
@@ -403,23 +401,18 @@ def test_independent_plots_render_plottable_runs(plot) -> None:
         RUN_COLUMNS,
     )
 
-    if plot is hc.performance_plot:
-        content = plot(runs, metric="loss", selected_run={"run": "best"}).text
-    else:
-        content = plot(
-            runs,
-            x_metric="loss",
-            y_metric="accuracy",
-            x_objective="minimize",
-            y_objective="maximize",
-        ).text
+    content = hc.performance_plot(
+        runs,
+        x_metric=x_metric,
+        y_metric="loss",
+        directions={"accuracy": "maximize"},
+        selected_record_id="root",
+        selected_run_id="best",
+    ).text
 
     assert "best" in content
     assert "other" in content
-    if plot is hc.performance_plot:
-        assert "numbered by execution order" not in content
-        assert "f59e0b" in content
-    else:
-        assert "diamond" not in content
-        assert "non_dominated" not in content
-        assert "comparable runs" not in content
+    assert "f59e0b" in content
+    assert (
+        "Run number (execution order)" if x_metric is None else "accuracy (maximize)"
+    ) in content

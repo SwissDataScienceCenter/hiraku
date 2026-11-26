@@ -184,43 +184,26 @@ Use **Refresh** to re-read records and tracking sources after new launches.
 
 ### Reusing plots
 
-`hc.performance_plot(runs, metric="loss", selected_run=selected_run)`
-plots one metric over execution order. `hc.tradeoff_plot(runs, x_metric="loss",
-y_metric="accuracy", x_objective="minimize", y_objective="maximize")` compares
-two metrics in a scatter plot. Both accept an already
-scoped run table and create no controls or selection state.
+`hc.performance_plot(runs, y_metric="loss")` plots loss over execution order.
+Pass `x_metric="accuracy"` to compare the two metrics in a scatter plot.
+The component accepts an already scoped run table and caller-owned selection.
 
-Place the Leaderboard header and its active view together in Studio:
+Place the Leaderboard header and both views together in Studio. The header
+includes the filter chips and run count. The active tab controls which view
+renders:
 
 ```html
 <marimo-cell name="leaderboard_header"></marimo-cell>
-<marimo-cell name="leaderboard_filters"></marimo-cell>
-<marimo-cell name="leaderboard_view"></marimo-cell>
+<marimo-cell name="leaderboard_plot"></marimo-cell>
+<marimo-cell name="leaderboard_table"></marimo-cell>
 ```
 
 ### Reusing record navigation
 
-Use `hc.RecordNavigation` to compose the heading, Files/Lineage tabs, filter
-chips, and active tree. Create it once in a setup cell, connecting its change
-callback to Marimo state:
-
-```python
-get_revision, set_revision = mo.state(0, allow_self_loops=True)
-navigation = hc.RecordNavigation(
-    on_change=lambda: set_revision(lambda revision: revision + 1)
-)
-```
-
-In a separate display cell, read the revision and render:
-
-```python
-get_revision()
-navigation.render(records, selected_id=selected_id, on_select=on_select)
-```
-
-The component retains view/filter state and widget references across selection
-changes. The caller owns record selection and loading. The independent filter
-and tree renderers remain available for custom layouts.
+The bundled notebook initializes independent Marimo state values together in
+`data_setup`. View cells render controls from those values and pass callbacks
+back to the relevant setter. The record header displays the Files/Lineage
+tabs and filter chips. Both views use the same record selection and filters.
 
 `hc.filesystem_tree(records, selected_id, on_select, types=(), states=())`
 renders filesystem navigation, retaining directories containing matching records.
@@ -230,16 +213,18 @@ states=())`, which returns `(filters, buttons)` with caller-owned filter state.
 Keep the returned buttons alive. Navigation shares record selection with the run
 table. On narrow screens the sidebar stacks above the main content.
 
-`hc.record_tree(records, selected_id, on_select)` remains available for lineage
-navigation using `parent_id`. Both components return `(tree, buttons)` and
+`hc.lineage_tree(records, selected_id, on_select, types=(), states=())` renders
+lineage navigation using `parent_id` and retains ancestors of matching records.
+Both components return `(tree, buttons)` and
 load no data or own selection state.
 
 Keep `buttons` in a notebook variable so their callbacks remain live. Wire
 `on_select` into the same selection callback used by the run table; the bundled
-notebook uses `select_key("record:" + record_id)` and passes the resulting key to
+notebook uses `select_record(record_id)` and passes the resulting key to
 `hc.run_table(..., selected_key=key, on_select=select_key)`.
 
-The Studio entry document places the `record_navigation` cell in the sidebar's
+The Studio entry document places `record_header`, `record_files`, and
+`record_tree` in the sidebar's
 `<aside>` element. Remove that element from a project copy to omit navigation;
 table selection and the remaining components continue to work independently.
 
