@@ -3,7 +3,13 @@
 .record-metadata dt { opacity: 0.65; }
 .record-metadata dd { margin: 0; overflow-wrap: anywhere; }
 .record-runs, .record-raw { margin: 10px 0; font: 13px/1.5 system-ui; }
+.record-runs:has(+ .record-raw) { margin-bottom: 4px; }
+.record-runs + .record-raw { margin-top: 0; }
 .record-runs summary, .record-raw summary { cursor: pointer; }
+.record-runs > ul { list-style: none; margin: 6px 0 0; padding-left: 1rem; }
+.record-run { margin: 4px 0; }
+.record-run .run-link { margin-left: 0.5rem; }
+.record-run > .run-provenance { margin: 6px 0 10px 1rem; }
 .record-raw pre { white-space: pre-wrap; overflow-wrap: anywhere; }
 .record-markdown { font: 14px/1.55 system-ui; }
 .record-markdown p { margin: 0 0 0.65em; }
@@ -127,9 +133,21 @@ button:has(.record-filter-chip) .paragraph { margin: 0 !important; }
   background: color-mix(in srgb, currentColor 5%, transparent);
   color: inherit;
 }
-.record-filter-chip.active {
+.record-filter-chip.active,
+:host(marimo-checkbox) .mo-label:has([aria-checked="true"]) .show-records-chip {
   border-color: var(--primary-color, #5561a6);
   background: color-mix(in srgb, var(--primary-color, #5561a6) 15%, transparent);
+}
+:host(marimo-checkbox) .mo-label:has(.show-records-chip) [role="checkbox"] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  clip-path: inset(50%);
+}
+:host(marimo-checkbox) .show-records-chip { cursor: pointer; }
+:host(marimo-checkbox) .mo-label:has([role="checkbox"]:focus-visible) .show-records-chip {
+  outline: 2px solid var(--primary-color, #5561a6);
+  outline-offset: 2px;
 }
 button:has(.record-filter-chip):focus-visible {
   outline: 2px solid var(--primary-color, #5561a6) !important;

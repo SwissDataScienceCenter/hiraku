@@ -105,7 +105,6 @@ def selection_state(
     records_df,
     requested_record,
     run_filters,
-    runs_df,
 ):
     paths = dict(zip(records_df["record"], records_df["record_path"], strict=True))
     metrics = hd.metric_names(all_runs_df)
@@ -132,7 +131,7 @@ def selection_state(
         _set_selection(
             lambda previous: (
                 key,
-                hd.selection_scope(key, previous[1], paths, runs_df),
+                hd.selection_scope(key, previous[1], paths, all_runs_df),
             )
         )
 
@@ -149,33 +148,11 @@ def selection_state(
 
 
 @app.cell
-def run_table(
-    get_selection, leaderboard_error, records_df, runs_df, select_key, tree_metric
-):
-    tree = hc.run_table(
-        records_df,
-        runs_df,
-        tree_metric,
-        selected_key=get_selection()[0],
-        on_select=select_key,
-    )
-    _messages = (
-        [mo.callout(mo.md(leaderboard_error), kind="warn")] if leaderboard_error else []
-    )
-    if records_df.empty:
-        _messages.append(
-            mo.md("No records yet. Create one with `hiraku record create`.")
-        )
-    mo.vstack([*_messages, tree])
-    return (tree,)
-
-
-@app.cell
-def selected_context(get_selection, records, runs_df):
+def selected_context(all_runs_df, get_selection, records):
     _key, scope = get_selection()
     _key = _key or ""
     _kind, _, _identifier = _key.partition(":")
-    selected_run = hd.find_run(runs_df, _identifier) if _kind == "run" else None
+    selected_run = hd.find_run(all_runs_df, _identifier) if _kind == "run" else None
     _record_id = selected_run["record"] if selected_run is not None else scope
     selected_record = next(
         (record for record in records if record.id == _record_id), None
@@ -225,25 +202,32 @@ def record_editor(project_context):
 
 @app.cell
 def record_details(
-    get_editor_revision, markdown_editor, selected_record, repository_url, runs_df
+    get_editor_revision,
+    markdown_editor,
+    repository_url,
+    runs_df,
+    selected_record,
+    selected_run,
 ):
     get_editor_revision()
-    hc.markdown_view(
-        selected_record,
-        editor=markdown_editor,
-        repository_url=repository_url,
-        runs=[
-            row
-            for row in runs_df.to_dict("records")
-            if selected_record is not None and row["record"] == selected_record.id
-        ],
-    )
-    return
-
-
-@app.cell
-def run_details(selected_run):
-    hc.run_details(selected_run)
+    _title = "Selected record"
+    if selected_record is None and selected_run is not None:
+        _title = "Run details"
+        _details = hc.run_details(selected_run)
+    else:
+        _runs = (
+            runs_df.loc[runs_df["record"] == selected_record.id].to_dict("records")
+            if selected_record is not None
+            else []
+        )
+        _details = hc.markdown_view(
+            selected_record,
+            editor=markdown_editor,
+            repository_url=repository_url,
+            runs=_runs,
+            open_run_id=selected_run["run"] if selected_run is not None else None,
+        )
+    mo.vstack([mo.Html(f'<h2 class="record-details-heading">{_title}</h2>'), _details])
     return
 
 
@@ -260,12 +244,29 @@ def leaderboard_filters(
 
 @app.cell
 def leaderboard_plot(
-    leaderboard, leaderboard_runs, plot_scope, selected_run, x_axis, y_axis
+    leaderboard,
+    leaderboard_runs,
+    plot_scope,
+    select_key,
+    selected_record,
+    selected_run,
+    x_axis,
+    y_axis,
 ):
+    def _select_run(run_id):
+        select_key(f"run:{run_id}")
+
     _x, _y = x_axis.value, y_axis.value
+    _record_id = selected_record.id if selected_record else None
+    _run_id = selected_run["run"] if selected_run is not None else None
     if _x is None:
         plot_view = hc.performance_plot(
-            leaderboard_runs, scope=plot_scope, metric=_y, selected_run=selected_run
+            leaderboard_runs,
+            scope=plot_scope,
+            metric=_y,
+            selected_record_id=_record_id,
+            selected_run_id=_run_id,
+            on_run_select=_select_run,
         )
     else:
         _configured_metrics = leaderboard.metrics if leaderboard is not None else None
@@ -276,6 +277,9 @@ def leaderboard_plot(
             y_metric=_y,
             x_objective=_directions.get(_x) or "minimize",
             y_objective=_directions.get(_y) or "minimize",
+            selected_record_id=_record_id,
+            selected_run_id=_run_id,
+            on_run_select=_select_run,
         )
     plot_view = mo.vstack(
         [plot_view, mo.hstack([x_axis, y_axis], justify="start", wrap=True)]
@@ -284,15 +288,33 @@ def leaderboard_plot(
 
 
 @app.cell
-def leaderboard_table(leaderboard_runs):
-    raw_leaderboard = mo.ui.table(
-        leaderboard_runs.drop(columns="record_path"),
-        selection=None,
-        page_size=50,
-        show_column_summaries=False,
-        show_data_types=False,
+def leaderboard_table_controls():
+    include_records = mo.ui.checkbox(
+        label='<span class="record-filter-chip show-records-chip">Show records</span>',
+        value=False,
     )
-    return (raw_leaderboard,)
+    return (include_records,)
+
+
+@app.cell
+def leaderboard_table(
+    get_selection,
+    include_records,
+    leaderboard_runs,
+    records_df,
+    select_key,
+    tree_metric,
+):
+    tree = hc.run_table(
+        records_df,
+        leaderboard_runs,
+        tree_metric,
+        selected_key=get_selection()[0],
+        on_select=select_key,
+        include_records=include_records.value,
+    )
+    table_view = mo.vstack([include_records, tree])
+    return tree, table_view
 
 
 @app.cell
@@ -307,9 +329,12 @@ def leaderboard_header(leaderboard_selector):
 
 
 @app.cell
-def leaderboard_view(leaderboard_mode, plot_view, raw_leaderboard):
-    _view = plot_view if leaderboard_mode.value == "Plot" else raw_leaderboard
-    mo.vstack([_view])
+def leaderboard_view(leaderboard_error, leaderboard_mode, plot_view, table_view):
+    _view = plot_view if leaderboard_mode.value == "Plot" else table_view
+    _messages = (
+        [mo.callout(mo.md(leaderboard_error), kind="warn")] if leaderboard_error else []
+    )
+    mo.vstack([*_messages, _view])
     return
 
 

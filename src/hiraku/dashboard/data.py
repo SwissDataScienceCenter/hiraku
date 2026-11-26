@@ -247,7 +247,11 @@ def filter_leaderboard_runs(
 
 
 def tree_rows(
-    records_df: pd.DataFrame, runs_df: pd.DataFrame, metric: str | None
+    records_df: pd.DataFrame,
+    runs_df: pd.DataFrame,
+    metric: str | None,
+    *,
+    include_records: bool = True,
 ) -> list[dict[str, Any]]:
     """Interleave records (in tree order) with their runs as indented table rows.
 
@@ -258,10 +262,11 @@ def tree_rows(
     runs_by_record: dict[str, list[dict[str, Any]]] = {}
     for run, value in zip(_records(runs_df), values, strict=True):
         run["value"] = None if math.isnan(value) else value
-        runs_by_record.setdefault(run["record"], []).append(run)
+        owner = run["record"] if include_records else None
+        runs_by_record.setdefault(owner, []).append(run)
 
     rows: list[dict[str, Any]] = []
-    for record in _records(records_df):
+    for record in _records(records_df) if include_records else ():
         depth = record["record_path"].count("/")
         rows.append(
             _row(f"record:{record['record']}", depth, "▾ " + record["record"], record)
@@ -269,15 +274,13 @@ def tree_rows(
         if metric:
             rows[-1][metric] = ""
         for run in runs_by_record.pop(record["record"], ()):
-            rows.append(
-                _row(f"run:{run['run']}", depth + 1, "• " + run["run"][:12], run)
-            )
+            rows.append(_row(f"run:{run['run']}", depth + 1, run["run"][:12], run))
             rows[-1]["Type"] = "run"
             if metric:
                 rows[-1][metric] = run["value"]
     for remaining in runs_by_record.values():
         for run in remaining:
-            rows.append(_row(f"run:{run['run']}", 0, "• " + run["run"][:12], run))
+            rows.append(_row(f"run:{run['run']}", 0, run["run"][:12], run))
             rows[-1]["Type"] = "run"
             if metric:
                 rows[-1][metric] = run["value"]

@@ -136,13 +136,16 @@ parameters are discovered automatically.
 **Leaderboard**
 :   Choose a leaderboard in either view. The axis selectors sit below the chart
     in **Plot**. The **X axis** defaults to **Run order**. Choose a **Y axis**
-    metric to see performance in execution order,
-    with colours marking the record and a ring marking the selected run.
+    metric to see performance in execution order. The plot highlights runs
+    attributed to the selected record and enlarges the selected run's point.
+    Click a point to select the run and open its details in the record below.
     Choose a metric on both axes to compare trade-offs among the filtered runs.
     Diamonds mark runs that no other run improves upon on one metric while
     matching or improving the other. Metrics use their configured directions
-    and default to minimizing. **Table** shows one row per filtered run, with
-    metrics, parameters, and attribution.
+    and default to minimizing. **Table** shows the filtered runs with their
+    start time, duration, and first leaderboard metric. Enable **Show records**
+    to interleave records with their runs. Select a run row to inspect the run
+    and select its owning record.
 
 **Record navigation**
 :   Choose the **Files** (default) or **Lineage** tab in the left sidebar.
@@ -163,27 +166,20 @@ parameters are discovered automatically.
     Expand or collapse directories, and toggle type and state filter chips. Values within
     one filter are combined with OR; the two filters are combined with AND.
     Filtering navigation does not change the selected record or run scope.
-    Choosing a record
-    selects the same row in the runs table, clears any selected run, and sets
-    the target for the Leaderboard record filters. Table selections highlight
-    the corresponding record in the tree.
+    Choosing a record selects its table row when records are included, clears
+    any selected run, and sets the target for the Leaderboard record filters.
+    Table selections highlight the corresponding record in the tree.
 
-**Runs**
-:   Records and their runs in one indented table. Runs appear under the record
-    they are attributed to, in execution order, with their start time, duration,
-    and the value of the first metric the leaderboard declares or discovers.
-    Select a record to target it with the Leaderboard filters, or a run to inspect it.
-
-**Run**
-:   The selected run's ID, record, commit, start time, duration,
-    parameters, and metrics, plus a link to the run in its tracking backend when
-    one is available.
-
-**Record**
+**Selected record**
 :   A compact summary of local metadata, expandable runs and raw front matter,
     followed by its Markdown body. Commit and branch links are shown when the
     project's actual Git origin points to GitHub. Run links use the tracking
     backend's HTTP(S) URL when available; missing links stay plain text.
+    Tracking links appear beside the run IDs under **Runs**. Expand a run to
+    see its commit, start time, duration, parameters, and metrics.
+    Selecting a plot point or run row
+    opens its disclosure. If the run has no available record, its details
+    appear directly below the Leaderboard.
     Click the pen to edit the body, then **Save** to write it back or **Cancel**
     to discard the draft. Front matter stays read-only. Drafts remain available
     when switching between records in the same session. Save errors keep the
@@ -201,11 +197,6 @@ plots one metric over execution order. `hc.tradeoff_plot(runs, x_metric="loss",
 y_metric="accuracy", x_objective="minimize", y_objective="maximize")` compares
 two metrics and lists non-dominated runs. Both accept an already scoped run table
 and create no controls or selection state.
-
-Use `hc.performance_controls(metrics, default_metric)` for the first plot's
-metric selector and `hc.tradeoff_controls(directions, metrics)` for the second
-plot's four selectors. Keep the returned widgets in notebook variables and pass
-their values to the corresponding plot.
 
 Place the Leaderboard header and its active view together in Studio:
 
@@ -306,9 +297,12 @@ details use the already loaded record objects to retain complete front matter.
 queried runs to rows. Tracking errors leave record navigation available.
 
 `runs_df`
-:   One row per run in execution order: `run`, `record`, `record_path`,
+:   One row per attributed run in execution order: `run`, `record`, `record_path`,
     `source`, `started`, `commit`, `url`, plus a
     `metric.<name>` and `param.<name>` column for each metric and parameter.
+
+`all_runs_df`
+:   The same columns, including runs with no record attribution.
 
 `records_df`
 :   One row per record in tree order: `record`, `parent`, `record_path`,
@@ -316,8 +310,8 @@ queried runs to rows. Tracking errors leave record navigation available.
 
 | View | Reads |
 | --- | --- |
-| Runs table | `records_df` rows, each followed by its runs from `runs_df` |
-| Run details | the selected run's row of `runs_df` |
+| Leaderboard table | filtered `leaderboard_runs`, with optional rows from `records_df` |
+| Run details | the selected run's row of `all_runs_df` |
 | Performance plot | filtered `leaderboard_runs`; choose one metric |
 | Trade-off plot | filtered `leaderboard_runs`; choose two metrics |
 

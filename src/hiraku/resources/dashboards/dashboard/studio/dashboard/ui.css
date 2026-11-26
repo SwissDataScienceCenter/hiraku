@@ -107,7 +107,7 @@ nav a[aria-current="page"] { background: var(--primary-color); color: var(--whit
 .card { min-width: 0; padding: 1.5rem; background: var(--card); }
 .card h2 { margin: 0 0 1rem; }
 marimo-cell { display: block; --marimo-output-max-height: none; }
-marimo-cell[name="run_details"] pre {
+.run-provenance pre {
   padding: 1rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-input);

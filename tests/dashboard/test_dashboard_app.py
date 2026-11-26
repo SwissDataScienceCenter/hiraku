@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-from hiraku.dashboard.data import tree_rows
 from hiraku.project import Project
 
 pytest.importorskip("marimo")
@@ -19,7 +18,8 @@ def test_app_runs_every_cell_against_a_project(
     outputs, definitions = app.run()
 
     rendered = "\n".join(getattr(output, "text", "") for output in outputs)
-    assert "Select a run in the tree to see its details." in rendered
+    assert "Selected record</h2>" in rendered
+    assert '<details class="record-runs">' in rendered
     assert "numbered by execution order." in rendered
     assert 'aria-label="Leaderboard filters"' in rendered
 
@@ -34,7 +34,7 @@ def test_app_runs_every_cell_against_a_project(
         "root/b/b",
         "root/root",
     ]
-    assert definitions["tree"].value[0]["key"] == "record:root/a/a"
+    assert definitions["tree"].value == []
     assert definitions["x_axis"].selected_key == "Run order"
     assert definitions["x_axis"].value is None
     assert definitions["y_axis"].value == "loss"
@@ -109,12 +109,20 @@ def test_leaderboard_table_shows_runs_across_records(project, monkeypatch):
     outputs, definitions = app.run(defs={"leaderboard_mode": mode})
 
     assert mode.value == "Table"
-    table = definitions["raw_leaderboard"]
+    table = definitions["tree"]
     rendered = [getattr(output, "text", "") for output in outputs]
     table_view = next(output for output in rendered if table.text in output)
     assert definitions["leaderboard_selector"].text not in table_view
-    assert table.data["run"].tolist() == ["r0", "r1", "r2", "r3", "r5", "r4"]
-    assert {"record", "metric.loss"} <= set(table.data.columns)
+    run_keys = ["run:r0", "run:r1", "run:r2", "run:r3", "run:r5", "run:r4"]
+    assert [row["key"] for row in table.data] == run_keys
+    assert {"Record / run", "Started", "Duration", "loss"} <= table.data[0].keys()
+
+    assert "Show records" in table_view
+    definitions["include_records"]._update(True)
+    _, interleaved = app.run(defs={"include_records": definitions["include_records"]})
+    keys = [row["key"] for row in interleaved["tree"].data]
+    assert keys.index("record:root/a/a") + 1 == keys.index("run:r0")
+    definitions["include_records"]._update(False)
 
     for name in ("record", "descendants"):
         definitions["run_filters"].buttons[name]._update(1)
@@ -125,17 +133,66 @@ def test_leaderboard_table_shows_runs_across_records(project, monkeypatch):
                 "leaderboard_mode",
                 "get_filter_revision",
                 "run_filters",
+                "include_records",
             )
         }
     )
-    assert filtered["raw_leaderboard"].data["run"].tolist() == ["r0", "r2", "r3"]
+    assert [row["key"] for row in filtered["tree"].data] == [
+        "run:r0",
+        "run:r2",
+        "run:r3",
+    ]
     assert "3 runs under" in filtered["plot_view"].text
     filtered["select_key"](None)
     cleared, scope = filtered["run_filters"].apply(
         filtered["all_runs_df"], filtered["records"], "root/a/a"
     )
-    assert list(cleared["run"]) == list(table.data["run"])
+    assert [f"run:{run}" for run in cleared["run"]] == run_keys
     assert scope is None
+
+
+def test_clicking_plot_point_selects_run_and_record(project, monkeypatch):
+    import marimo as mo
+
+    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
+    monkeypatch.setenv("HIRAKU_DASHBOARD_RECORD", "root/a/a")
+    from hiraku.resources.dashboards.dashboard.app import app
+
+    charts = []
+    altair_chart = mo.ui.altair_chart
+
+    def capture_chart(*args, **kwargs):
+        chart = altair_chart(*args, **kwargs)
+        charts.append(chart)
+        return chart
+
+    monkeypatch.setattr(mo.ui, "altair_chart", capture_chart)
+    _, initial = app.run()
+    chart = charts[-1]
+    assert chart.text in initial["plot_view"].text
+    color = chart._spec["layer"][1]["encoding"]["color"]
+    assert color["condition"]["test"] == "(datum.record === 'root/a/a')"
+    assert "field" not in color
+    chart._update({"picked_run": {"run": ["r1"]}})
+    assert initial["get_selection"]() == ("run:r1", "root/b/b")
+    app.run(
+        defs={
+            name: initial[name]
+            for name in (
+                "get_selection",
+                "initial_record",
+                "metrics",
+                "paths",
+                "select_key",
+                "tree_metric",
+                "x_axis",
+                "y_axis",
+            )
+        }
+    )
+    size = charts[-1]._spec["layer"][1]["encoding"]["size"]
+    assert size["condition"]["test"] == "(datum.run === 'r1')"
+    assert size["condition"]["value"] > size["value"]
 
 
 @pytest.mark.parametrize(
@@ -158,7 +215,10 @@ def test_record_details_follow_selection_without_changing_subtree_semantics(
     from hiraku.resources.dashboards.dashboard.app import app
 
     _, initial = app.run()
-    rows = tree_rows(initial["records_df"], initial["runs_df"], initial["tree_metric"])
+    if key.startswith("record:"):
+        initial["include_records"]._update(True)
+        _, initial = app.run(defs={"include_records": initial["include_records"]})
+    rows = initial["tree"].data
     index = next(index for index, row in enumerate(rows) if row["key"] == key)
     initial["tree"]._update([str(index)])
     assert initial["get_selection"]() == (key, scope)
@@ -174,6 +234,7 @@ def test_record_details_follow_selection_without_changing_subtree_semantics(
                 "tree_metric",
                 "x_axis",
                 "y_axis",
+                "include_records",
             )
         }
     )
@@ -183,6 +244,14 @@ def test_record_details_follow_selection_without_changing_subtree_semantics(
     assert definitions["tree"].value[0]["key"] == key
     rendered = "\n".join(getattr(output, "text", "") for output in outputs)
     assert f"type: {definitions['selected_record'].type}" in rendered
+    if key.startswith("run:"):
+        run_id = key.removeprefix("run:")
+        assert '<details class="record-runs" open>' in rendered
+        assert (
+            f'<details class="record-run" open><summary>{run_id}</summary>' in rendered
+        )
+    else:
+        assert '<details class="record-runs" open>' not in rendered
 
 
 def test_navigation_filter_toggles_preserve_selection(project, monkeypatch):
@@ -252,6 +321,7 @@ def test_navigation_selection_updates_table_and_clears_run(
     from hiraku.resources.dashboards.dashboard.app import app
 
     _, initial = app.run()
+    initial["include_records"]._update(True)
     initial["select_key"]("run:r1")
     initial["navigation"].record_buttons["root/a/a"]._update(1)
     assert initial["get_selection"]() == ("record:root/a/a", "root/a/a")
@@ -267,6 +337,7 @@ def test_navigation_selection_updates_table_and_clears_run(
                 "tree_metric",
                 "x_axis",
                 "y_axis",
+                "include_records",
             )
         }
     )
@@ -321,9 +392,28 @@ def test_dashboard_plots_a_leaderboard_without_records(tmp_path, monkeypatch):
             name: definitions[name] for name in ("get_filter_revision", "run_filters")
         }
     )
-    assert definitions["raw_leaderboard"].data["run"].tolist() == ["r"]
+    assert [row["key"] for row in definitions["tree"].data] == ["run:r"]
     rendered = "\n".join(getattr(output, "text", "") for output in outputs)
     assert "1 without a numeric" in rendered
+    definitions["tree"]._update(["0"])
+    outputs, selected = app.run(
+        defs={
+            name: definitions[name]
+            for name in (
+                "get_selection",
+                "initial_record",
+                "metrics",
+                "paths",
+                "select_key",
+                "tree_metric",
+                "x_axis",
+                "y_axis",
+            )
+        }
+    )
+    assert selected["selected_record"] is None
+    assert selected["selected_run"]["run"] == "r"
+    assert any("Run details</h2>" in getattr(output, "text", "") for output in outputs)
 
 
 def test_dashboard_selects_between_leaderboards(project, monkeypatch):

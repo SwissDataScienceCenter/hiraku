@@ -11,7 +11,6 @@
 .eyebrow { margin-bottom: 0.75rem; }
 h1 { margin: 0 0 1rem; }
 .intro { margin-bottom: 2rem; }
-.run-details { margin-top: 1.5rem; }
 .dashboard-layout {
   display: grid;
   grid-template-columns: var(--record-sidebar-width, clamp(280px, 27vw, 380px)) 6px minmax(0, 1fr);
@@ -42,7 +41,7 @@ h1 { margin: 0 0 1rem; }
 .dashboard-layout.resizing { user-select: none; cursor: col-resize; }
 .record-navigation { position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow: auto; }
 .record-details { position: relative; margin-top: 1.5rem; }
-.record-details > h2 { min-height: 2rem; padding-right: 10rem; }
+.record-details-heading { min-height: 2rem; padding-right: 10rem; }
 .record-details marimo-cell[name="record_details"] .output { position: static; }
 .record-details .hiraku-markdown-controls {
   position: absolute;

@@ -138,6 +138,7 @@ def test_record_summary_links_and_collapsible_metadata():
             {"run": "r1", "source": "mlflow", "url": "https://mlflow.test/r1"},
             {"run": "r2", "url": "javascript:alert(1)"},
         ],
+        open_run_id="r2",
     ).text
     assert "https://github.com/team/repo/commit/" + "a" * 40 in summary
     assert "https://github.com/team/repo/tree/feature%2Ftest" in summary
@@ -145,6 +146,11 @@ def test_record_summary_links_and_collapsible_metadata():
     assert "javascript:" not in summary
     assert "&lt;check&gt;" in summary
     assert "Runs (2)" in summary
+    assert '<details class="record-runs" open>' in summary
+    assert '<details class="record-run" open><summary>r2</summary>' in summary
+    collapsed_header = summary.split('<details class="record-run"><summary>r1', 1)[1]
+    assert "https://mlflow.test/r1" in collapsed_header.split("</summary>", 1)[0]
+    assert summary.count("https://mlflow.test/r1") == 1
     assert "<details" in summary and "Raw frontmatter" in summary
     plain = hc.record_summary(record).text
     assert "<a " not in plain
@@ -344,21 +350,6 @@ def test_run_details_escapes_content_and_only_links_safe_urls(
     assert "<script>bad()</script>" not in details
     assert ("Open in mlflow" in details) is linked
     assert "javascript:alert" not in details
-
-
-def test_independent_plot_controls_use_declared_defaults() -> None:
-    directions = {"loss": "minimize", "accuracy": "maximize"}
-
-    metric = hc.performance_controls(["loss", "accuracy"], "loss")
-    controls = hc.tradeoff_controls(directions, ["loss", "accuracy"])
-
-    assert metric.value == "loss"
-    assert [control.value for control in controls] == [
-        "loss",
-        "minimize",
-        "accuracy",
-        "maximize",
-    ]
 
 
 @pytest.mark.parametrize(

@@ -39,6 +39,7 @@ def markdown_view(
     empty_message: str = "This record has no Markdown.",
     repository_url: str | None = None,
     runs: Sequence[Mapping[str, Any]] = (),
+    open_run_id: str | None = None,
 ) -> mo.Html:
     """Render a Record's front matter and Markdown body.
 
@@ -51,11 +52,14 @@ def markdown_view(
             empty_message=empty_message,
             repository_url=repository_url,
             runs=runs,
+            open_run_id=open_run_id,
         )
     if record is None:
         return mo.md("No record selected.")
     body = mo.md(record.markdown if record.markdown.strip() else empty_message)
-    metadata = record_summary(record, repository_url=repository_url, runs=runs)
+    metadata = record_summary(
+        record, repository_url=repository_url, runs=runs, open_run_id=open_run_id
+    )
     return mo.vstack(
         [metadata, mo.Html(f'<div class="record-markdown">{body.text}</div>')]
     )
@@ -66,8 +70,9 @@ def record_summary(
     *,
     repository_url: str | None = None,
     runs: Sequence[Mapping[str, Any]] = (),
+    open_run_id: str | None = None,
 ) -> mo.Html:
-    """Render local metadata and optional links supplied by the caller."""
+    """Render local metadata and expandable details for supplied runs."""
     rows = []
     values = {"id": record.id, **record.metadata}
     for field in (
@@ -97,20 +102,22 @@ def record_summary(
             )
         rows.append(f"<dt>{field}</dt><dd>{display}</dd>")
     items = []
+    any_open = False
     for run in runs:
         label = html.escape(str(run["run"]))
-        url = safe_url(run.get("url"))
-        if url:
-            source = html.escape(str(run.get("source") or "tracking backend"))
-            label = (
-                f'<a href="{html.escape(url, quote=True)}" target="_blank" '
-                f'rel="noopener noreferrer">{label} · {source}</a>'
-            )
-        items.append(f"<li>{label}</li>")
+        is_open = run["run"] == open_run_id
+        any_open |= is_open
+        expanded = " open" if is_open else ""
+        items.append(
+            f'<li><details class="record-run"{expanded}>'
+            f"<summary>{label}{_run_link(run)}</summary>"
+            f"{run_details(run, show_link=False).text}</details></li>"
+        )
+    expanded = " open" if any_open else ""
     raw = html.escape(dump_yaml(record.metadata))
     return mo.Html(
         f'<dl class="record-metadata">{"".join(rows)}</dl>'
-        f'<details class="record-runs"><summary>Runs ({len(items)})</summary>'
+        f'<details class="record-runs"{expanded}><summary>Runs ({len(items)})</summary>'
         f"<ul>{''.join(items)}</ul></details>"
         '<details class="record-raw"><summary>Raw frontmatter · '
         f"{html.escape(record.id)}</summary><pre>{raw}</pre></details>"
@@ -174,6 +181,7 @@ class MarkdownEditor:
         empty_message: str = "This record has no Markdown.",
         repository_url: str | None = None,
         runs: Sequence[Mapping[str, Any]] = (),
+        open_run_id: str | None = None,
     ) -> mo.Html:
         """Show the record or its draft, retaining drafts across selections."""
         if record is None:
@@ -196,6 +204,7 @@ class MarkdownEditor:
                         empty_message=empty_message,
                         repository_url=repository_url,
                         runs=runs,
+                        open_run_id=open_run_id,
                     ),
                 ]
             )
@@ -563,9 +572,10 @@ def run_table(
     *,
     selected_key: str | None = None,
     on_select: Callable[[str | None], Any] | None = None,
+    include_records: bool = True,
 ) -> mo.ui.table:
     """Build the selectable record/run table, retaining its hidden row keys."""
-    _rows = tree_rows(records_df, runs_df, metric)
+    _rows = tree_rows(records_df, runs_df, metric, include_records=include_records)
 
     def _style(row, column):
         style = {"fontWeight": "600"} if row["key"].startswith("record:") else {}
@@ -600,53 +610,30 @@ def run_table(
     return tree
 
 
-def run_details(selected_run: Mapping[str, Any] | None) -> mo.Html:
+def _run_link(run: Mapping[str, Any]) -> str:
+    url = safe_url(run.get("url"))
+    if not url:
+        return ""
+    source = html.escape(str(run.get("source") or "tracking backend"))
+    return (
+        f' <a class="run-link" href="{html.escape(url, quote=True)}" target="_blank" '
+        f'rel="noopener noreferrer">Open in {source} ↗</a>'
+    )
+
+
+def run_details(
+    selected_run: Mapping[str, Any] | None, *, show_link: bool = True
+) -> mo.Html:
     """Render run provenance and a safe tracking link, or a selection prompt."""
     if selected_run is None:
-        _content = mo.md("Select a run in the tree to see its details.")
+        _content = mo.md("Select a run in the leaderboard to see its details.")
     else:
-        # The link and the source name come from the run's tracking backend.
-        _url = safe_url(selected_run["url"])
-        _source = selected_run["source"] or "tracking backend"
-        _content = mo.vstack(
-            [
-                mo.md(f"[Open in {_source} ↗]({_url})") if _url else mo.md(""),
-                mo.Html(f"<pre>{html.escape(run_text(selected_run))}</pre>"),
-            ]
+        _link = _run_link(selected_run) if show_link else ""
+        _content = mo.Html(
+            f'<div class="run-provenance">{_link}'
+            f"<pre>{html.escape(run_text(selected_run))}</pre></div>"
         )
     return mo.as_html(_content)
-
-
-def performance_controls(
-    metrics: Sequence[str], default_metric: str | None
-) -> mo.ui.dropdown:
-    """Create the metric selector for the performance plot."""
-    return mo.ui.dropdown(metrics, value=default_metric, label="Metric (y axis)")
-
-
-def tradeoff_controls(
-    directions: Mapping[str, str | None], metrics: Sequence[str]
-) -> tuple[mo.ui.dropdown, mo.ui.dropdown, mo.ui.dropdown, mo.ui.dropdown]:
-    """Create independent metric and objective selectors for the trade-off plot."""
-    x_default = metrics[0] if metrics else None
-    y_default = metrics[1] if len(metrics) > 1 else x_default
-    x_metric = mo.ui.dropdown(metrics, value=x_default, label="X metric")
-    y_metric = mo.ui.dropdown(metrics, value=y_default, label="Y metric")
-
-    def direction(metric_name):
-        return directions.get(metric_name) or "minimize"
-
-    x_objective = mo.ui.dropdown(
-        ["minimize", "maximize"],
-        value=direction(x_default) if x_default else "minimize",
-        label="X objective",
-    )
-    y_objective = mo.ui.dropdown(
-        ["minimize", "maximize"],
-        value=direction(y_default) if y_default else "minimize",
-        label="Y objective",
-    )
-    return x_metric, x_objective, y_metric, y_objective
 
 
 def performance_plot(
@@ -655,6 +642,9 @@ def performance_plot(
     scope: str | None,
     metric: str | None,
     selected_run: Mapping[str, Any] | None = None,
+    selected_record_id: str | None = None,
+    selected_run_id: str | None = None,
+    on_run_select: Callable[[str], Any] | None = None,
 ) -> mo.Html:
     """Plot one metric over execution order for an already scoped run table."""
     _points, _missing = plot_frame(runs_df, metric)
@@ -665,7 +655,7 @@ def performance_plot(
     if _points.empty:
         _chart = mo.md("No runs to plot.")
     else:
-        _base = alt.Chart(_points).encode(
+        _base = alt.Chart().encode(
             x=alt.X(
                 "number:Q",
                 title="Run number (execution order)",
@@ -675,8 +665,20 @@ def performance_plot(
             y=alt.Y("value:Q", title=metric, scale=alt.Scale(zero=False)),
         )
         _line = _base.mark_line(strokeWidth=2, opacity=0.3)
-        _dots = _base.mark_point(filled=True, size=90, opacity=1).encode(
-            color=alt.Color("record:N", title="Record"),
+        if selected_record_id is None and selected_run is not None:
+            _selected = _points.loc[_points["run"] == selected_run["run"], "record"]
+            if not _selected.empty:
+                selected_record_id = _selected.iloc[0]
+        _cursor = "pointer" if on_run_select is not None else alt.Undefined
+        if selected_run_id is None and selected_run is not None:
+            selected_run_id = selected_run["run"]
+        _is_selected = alt.datum.run == selected_run_id
+        _dots = _base.mark_point(
+            filled=True, opacity=1, cursor=_cursor, stroke="#243449"
+        ).encode(
+            color=_run_color(selected_record_id),
+            size=alt.condition(_is_selected, alt.value(220), alt.value(90)),
+            strokeWidth=alt.condition(_is_selected, alt.value(1.5), alt.value(0)),
             tooltip=[
                 alt.Tooltip("number:Q", title="Run #"),
                 alt.Tooltip("run:N", title="Run"),
@@ -686,19 +688,15 @@ def performance_plot(
                 alt.Tooltip("value:Q", title=metric, format=".4g"),
             ],
         )
-        _layers = [_line, _dots]
-        if selected_run is not None:
-            _layers.append(
-                _base.transform_filter(alt.datum.run == selected_run["run"]).mark_point(
-                    size=320, strokeWidth=3, color="#f59e0b", filled=False
-                )
-            )
-        _chart = (
-            alt.layer(*_layers)
+        if on_run_select is not None:
+            _dots = _dots.add_params(_run_selection())
+        _spec = (
+            alt.layer(_line, _dots, data=_points)
             .properties(width="container", height=340)
             .configure(background="transparent")
             .configure_view(stroke=None)
         )
+        _chart = _interactive_run_chart(_spec, on_run_select)
     _content = mo.vstack([mo.md(" ".join(_notes)), _chart])
     return mo.as_html(_content)
 
@@ -710,6 +708,9 @@ def tradeoff_plot(
     y_metric: str | None,
     x_objective: str = "minimize",
     y_objective: str = "minimize",
+    selected_record_id: str | None = None,
+    selected_run_id: str | None = None,
+    on_run_select: Callable[[str], Any] | None = None,
 ) -> mo.Html:
     """Compare two metrics and highlight non-dominated runs in the supplied table."""
     if not x_metric or not y_metric:
@@ -748,7 +749,7 @@ def tradeoff_plot(
                     title=f"{y_metric} ({y_objective})",
                     scale=alt.Scale(zero=False),
                 ),
-                color=alt.Color("record:N", title="Record"),
+                color=_run_color(selected_record_id),
                 tooltip=[
                     alt.Tooltip("run:N", title="Run"),
                     alt.Tooltip("record:N", title="Record"),
@@ -757,18 +758,39 @@ def tradeoff_plot(
                     alt.Tooltip("non_dominated:N", title="Strong trade-off"),
                 ],
             )
-            _chart = (
-                alt.layer(
-                    _base.mark_circle(size=100, opacity=0.55),
-                    _base.transform_filter(alt.datum.non_dominated).mark_point(
-                        shape="diamond", filled=True, size=220, strokeWidth=1
+            _spec = (
+                _base.mark_point(
+                    filled=True,
+                    opacity=1,
+                    stroke="#243449",
+                    cursor="pointer" if on_run_select is not None else alt.Undefined,
+                )
+                .encode(
+                    shape=alt.condition(
+                        "datum.non_dominated", alt.value("diamond"), alt.value("circle")
+                    ),
+                    size=alt.SizeValue(
+                        value=100,
+                        condition=[
+                            {
+                                "test": str(alt.datum.run == selected_run_id),
+                                "value": 340,
+                            },
+                            {"test": "datum.non_dominated", "value": 220},
+                        ],
+                    ),
+                    strokeWidth=alt.condition(
+                        alt.datum.run == selected_run_id, alt.value(1.5), alt.value(0)
                     ),
                 )
                 .properties(width="container", height=420)
-                .interactive()
+                .interactive(name="pan_zoom")
                 .configure(background="transparent")
                 .configure_view(stroke=None)
             )
+            if on_run_select is not None:
+                _spec = _spec.add_params(_run_selection())
+            _chart = _interactive_run_chart(_spec, on_run_select)
             _table = _highlighted.drop(columns="non_dominated").rename(
                 columns={
                     "run": "Run",
@@ -781,13 +803,52 @@ def tradeoff_plot(
                 [
                     mo.md(_note),
                     mo.md(
-                        "A highlighted run has a strong trade-off: no comparable "
+                        "A diamond marks a strong trade-off: no comparable "
                         "run matches or improves both metrics while improving "
                         "at least one."
                     ),
                     _chart,
-                    mo.ui.table(_table, selection=None, show_download=False),
+                    mo.ui.table(
+                        _table,
+                        selection="single" if on_run_select is not None else None,
+                        on_change=(
+                            lambda rows: (
+                                on_run_select(rows["Run"].iloc[0])
+                                if not rows.empty
+                                else None
+                            )
+                        )
+                        if on_run_select is not None
+                        else None,
+                        show_download=False,
+                    ),
                 ]
             )
     _content = _comparison
     return mo.as_html(_content)
+
+
+def _run_color(record_id: str | None):
+    default = alt.value("#4c78a8")
+    if record_id is None:
+        return default
+    return alt.condition(alt.datum.record == record_id, alt.value("#f59e0b"), default)
+
+
+def _run_selection() -> alt.Parameter:
+    return alt.selection_point(name="picked_run", fields=["run"], toggle=False)
+
+
+def _interactive_run_chart(
+    chart: alt.Chart | alt.LayerChart, on_run_select: Callable[[str], Any] | None
+) -> alt.Chart | alt.LayerChart | mo.ui.altair_chart:
+    if on_run_select is None:
+        return chart
+
+    def select(rows: pd.DataFrame) -> None:
+        if not rows.empty:
+            on_run_select(rows["run"].iloc[0])
+
+    return mo.ui.altair_chart(
+        chart, chart_selection=False, legend_selection=False, on_change=select
+    )

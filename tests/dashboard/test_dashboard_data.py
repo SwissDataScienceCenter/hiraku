@@ -237,6 +237,8 @@ def test_tree_rows_nest_runs_under_records_in_execution_order(
     assert rows[0]["loss"] == ""
     assert rows[2]["loss"] == 0.9
     assert rows[2]["Type"] == "run"
+    assert rows[2]["Record / run"] == "r0"
+    assert rows[-1]["Record / run"] == "r5"
     assert rows[2]["Started"] == "2026-10-14 10:00:00"
     assert rows[-2]["Started"] == ""
     assert [row["Duration"] for row in rows] == [
