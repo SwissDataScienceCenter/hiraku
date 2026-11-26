@@ -59,13 +59,13 @@ def test_build_command_leaves_automatic_port_selection_to_marimo(edit: bool) -> 
     assert command[command.index("--host") + 1] == "127.0.0.1"
 
 
-def test_bundled_views_place_all_interactive_cells() -> None:
+def test_default_views_place_all_interactive_cells() -> None:
     from marimo._ast.load import load_app
 
-    app = load_app(str(launcher.BUNDLED_NOTEBOOK))
+    app = load_app(str(launcher.DEFAULT_NOTEBOOK))
     assert app._config.css_file
-    assert (launcher.BUNDLED_NOTEBOOK.parent / app._config.css_file).is_file()
-    view = (launcher.BUNDLED_VIEWS / "dashboard" / "index.html").read_text(
+    assert (launcher.DEFAULT_NOTEBOOK.parent / app._config.css_file).is_file()
+    view = (launcher.DEFAULT_VIEWS / "dashboard" / "index.html").read_text(
         encoding="utf-8"
     )
     placed = set(re.findall(r'<marimo-cell name="([^"]+)">', view))
@@ -95,21 +95,21 @@ def test_init_dashboard_copies_the_notebook(project: Project) -> None:
 
     assert notebook == project.hiraku_dir / "dashboard" / "app.py"
     assert notebook.read_text(encoding="utf-8") == (
-        launcher.BUNDLED_NOTEBOOK.read_text(encoding="utf-8")
+        launcher.DEFAULT_NOTEBOOK.read_text(encoding="utf-8")
     )
     assert (notebook.parent / "studio/dashboard/components.css").read_bytes() == (
-        launcher.BUNDLED_VIEWS / "dashboard/components.css"
+        launcher.DEFAULT_VIEWS / "dashboard/components.css"
     ).read_bytes()
     view = notebook.parent / "studio" / "dashboard" / "index.html"
     assert view.read_text(encoding="utf-8") == (
-        (launcher.BUNDLED_VIEWS / "dashboard" / "index.html").read_text(
+        (launcher.DEFAULT_VIEWS / "dashboard" / "index.html").read_text(
             encoding="utf-8"
         )
     )
     for logo in ("sdsc-logo.svg", "sdsc-logo-white.svg"):
         relative = Path("dashboard") / "assets" / logo
         assert (notebook.parent / "studio" / relative).read_bytes() == (
-            launcher.BUNDLED_VIEWS / relative
+            launcher.DEFAULT_VIEWS / relative
         ).read_bytes()
     assert (notebook.parent / ".gitignore").read_text() == (
         "__marimo__/\nstudio/.locks/\nstudio/*/.artifacts/\n"

@@ -287,8 +287,8 @@ def test_example_list_works_outside_a_project(tmp_path: Path, monkeypatch) -> No
 
     assert result.exit_code == 0
     assert "digits" in result.output
-    assert "workflows" not in result.output
-    assert "heart-disease" not in result.output
+    assert "Digits" in result.output
+    assert "Compare regularization strengths" in result.output
     assert list(tmp_path.iterdir()) == []
 
 
@@ -307,10 +307,34 @@ def test_init_and_example_create_accept_destination(
     )
     assert Project.load(tmp_path / "demo/hiraku.yml").root == tmp_path / "demo"
     assert (tmp_path / "demo/train.py").is_file()
+    assert (tmp_path / "demo/README.md").is_file()
+    assert (tmp_path / "demo/hiraku/leaderboards/default.yml").is_file()
+    for path in (
+        ".agents/skills/hiraku/SKILL.md",
+        ".claude/skills/hiraku/SKILL.md",
+        ".mcp.json",
+        ".pi/mcp.json",
+        ".codex/config.toml",
+    ):
+        assert (tmp_path / "demo" / path).read_bytes() == (
+            tmp_path / "research" / path
+        ).read_bytes()
+    assert not (tmp_path / "demo/hiraku/workflows").exists()
+    assert not list((tmp_path / "demo/hiraku/records").rglob("*.md"))
     assert not (tmp_path / "demo/mlflow.db").exists()
 
 
-def test_example_create_copies_bundled_results(tmp_path: Path, monkeypatch) -> None:
+def test_init_rejects_template_option(tmp_path: Path) -> None:
+    target = tmp_path / "project"
+    result = invoke("init", str(target), "--template", str(tmp_path))
+
+    assert result.exit_code == 2
+    assert "No such option" in result.output
+    assert "--template" in result.output
+    assert not target.exists()
+
+
+def test_example_create_copies_prepared_results(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
 
     result = invoke("example", "create", "digits", "--with-results")
@@ -322,20 +346,6 @@ def test_example_create_copies_bundled_results(tmp_path: Path, monkeypatch) -> N
     assert project.vault.load("digit-classification/weak-l2").title == (
         "Weak L2 regularization"
     )
-
-
-@pytest.mark.parametrize("option", ["--generate", "--with-generator"])
-def test_example_create_rejects_generator_options(
-    tmp_path: Path, monkeypatch, option: str
-) -> None:
-    monkeypatch.chdir(tmp_path)
-
-    result = invoke("example", "create", "digits", option)
-
-    assert result.exit_code == 2
-    assert "No such option" in result.output
-    assert option in result.output
-    assert not (tmp_path / "digits").exists()
 
 
 def test_init_reports_existing_project_without_overwriting_it(
@@ -352,15 +362,11 @@ def test_init_reports_existing_project_without_overwriting_it(
     assert project.path.read_bytes() == marker_before
 
 
-def test_init_rejects_example_options_and_example_create_requires_example(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_example_create_requires_example(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
 
-    invalid_init = invoke("init", "--example")
     missing_example = invoke("example", "create")
 
-    assert invalid_init.exit_code == 2
     assert missing_example.exit_code == 2
     assert list(tmp_path.iterdir()) == []
 
@@ -567,12 +573,6 @@ def test_record_update_preserves_child_parent(tmp_path: Path, monkeypatch) -> No
     assert updated.parent_id == parent.id
     assert updated.count == 1
     assert project.vault.load(child.id).related_to == []
-
-
-def test_results_flag_requires_example(tmp_path: Path):
-    result = CliRunner().invoke(main, ["init", str(tmp_path), "--with-results"])
-    assert result.exit_code == 2
-    assert "No such option" in result.output
 
 
 def create_tracked_project(*args, **kwargs):

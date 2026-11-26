@@ -13,7 +13,6 @@ import pytest
 from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 
-import hiraku.project
 from hiraku.errors import (
     ProjectExistsError,
     ProjectNotFoundError,
@@ -183,7 +182,7 @@ def test_init_discovery_resources_and_skill_opt_out(tmp_path: Path) -> None:
         Project.discover(tmp_path / "missing")
 
 
-def test_init_installs_all_bundled_skill_files(tmp_path: Path) -> None:
+def test_init_installs_all_included_skill_files(tmp_path: Path) -> None:
     Project.create(tmp_path)
     source = Path(str(files("hiraku.resources").joinpath("skills")))
     expected = {
@@ -200,67 +199,6 @@ def test_init_installs_all_bundled_skill_files(tmp_path: Path) -> None:
             if path.is_file()
         }
         assert actual == expected
-
-
-def test_init_from_template_applies_overlay(tmp_path: Path) -> None:
-    template = tmp_path / "template"
-    (template / "custom/dispatch").mkdir(parents=True)
-    (template / "empty").mkdir()
-    (template / "hiraku").mkdir()
-    (template / "hiraku.yml").write_text("hiraku_dir: custom\n")
-    launcher = template / "custom/dispatch/launch.sh"
-    launcher.write_text("#!/bin/sh\necho template\n")
-    launcher.chmod(0o744)
-    (template / ".example-dotfile").write_text("included\n")
-    (template / "payload.bin").write_bytes(b"\x00\xfftemplate")
-
-    root = tmp_path / "project"
-    config = Project.create(
-        root,
-        template=template,
-        install_skill=False,
-    )
-
-    assert config.hiraku_dir == root / "custom"
-    assert launcher.read_text() == (root / "custom/dispatch/launch.sh").read_text()
-    assert (root / "custom/dispatch/launch.sh").stat().st_mode & 0o111
-    assert not (root / "custom/dispatch/worktree.sh").exists()
-    assert (root / ".example-dotfile").read_text() == "included\n"
-    assert (root / "payload.bin").read_bytes() == b"\x00\xfftemplate"
-    assert (root / "empty").is_dir()
-
-
-def test_init_from_packaged_example_copies_only_src(
-    tmp_path: Path, monkeypatch
-) -> None:
-    resources = tmp_path / "resources"
-    examples = tmp_path / "examples"
-    for name in ("workflows", "dispatch"):
-        (resources / name).mkdir(parents=True)
-    example = examples / "demo"
-    (example / "src").mkdir(parents=True)
-    (example / "README.md").write_text("do not copy")
-    (example / "example.yml").write_text("description: Demo\n")
-    (example / "src/copied.txt").write_text("copied")
-    monkeypatch.setattr(hiraku.project, "files", lambda package: resources)
-    monkeypatch.setattr(hiraku.project, "_examples_root", lambda: examples)
-
-    root = tmp_path / "project"
-    Project.create(root, example="demo", install_skill=False)
-
-    assert (root / "copied.txt").read_text() == "copied"
-    assert not (root / "README.md").exists()
-    assert not (root / "example.yml").exists()
-    with pytest.raises(ValidationError, match="available examples: demo"):
-        Project.create(tmp_path / "unknown", example="missing")
-
-
-def test_init_rejects_conflicting_template_sources(tmp_path: Path) -> None:
-    template = tmp_path / "template"
-    template.mkdir()
-
-    with pytest.raises(ValidationError, match="mutually exclusive"):
-        Project.create(tmp_path / "project", template=template, example="demo")
 
 
 def test_load_project_through_symlinked_directory(tmp_path: Path) -> None:
@@ -344,58 +282,6 @@ def test_init_leaves_inline_codex_mcp_servers_unchanged(tmp_path: Path) -> None:
     with pytest.raises(ValidationError, match=r"\[mcp_servers.hiraku\] table"):
         Project.create(tmp_path, install_skill=False)
     assert codex.read_text() == original
-
-
-def test_base_example_has_no_results(tmp_path: Path):
-    config = Project.create(tmp_path, example="digits", install_skill=False)
-    assert (tmp_path / "train.py").is_file()
-    assert not (tmp_path / "runs.csv").exists()
-    assert not list(config.records_dir.rglob("*.md"))
-
-
-@pytest.mark.parametrize("example", [None, "minimal"])
-def test_unavailable_results_leave_no_project(tmp_path: Path, example):
-    with pytest.raises(ValidationError, match="Unknown example|requires|no results"):
-        Project.create(tmp_path, example=example, results=True)
-    assert not (tmp_path / "hiraku.yml").exists()
-
-
-def test_results_include_leaderboard_configuration(tmp_path: Path):
-    config = Project.create(
-        tmp_path,
-        example="digits",
-        results=True,
-        install_skill=False,
-    )
-    assert Leaderboard.load(config).source.model_dump(
-        mode="json", exclude_none=True
-    ) == {
-        "type": "mlflow",
-        "experiment_name": "hiraku-digits",
-    }
-    assert config.vault.load("digit-classification").id == "digit-classification"
-
-
-def test_results_override_base_files(tmp_path: Path, monkeypatch):
-    resources = tmp_path / "resources"
-    examples = tmp_path / "examples"
-    base = examples / "layered/src"
-    results = examples / "layered/results"
-    (resources / "workflows").mkdir(parents=True)
-    base.mkdir(parents=True)
-    results.mkdir()
-    (base / "train.py").write_text("base")
-    (base / "hiraku.yml").write_text("hiraku_dir: base-data\n")
-    (results / "train.py").write_text("results")
-    (results / "hiraku.yml").write_text("hiraku_dir: results-data\n")
-    monkeypatch.setattr(hiraku.project, "files", lambda package: resources)
-    monkeypatch.setattr(hiraku.project, "_examples_root", lambda: examples)
-    target = tmp_path / "target"
-    config = Project.create(
-        target, example="layered", results=True, install_skill=False
-    )
-    assert (target / "train.py").read_text() == "results"
-    assert config.hiraku_dir_name == "results-data"
 
 
 RUN_AGENT_TESTS = os.environ.get("HIRAKU_RUN_CODEX_SKILL_TESTS") == "1"

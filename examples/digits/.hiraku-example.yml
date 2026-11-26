@@ -1,0 +1,12 @@
+title: Digits
+description: Compare regularization strengths while logging learning curves to MLflow.
+results:
+  - "hiraku/records/**/*.md"
+  - mlflow.db
+exclude:
+  - .agents
+  - .hiraku
+  - .venv
+  - "**/__pycache__"
+  - "mlflow.db-*"
+  - mlruns

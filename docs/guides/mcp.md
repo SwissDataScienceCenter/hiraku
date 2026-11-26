@@ -64,7 +64,7 @@ for trusted projects. The MCP tools are exposed directly by the host, so no
 extra `AGENTS.md` or Claude skill instructions are needed to register them.
 For agent-launched commands, prefer the `job_submit` MCP tool. Read command
 output with `job_logs`; call `job_status` or `job_list` when execution state is
-needed. Use `job_cancel` to stop a running job. The bundled Hiraku skill gives
+needed. Use `job_cancel` to stop a running job. The Hiraku skill included with
 the same guidance and describes CLI fallback when MCP tools are unavailable or
 the user asks for CLI commands.
 

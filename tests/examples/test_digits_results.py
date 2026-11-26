@@ -8,14 +8,13 @@ from math import isfinite
 from pathlib import Path
 
 from hiraku import Project
+from hiraku.examples import Example
 from hiraku.job import prepare_job, run_local
 from hiraku.tracking import Leaderboard
 
 
-def test_bundled_digits_database_is_portable(
-    tmp_path, monkeypatch, mlflow_server_factory
-):
-    Project.create(tmp_path, example="digits", results=True, install_skill=False)
+def test_digits_database_is_portable(tmp_path, monkeypatch, mlflow_server_factory):
+    Example.create("digits", tmp_path, with_results=True)
     project = Project.discover(tmp_path)
     assert {record.id: record.title for record in project.vault.list()} == {
         "digit-classification": "Digit classification",
@@ -27,7 +26,6 @@ def test_bundled_digits_database_is_portable(
     }
     tracking_uri = mlflow_server_factory(tmp_path / "mlflow.db")
     monkeypatch.setenv("MLFLOW_TRACKING_URI", tracking_uri)
-    assert not (tmp_path / "generate_results.py").exists()
     with sqlite3.connect(tmp_path / "mlflow.db") as db:
         assert db.execute(
             "SELECT status, COUNT(*) FROM runs GROUP BY status"
@@ -68,11 +66,11 @@ def test_bundled_digits_database_is_portable(
     assert {row["source"] for row in rows} == {"mlflow"}
 
 
-def test_append_run_to_bundled_digits_results(
+def test_append_run_to_prepared_digits_results(
     tmp_path, monkeypatch, mlflow_server_factory
 ):
-    config = Project.create(
-        tmp_path / "digits", example="digits", results=True, install_skill=False
+    config = Project.load(
+        Example.create("digits", tmp_path / "digits", with_results=True)
     )
     tracking_uri = mlflow_server_factory(config.root / "mlflow.db")
     monkeypatch.setenv("MLFLOW_TRACKING_URI", tracking_uri)

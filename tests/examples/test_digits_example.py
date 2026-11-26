@@ -15,7 +15,7 @@ from hiraku.project import Project
 
 REPOSITORY = Path(__file__).parents[2]
 EXAMPLE = REPOSITORY / "examples" / "digits"
-OVERLAY = EXAMPLE / "src"
+OVERLAY = EXAMPLE
 
 
 def git(path: Path, *arguments: str) -> str:
@@ -51,8 +51,7 @@ def test_digits_curves_from_committed_launches(
     runner = CliRunner()
     initialized = invoke(runner, ["example", "create", "digits", "."])
     assert initialized.exit_code == 0
-    assert not (project / "README.md").exists()
-    assert not (project / "example.yml").exists()
+    assert (project / "README.md").is_file()
     git(project, "add", ".")
     git(project, "commit", "-m", "initialize Digits example")
     invoke(
