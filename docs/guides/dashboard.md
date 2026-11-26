@@ -1,6 +1,6 @@
 # Dashboard
 
-`hiraku dashboard` serves a local page for browsing records and the runs
+`hiraku dashboard serve` serves a local page for browsing records and the runs
 attributed to them. The page is a [marimo](https://marimo.io) notebook served
 through [Marimo Studio](https://marimo-team.github.io/marimo-studio/). Its
 performance and metric trade-off plots are separate, independently placeable cells.
@@ -20,26 +20,25 @@ Run every command from inside a Hiraku project.
 
 | Command | Mode | What it does |
 | --- | --- | --- |
-| `hiraku dashboard` | View | Serves the dashboard with record Markdown editing. |
-| `hiraku dashboard --watch` | Watch | Reloads the notebook when it changes on disk. |
-| `hiraku dashboard --include-code` | View with code | Same page; marimo's menu can also show each cell's code. |
+| `hiraku dashboard serve` | View | Serves the dashboard with record Markdown editing. |
+| `hiraku dashboard serve --watch` | Watch | Reloads the notebook when it changes on disk. |
+| `hiraku dashboard serve --include-code` | View with code | Same page; marimo's menu can also show each cell's code. |
 | `hiraku dashboard create NAME` | Customize | Creates `hiraku/dashboards/NAME.py` and its Studio view. |
 | `hiraku dashboard list` | Discover | Lists project dashboard names. |
 | `hiraku dashboard serve NAME` | View | Serves the named notebook. |
 | `hiraku dashboard edit NAME` | Edit | Opens the notebook in marimo-studio. |
 
-Without a name, `hiraku dashboard serve` serves the sole project dashboard.
-With several dashboards, it asks you to select a name. With none, it serves the
-bundled dashboard without writing project files. `hiraku dashboard` is shorthand
-for this default behavior. Existing `hiraku/dashboard/app.py` copies remain
+With no project dashboards, `hiraku dashboard serve` serves the bundled
+dashboard without writing project files. With one project dashboard, it serves
+that dashboard. With several, use `hiraku dashboard serve NAME`.
+Existing `hiraku/dashboard/app.py` copies remain
 available as `overview`; a new `hiraku/dashboards/overview.py` takes precedence.
-The older `--init` flag creates `overview`. Editing uses `hiraku dashboard edit`;
-the `--edit` flag is no longer supported. Omit the name to edit the sole dashboard.
+Use `hiraku dashboard edit` without a name to edit the sole project dashboard.
 
 ### View
 
 ```bash
-hiraku dashboard --record digit-classification
+hiraku dashboard serve --record digit-classification
 ```
 
 The page is served on localhost and opens in your browser. Hiraku selects a
@@ -77,7 +76,7 @@ to `hiraku/dashboards/exploration.py`.
 The default template copies the notebook to `hiraku/dashboards/overview.py` and the Studio view,
 including its HTML, CSS, and logos, to `hiraku/dashboards/studio/overview/`, with a
 `.gitignore` for marimo's `__marimo__/` caches and Studio's build state. From then on,
-`hiraku dashboard` serves this copy instead of the bundled notebook, so commit
+`hiraku dashboard serve` serves this copy when it is the sole dashboard, so commit
 it with the project. Creation refuses to overwrite an existing notebook or view
 directory. Each notebook has independent views under `studio/<name>/`.
 You can also add your own top-level `.py` Marimo notebooks to `hiraku/dashboards/`;
@@ -112,7 +111,7 @@ preview of the dashboard. It reloads when the file changes on disk, for
 example when an agent edits it. The view's `index.html` places the notebook's
 named cells on the page; add a named cell there to show it on the dashboard. Editing requires a copy;
 run `hiraku dashboard create overview` first.
-Saved changes appear the next time you run `hiraku dashboard`.
+Saved changes appear the next time you run `hiraku dashboard serve`.
 
 The notebook editor runs arbitrary code, so, unlike the dashboard, it is protected
 by marimo's access token, which is part of the URL it prints and opens. You can
@@ -123,7 +122,7 @@ location.
 ## Leaderboards
 
 Choose a leaderboard using the selector, or open one with
-`hiraku dashboard --leaderboard NAME`. A sole leaderboard is selected automatically.
+`hiraku dashboard serve --leaderboard NAME`. A sole leaderboard is selected automatically.
 Plots show attributed runs by default, including runs whose record files are
 missing. Enable **Include unattributed runs** to show the entire source.
 Without an initial `--record`, plots span the selected leaderboard; select
@@ -380,14 +379,14 @@ Keep the server running. In another terminal in the project directory:
 
 ```bash
 export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
-hiraku dashboard --record digit-classification
+hiraku dashboard serve --record digit-classification
 ```
 
 The dashboard reads the six bundled runs through the MLflow server.
 You can also try the other modes in that project:
 
 ```bash
-hiraku dashboard --include-code --record digit-classification
+hiraku dashboard serve --include-code --record digit-classification
 hiraku dashboard create overview
 hiraku dashboard edit overview --record digit-classification
 ```

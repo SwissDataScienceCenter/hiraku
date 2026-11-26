@@ -9,6 +9,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Removed
 
 - **Breaking:** Remove the top-level `hiraku status` command.
+- **Breaking:** Use `hiraku dashboard serve` to open the dashboard and
+  `hiraku dashboard create overview` to copy the bundled dashboard into the project.
 
 ### Changed
 

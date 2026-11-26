@@ -1044,61 +1044,9 @@ def run_list(
         _print_table(columns, rows)
 
 
-@main.group("dashboard", invoke_without_command=True)
-@click.option(
-    "--leaderboard", "leaderboard_name", help="Leaderboard selected when opening."
-)
-@click.option("--record", "record_id", help="Record selected when the page opens.")
-@click.option(
-    "--port",
-    type=click.IntRange(1, 65535),
-    help="Use this port; otherwise automatically choose a free port from 2718.",
-)
-@click.option("--no-browser", is_flag=True, help="Do not open a browser window.")
-@click.option("--watch", is_flag=True, help="Reload when the notebook changes.")
-@click.option(
-    "--init",
-    "initialize",
-    is_flag=True,
-    help="Copy the dashboard notebook into the project and exit.",
-)
-@click.option(
-    "--include-code",
-    is_flag=True,
-    help="Let the read-only dashboard show its notebook code.",
-)
-@click.pass_obj
-def dashboard_command(
-    state: CLIContext,
-    leaderboard_name: str | None,
-    record_id: str | None,
-    port: int | None,
-    no_browser: bool,
-    watch: bool,
-    initialize: bool,
-    include_code: bool,
-) -> None:
-    """Browse records and tracked runs in a local, read-only dashboard."""
-    from .dashboard.launcher import init_dashboard, serve_dashboard
-
-    if click.get_current_context().invoked_subcommand is not None:
-        return
-    if initialize:
-        click.echo(f"Created dashboard: {init_dashboard(state.project)}")
-        return
-    exit_code = serve_dashboard(
-        state.project,
-        name=None,
-        leaderboard_name=leaderboard_name,
-        record_id=record_id,
-        port=port,
-        no_browser=no_browser,
-        edit=False,
-        include_code=include_code,
-        watch=watch,
-    )
-    if exit_code:
-        raise click.exceptions.Exit(exit_code)
+@main.group("dashboard")
+def dashboard_command() -> None:
+    """Serve, edit, and manage project dashboards."""
 
 
 @dashboard_command.command("create")
@@ -1143,7 +1091,7 @@ def dashboard_list(state: CLIContext) -> None:
 @click.option("--include-code", is_flag=True, help="Include read-only notebook code.")
 @click.pass_obj
 def dashboard_serve(state: CLIContext, name: str | None, **options: Any) -> None:
-    """Serve a named dashboard, or the sole project dashboard."""
+    """Serve a named dashboard, the sole project dashboard, or the bundled one."""
     from .dashboard.launcher import serve_dashboard
 
     exit_code = serve_dashboard(state.project, name=name, **options)

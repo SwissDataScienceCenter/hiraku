@@ -170,8 +170,7 @@ def serve_dashboard(
         # The bundled notebook is installed package data; edits would be lost.
         raise ValidationError(
             "This project has no dashboard to edit. "
-            "Create one with: hiraku dashboard create overview "
-            "(or hiraku dashboard --init)"
+            "Create one with: hiraku dashboard create overview"
         )
     if record_id is not None:
         project.vault.load(record_id)

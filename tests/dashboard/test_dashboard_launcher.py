@@ -194,7 +194,7 @@ def test_serve_dashboard_prefers_the_project_notebook(
 
 
 def test_serve_dashboard_edit_requires_init(project: Project) -> None:
-    with pytest.raises(ValidationError, match="hiraku dashboard --init"):
+    with pytest.raises(ValidationError, match="hiraku dashboard create overview"):
         launcher.serve_dashboard(project, edit=True)
 
 
@@ -228,6 +228,7 @@ def test_dashboard_cli_forwards_options(
         main,
         [
             "dashboard",
+            "serve",
             "--record",
             "a",
             "--port",
@@ -245,14 +246,13 @@ def test_dashboard_cli_forwards_options(
         "record_id": "a",
         "port": 9000,
         "no_browser": True,
-        "edit": False,
         "include_code": True,
         "watch": True,
         "root": project.root,
     }
 
 
-def test_dashboard_cli_init_only_creates_notebook(
+def test_dashboard_cli_requires_subcommand(
     project: Project, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     served = []
@@ -262,14 +262,15 @@ def test_dashboard_cli_init_only_creates_notebook(
     monkeypatch.chdir(project.root)
     runner = CliRunner()
 
-    result = runner.invoke(main, ["dashboard", "--init"])
-
-    assert result.exit_code == 0, result.output
-    assert "Created dashboard:" in result.output
+    result = runner.invoke(main, ["dashboard"])
+    assert result.exit_code == 2
+    assert "serve" in result.output
+    removed = runner.invoke(main, ["dashboard", "--init"])
+    assert removed.exit_code == 2
+    assert "No such option" in removed.output
+    assert "--init" in removed.output
     assert not served
-    again = runner.invoke(main, ["dashboard", "--init"])
-    assert again.exit_code != 0
-    assert "Dashboard already exists" in again.output
+    assert not launcher.list_dashboards(project)
 
 
 def test_dashboard_cli_propagates_server_exit_code(
@@ -278,7 +279,7 @@ def test_dashboard_cli_propagates_server_exit_code(
     monkeypatch.setattr(launcher, "serve_dashboard", lambda config, **options: 3)
     monkeypatch.chdir(project.root)
 
-    assert CliRunner().invoke(main, ["dashboard"]).exit_code == 3
+    assert CliRunner().invoke(main, ["dashboard", "serve"]).exit_code == 3
 
 
 def test_dashboard_cli_defaults_to_automatic_port_selection(
@@ -293,7 +294,7 @@ def test_dashboard_cli_defaults_to_automatic_port_selection(
     monkeypatch.setattr(launcher, "serve_dashboard", serve)
     monkeypatch.chdir(project.root)
 
-    result = CliRunner().invoke(main, ["dashboard"])
+    result = CliRunner().invoke(main, ["dashboard", "serve"])
 
     assert result.exit_code == 0, result.output
     assert received["port"] is None

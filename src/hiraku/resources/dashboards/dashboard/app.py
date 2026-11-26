@@ -6,7 +6,7 @@
 # default = "dashboard"
 # view_root = "studio"
 # ///
-"""Dashboard wiring. Start with ``hiraku dashboard`` or edit a project copy.
+"""Dashboard wiring. Start with ``hiraku dashboard serve`` or edit a project copy.
 
 Reusable UI lives in ``hiraku.dashboard.components``; the Studio view owns
 branding and layout. Keep loading, selection, and reactive widget reads here.
