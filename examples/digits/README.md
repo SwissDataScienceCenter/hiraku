@@ -58,8 +58,8 @@ export MLFLOW_TRACKING_URI="http://127.0.0.1:5000"
 hiraku dashboard serve --record digit-classification
 ```
 
-Use `hiraku dashboard create overview` to copy the notebook into the project,
-then open it with `hiraku dashboard edit overview --record digit-classification`.
+Use `hiraku dashboard create` to copy the notebook into the project,
+then open it with `hiraku dashboard edit --record digit-classification`.
 Run details link to the MLflow UI when
 the dashboard is configured with its URL. See the dashboard guide for details.
 

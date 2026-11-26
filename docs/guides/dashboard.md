@@ -23,7 +23,7 @@ hiraku dashboard serve
 ```
 
 Hiraku opens the dashboard in your browser and prints its local URL in the
-terminal. For projects without a dashboard of their own, it opens the included
+terminal. For projects without `hiraku/dashboards/dashboard.py`, it opens the included
 dashboard without writing project files. Press Ctrl-C to stop the server.
 
 In the leaderboard's **Table** view, use **Columns** to show more metrics,
@@ -42,20 +42,22 @@ parameters, or run provenance.
 Copy the included dashboard into your project to customize the marimo notebook, layout and plots.
 
 ```bash
-hiraku dashboard create overview
+hiraku dashboard create
 ```
 
-Edit the cells in `hiraku/dashboards/overview.py` directly or open the notebook
-editor with `hiraku dashboard edit overview`. The Studio layout and styles
-live in `hiraku/dashboards/studio/overview/dashboard/`.
+Edit the cells in `hiraku/dashboards/dashboard.py` directly or open the notebook
+editor with `hiraku dashboard edit`. The Studio layout and styles
+live in `hiraku/dashboards/studio/dashboard/html/`.
 
 To open your copy in the browser, run:
 
 ```bash
-hiraku dashboard serve overview
+hiraku dashboard serve
 ```
 
-If the project has only one dashboard, you can omit its name. Use
+Without a name, `serve`, `edit`, and `create` use `dashboard.py`. If it is missing,
+`serve` runs the bundled dashboard and `edit` copies it into the project before
+opening the editor. Pass a name to work with another dashboard. Use
 `hiraku dashboard list` to see the available names.
 
 For a plain Marimo starter, run

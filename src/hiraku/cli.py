@@ -1050,7 +1050,7 @@ def dashboard_command() -> None:
 
 
 @dashboard_command.command("create")
-@click.argument("name")
+@click.argument("name", required=False)
 @click.option(
     "--template",
     type=click.Choice(["dashboard", "notebook"]),
@@ -1059,13 +1059,14 @@ def dashboard_command() -> None:
     help="Bundled starter to copy.",
 )
 @click.pass_obj
-def dashboard_create(state: CLIContext, name: str, template: str) -> None:
-    """Create a named copy of the bundled dashboard."""
-    from .dashboard.launcher import init_dashboard
+def dashboard_create(state: CLIContext, name: str | None, template: str) -> None:
+    """Create a dashboard notebook (default: dashboard.py)."""
+    from .dashboard.launcher import DEFAULT_NAME, init_dashboard
 
-    click.echo(
-        f"Created dashboard: {init_dashboard(state.project, name, template=template)}"
+    notebook = init_dashboard(
+        state.project, DEFAULT_NAME if name is None else name, template=template
     )
+    click.echo(f"Created dashboard: {notebook}")
 
 
 @dashboard_command.command("list")
@@ -1076,7 +1077,7 @@ def dashboard_list(state: CLIContext) -> None:
 
     dashboards = list_dashboards(state.project)
     if not dashboards:
-        click.echo("No project dashboards. Use: hiraku dashboard create NAME")
+        click.echo("No project dashboards. Use: hiraku dashboard create")
     for name in sorted(dashboards):
         click.echo(name)
 
@@ -1091,7 +1092,7 @@ def dashboard_list(state: CLIContext) -> None:
 @click.option("--include-code", is_flag=True, help="Include read-only notebook code.")
 @click.pass_obj
 def dashboard_serve(state: CLIContext, name: str | None, **options: Any) -> None:
-    """Serve a named dashboard, the sole project dashboard, or the bundled one."""
+    """Serve a dashboard (default: local or bundled dashboard.py)."""
     from .dashboard.launcher import serve_dashboard
 
     exit_code = serve_dashboard(state.project, name=name, **options)
@@ -1107,7 +1108,7 @@ def dashboard_serve(state: CLIContext, name: str | None, **options: Any) -> None
 @click.option("--no-browser", is_flag=True, help="Do not open a browser window.")
 @click.pass_obj
 def dashboard_edit(state: CLIContext, name: str | None, **options: Any) -> None:
-    """Edit a named dashboard, or the sole project dashboard, in marimo-studio."""
+    """Edit a dashboard (default: dashboard.py, copied into the project if needed)."""
     from .dashboard.launcher import serve_dashboard
 
     exit_code = serve_dashboard(state.project, name=name, edit=True, **options)

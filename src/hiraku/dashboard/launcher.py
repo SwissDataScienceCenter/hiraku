@@ -18,6 +18,7 @@ from ..record import validate_identifier
 from ..tracking import Leaderboard
 
 DEFAULT_HOST = "127.0.0.1"
+DEFAULT_NAME = "dashboard"
 TEMPLATES = files("hiraku") / "resources" / "dashboards"
 
 
@@ -33,7 +34,7 @@ def _copy_resources(source: Traversable, destination: Path) -> None:
             target.write_bytes(item.read_bytes())
 
 
-def project_notebook(project: Project, name: str = "overview") -> Path:
+def project_notebook(project: Project, name: str = DEFAULT_NAME) -> Path:
     """Return a named dashboard's destination in the project."""
     validate_identifier(name, label="dashboard name")
     path = project.hiraku_dir / "dashboards" / f"{name}.py"
@@ -53,7 +54,7 @@ def list_dashboards(project: Project) -> dict[str, Path]:
 
 def init_dashboard(
     project: Project,
-    name: str = "overview",
+    name: str = DEFAULT_NAME,
     *,
     template: Literal["dashboard", "notebook"] = "dashboard",
 ) -> Path:
@@ -79,7 +80,7 @@ def init_dashboard(
 
 
 def _copy_bundled(
-    directory: Path, name: str = "overview", *, template: str = "dashboard"
+    directory: Path, name: str = DEFAULT_NAME, *, template: str = "dashboard"
 ) -> Path:
     """Copy the bundled notebook and its Studio views into ``directory``."""
     bundle = TEMPLATES / template
@@ -140,34 +141,18 @@ def serve_dashboard(
 ) -> int:
     """Serve the dashboard until interrupted and return marimo's exit code.
 
-    Select a notebook by name, or use the sole project notebook. With none,
-    serve a temporary copy of the bundled dashboard.
+    With no name, use the project's dashboard.py or the bundled dashboard.
+    Editing the bundled dashboard first copies it into the project.
 
     Raises:
-        hiraku.errors.ValidationError: If the dashboard extra is missing, or if
-            ``edit`` is requested for a project without its own notebook.
+        hiraku.errors.ValidationError: If the dashboard extra is missing or the
+            requested notebook is unavailable.
         hiraku.errors.RecordNotFoundError: If ``record_id`` does not exist.
     """
-    dashboards = list_dashboards(project)
-    if name is not None:
-        project_notebook(project, name)
-        if name not in dashboards:
-            raise ValidationError(f"Dashboard not found: {name}")
-        local = dashboards[name]
-    elif len(dashboards) > 1:
-        raise ValidationError(
-            "Choose a dashboard: "
-            + ", ".join(sorted(dashboards))
-            + ". Use: hiraku dashboard serve NAME"
-        )
-    else:
-        local = next(iter(dashboards.values()), None)
-    if edit and local is None:
-        # The bundled notebook is installed package data; edits would be lost.
-        raise ValidationError(
-            "This project has no dashboard to edit. "
-            "Create one with: hiraku dashboard create overview"
-        )
+    local = project_notebook(project, DEFAULT_NAME if name is None else name)
+    has_local = local.is_file()
+    if name is not None and not has_local:
+        raise ValidationError(f"Dashboard not found: {name}")
     if record_id is not None:
         project.vault.load(record_id)
     if leaderboard_name is not None:
@@ -196,8 +181,10 @@ def serve_dashboard(
         )
         return _wait(subprocess.Popen(command, cwd=notebook.parent, env=environment))
 
-    if local is not None:
+    if has_local:
         return serve(local)
+    if edit:
+        return serve(init_dashboard(project))
     # marimo writes session caches beside the notebook and in its working
     # directory, so run a copy from a scratch directory outside the project.
     with tempfile.TemporaryDirectory(prefix="hiraku-dashboard-") as directory:

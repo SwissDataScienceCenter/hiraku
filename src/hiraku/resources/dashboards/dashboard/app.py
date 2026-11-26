@@ -3,7 +3,7 @@
 # theme = "system"
 #
 # [tool.marimo-studio]
-# default = "dashboard"
+# default = "html"
 # view_root = "studio"
 # ///
 """Dashboard wiring. Start with ``hiraku dashboard serve`` or edit a project copy.
@@ -15,7 +15,7 @@ branding and layout. Keep loading, selection, and reactive widget reads here.
 import marimo
 
 __generated_with = "0.25.1"
-app = marimo.App(css_file="studio/dashboard/components.css")
+app = marimo.App(css_file="studio/html/components.css")
 
 
 with app.setup:

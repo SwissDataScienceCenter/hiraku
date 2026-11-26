@@ -21,7 +21,7 @@ BUNDLED_VIEWS = Path(str(TEMPLATES / "dashboard" / "studio"))
 class BundledProvider(HtmlProvider):
     def create(self, starter, context):
         plan = super().create(starter, context)
-        root = BUNDLED_VIEWS / "dashboard"
+        root = BUNDLED_VIEWS / "html"
         files = {
             PurePosixPath(path.relative_to(root).as_posix()): path.read_bytes()
             for path in root.rglob("*")
@@ -44,7 +44,7 @@ def test_registered_provider_publishes_starter():
 
 def test_bundled_view_publishes_linked_images_and_styles():
     view = check_provider(BundledProvider())[0]
-    root = BUNDLED_VIEWS / "dashboard"
+    root = BUNDLED_VIEWS / "html"
     for name in ("sdsc-logo.svg", "sdsc-logo-white.svg"):
         path = PurePosixPath("assets") / name
         assert view.published[path] == (root / str(path)).read_bytes()
