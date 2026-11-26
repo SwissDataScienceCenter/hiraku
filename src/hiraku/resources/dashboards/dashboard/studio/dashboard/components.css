@@ -9,9 +9,9 @@
 .record-markdown p { margin: 0 0 0.65em; }
 .record-markdown h1, .record-markdown h2, .record-markdown h3 { margin: 1em 0 0.4em; }
 .record-markdown ul, .record-markdown ol { margin: 0.4em 0 0.8em; padding-left: 1.5em; }
-.record-navigation-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
-.record-navigation-header h2 { margin: 0; font: 600 18px/1.4 system-ui, sans-serif; }
-.record-navigation-mode { display: flex; justify-content: flex-end; margin-left: auto; }
+.record-navigation-header, .dashboard-block-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.record-navigation-header h2, .dashboard-block-header h2 { margin: 0; font: 600 18px/1.4 system-ui, sans-serif; }
+.record-navigation-mode, .dashboard-block-mode { display: flex; justify-content: flex-end; margin-left: auto; }
 :host(marimo-tabs) [role="tablist"] {
   gap: 1px;
   padding: 2px;
@@ -38,6 +38,34 @@
 }
 :host(marimo-tabs) [role="tab"] .markdown,
 :host(marimo-tabs) [role="tab"] .paragraph { font: inherit; margin: 0; }
+
+:host(marimo-dropdown) label .paragraph {
+  margin: 0;
+  font: 12px/1.4 system-ui, sans-serif;
+}
+:host(marimo-dropdown) select {
+  max-width: 100%;
+  height: auto;
+  min-height: 28px;
+  padding: 3px 8px;
+  border: 1px solid var(--border, #e2e4e8);
+  border-radius: 6px;
+  background: color-mix(in srgb, currentColor 3%, transparent);
+  color: inherit;
+  box-shadow: none;
+  font: 12px/1.4 system-ui, sans-serif;
+}
+:host(marimo-dropdown) select:focus-visible {
+  outline: 2px solid var(--primary-color, #5561a6);
+  outline-offset: 2px;
+}
+:host(marimo-dropdown) [part="label"]:has(.leaderboard-selector-label) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
 
 .record-tree { display: block; }
 .record-tree ul { list-style: none; margin: 0; padding: 0; }

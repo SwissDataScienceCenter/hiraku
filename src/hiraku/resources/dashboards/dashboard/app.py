@@ -58,12 +58,10 @@ def refresh_control(project_context, requested_leaderboard):
         value=requested_leaderboard
         if requested_leaderboard in _names
         else (_names[0] if len(_names) == 1 else None),
-        label="Leaderboard",
+        label='<span class="leaderboard-selector-label">Leaderboard</span>',
     )
-    include_unattributed = mo.ui.checkbox(
-        label="Include unattributed runs", value=False
-    )
-    mo.hstack([leaderboard_selector, include_unattributed, refresh], justify="end")
+    include_unattributed = mo.ui.checkbox(label="Include unattributed", value=False)
+    mo.hstack([refresh], justify="end")
     return refresh, leaderboard_selector, include_unattributed
 
 
@@ -100,6 +98,15 @@ def selection_state(leaderboard, records_df, requested_record, runs_df):
     if leaderboard is not None and leaderboard.metrics is not None:
         metrics = [item.name for item in leaderboard.metrics]
     tree_metric = metrics[0] if metrics else None
+    _run_order = "Run order"
+    while _run_order in metrics:
+        _run_order += " (execution)"
+    x_axis = mo.ui.dropdown(
+        {_run_order: None, **{name: name for name in metrics}},
+        value=_run_order,
+        label="X axis",
+    )
+    y_axis = mo.ui.dropdown(metrics, value=tree_metric, label="Y axis")
     initial_record = requested_record if requested_record in paths else None
     get_selection, _set_selection = mo.state(
         (f"record:{initial_record}" if initial_record else None, initial_record)
@@ -113,7 +120,16 @@ def selection_state(leaderboard, records_df, requested_record, runs_df):
             )
         )
 
-    return get_selection, initial_record, metrics, paths, select_key, tree_metric
+    return (
+        get_selection,
+        initial_record,
+        metrics,
+        paths,
+        select_key,
+        tree_metric,
+        x_axis,
+        y_axis,
+    )
 
 
 @app.cell
@@ -216,48 +232,56 @@ def run_details(selected_run):
 
 
 @app.cell
-def performance_controls(metrics, tree_metric):
-    metric = hc.performance_controls(metrics, tree_metric)
-    return (metric,)
+def leaderboard_plot(leaderboard, paths, runs_df, scope, selected_run, x_axis, y_axis):
+    _runs = hd.subtree(runs_df, paths.get(scope))
+    _x, _y = x_axis.value, y_axis.value
+    if _x is None:
+        plot_view = hc.performance_plot(
+            _runs, scope=scope, metric=_y, selected_run=selected_run
+        )
+    else:
+        _configured_metrics = leaderboard.metrics if leaderboard is not None else None
+        _directions = {item.name: item.direction for item in _configured_metrics or ()}
+        plot_view = hc.tradeoff_plot(
+            _runs,
+            x_metric=_x,
+            y_metric=_y,
+            x_objective=_directions.get(_x) or "minimize",
+            y_objective=_directions.get(_y) or "minimize",
+        )
+    plot_view = mo.vstack(
+        [plot_view, mo.hstack([x_axis, y_axis], justify="start", wrap=True)]
+    )
+    return (plot_view,)
 
 
 @app.cell
-def performance_plot(metric, paths, runs_df, scope, selected_run):
-    _content = hc.performance_plot(
-        hd.subtree(runs_df, paths.get(scope)),
-        scope=scope,
-        metric=metric.value,
-        selected_run=selected_run,
+def leaderboard_table(runs_df):
+    raw_leaderboard = mo.ui.table(
+        runs_df.drop(columns="record_path"),
+        selection=None,
+        page_size=50,
+        show_column_summaries=False,
+        show_data_types=False,
     )
-    mo.vstack([metric, _content])
-    return
+    return (raw_leaderboard,)
 
 
 @app.cell
-def tradeoff_controls(metrics, leaderboard):
-    _directions = (
-        {item.name: item.direction for item in (leaderboard.metrics or ())}
-        if leaderboard is not None
-        else {}
+def leaderboard_header(leaderboard_selector, include_unattributed):
+    leaderboard_mode = mo.ui.tabs({"Plot": "", "Table": ""}, value="Plot")
+    mo.Html(
+        '<div class="dashboard-block-header"><h2>Leaderboard</h2>'
+        f"{leaderboard_selector.text}{include_unattributed.text}"
+        f'<div class="dashboard-block-mode">{leaderboard_mode.text}</div></div>'
     )
-    x_metric, x_objective, y_metric, y_objective = hc.tradeoff_controls(
-        _directions, metrics
-    )
-    return x_metric, x_objective, y_metric, y_objective
+    return (leaderboard_mode,)
 
 
 @app.cell
-def tradeoff_plot(paths, runs_df, scope, x_metric, x_objective, y_metric, y_objective):
-    _content = hc.tradeoff_plot(
-        hd.subtree(runs_df, paths.get(scope)),
-        x_metric=x_metric.value,
-        y_metric=y_metric.value,
-        x_objective=x_objective.value,
-        y_objective=y_objective.value,
-    )
-    mo.vstack(
-        [mo.hstack([x_metric, x_objective, y_metric, y_objective], wrap=True), _content]
-    )
+def leaderboard_view(leaderboard_mode, plot_view, raw_leaderboard):
+    _view = plot_view if leaderboard_mode.value == "Plot" else raw_leaderboard
+    mo.vstack([_view])
     return
 
 

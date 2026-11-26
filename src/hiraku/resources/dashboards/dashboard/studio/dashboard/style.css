@@ -7,13 +7,7 @@
   margin: 0 -2.5rem 3rem;
   padding: 0.5rem 2.5rem;
 }
-.workspace {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 1.5rem;
-  margin-top: 1.5rem;
-  align-items: start;
-}
+.leaderboard { margin-bottom: 1.5rem; }
 .eyebrow { margin-bottom: 0.75rem; }
 h1 { margin: 0 0 1rem; }
 .intro { margin-bottom: 2rem; }
@@ -61,7 +55,6 @@ h1 { margin: 0 0 1rem; }
   .record-navigation { position: static; max-height: 45vh; }
   #app-shell { padding: 0 1.5rem 2.5rem; }
   .topbar { margin: 0 -1.5rem 2rem; padding: 0.5rem 1.5rem; }
-  .workspace { grid-template-columns: 1fr; }
 }
 @media (max-width: 600px) {
   #app-shell { padding: 0 1rem 2rem; }

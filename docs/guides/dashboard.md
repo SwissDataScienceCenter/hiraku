@@ -124,12 +124,24 @@ location.
 Choose a leaderboard using the selector, or open one with
 `hiraku dashboard serve --leaderboard NAME`. A sole leaderboard is selected automatically.
 Plots show attributed runs by default, including runs whose record files are
-missing. Enable **Include unattributed runs** to show the entire source.
+missing. Enable **Include unattributed** in the Leaderboard header to show
+the entire source.
 Without an initial `--record`, plots span the selected leaderboard; select
 **Clear selection** in the runs table to clear a subtree filter. Metric names and directions
 come from the leaderboard; parameters are discovered automatically.
 
 ## Sections
+
+**Leaderboard**
+:   Choose a leaderboard in either view. The axis selectors sit below the chart
+    in **Plot**. The **X axis** defaults to **Run order**. Choose a **Y axis**
+    metric to see performance in execution order,
+    with colours marking the record and a ring marking the selected run.
+    Choose a metric on both axes to compare trade-offs in the selected subtree.
+    Diamonds mark runs that no other run improves upon on one metric while
+    matching or improving the other. Metrics use their configured directions
+    and default to minimizing. **Table** shows one row per loaded run across the
+    leaderboard, with metrics, parameters, and attribution.
 
 **Record navigation**
 :   Choose the **Files** (default) or **Lineage** tab in the left sidebar.
@@ -180,18 +192,6 @@ come from the leaderboard; parameters are discovered automatically.
     Selecting a run shows its owning record, while the metric analysis keeps
     the selected comparison subtree when that run lies within it.
 
-**Performance over runs**
-:   Shows runs in the selected record subtree
-    in execution order, with a metric on the y axis. Colours mark the record
-    and a ring marks the selected run. Choose its y-axis metric independently
-    of the trade-off plot.
-
-**Metric trade-offs**
-:   Compares two metrics in the selected subtree; set whether each should be minimized or
-    maximized. Diamonds mark runs for which no comparable run matches or
-    improves both metrics while improving at least one. Runs without finite
-    numeric values for both metrics are excluded.
-
 Use **Refresh** to re-read records and tracking sources after new launches.
 
 ### Reusing plots
@@ -207,12 +207,11 @@ metric selector and `hc.tradeoff_controls(directions, metrics)` for the second
 plot's four selectors. Keep the returned widgets in notebook variables and pass
 their values to the corresponding plot.
 
-The bundled notebook displays both plots without a mode selector. Each has its
-own named cell and can be placed, moved, or omitted independently in Studio:
+Place the Leaderboard header and its active view together in Studio:
 
 ```html
-<marimo-cell name="performance_plot"></marimo-cell>
-<marimo-cell name="tradeoff_plot"></marimo-cell>
+<marimo-cell name="leaderboard_header"></marimo-cell>
+<marimo-cell name="leaderboard_view"></marimo-cell>
 ```
 
 ### Reusing record navigation

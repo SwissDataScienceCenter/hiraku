@@ -82,8 +82,8 @@ def test_bundled_views_place_all_interactive_cells() -> None:
         "record_details",
         "record_navigation",
         "run_details",
-        "performance_plot",
-        "tradeoff_plot",
+        "leaderboard_header",
+        "leaderboard_view",
     }
     assert 'role="tablist"' not in view
     assert "workflow_selection" not in named
@@ -93,6 +93,8 @@ def test_bundled_views_place_all_interactive_cells() -> None:
         "project_data",
         "selection_state",
         "selected_context",
+        "leaderboard_plot",
+        "leaderboard_table",
     } <= named
 
 

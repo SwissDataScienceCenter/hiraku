@@ -34,9 +34,10 @@ def test_app_runs_every_cell_against_a_project(
         "root/root",
     ]
     assert definitions["tree"].value[0]["key"] == "record:root/a/a"
-    assert definitions["metric"].value == "loss"
-    assert "plot_mode" not in definitions
-    assert "Choose two different metrics." in rendered
+    assert definitions["x_axis"].selected_key == "Run order"
+    assert definitions["x_axis"].value is None
+    assert definitions["y_axis"].value == "loss"
+    assert definitions["leaderboard_mode"].value == "Plot"
     runs_df = definitions["runs_df"]
     assert list(runs_df["run"]) == ["r0", "r1", "r2", "r3", "r5", "r4"]
     assert {"record_path", "metric.loss"} <= set(runs_df.columns)
@@ -47,6 +48,73 @@ def test_app_runs_every_cell_against_a_project(
         "root/a/a1",
         "root/b",
     ]
+
+
+def test_leaderboard_axes_switch_to_tradeoffs(project, monkeypatch):
+    (project.leaderboards_dir / "default.yml").write_text(
+        "source: {type: csv, path: runs.csv}\n"
+        "metrics: [{name: loss, direction: minimize}, "
+        "{name: accuracy, direction: maximize}]\n"
+    )
+    csv_path = project.root / "runs.csv"
+    header, *rows = csv_path.read_text().splitlines()
+    csv_path.write_text(
+        "\n".join([f"{header},metric.accuracy", *(f"{row},0.8" for row in rows)]) + "\n"
+    )
+    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
+    from hiraku.resources.dashboards.dashboard.app import app
+
+    _, initial = app.run()
+    initial["x_axis"]._update(["accuracy"])
+    _, updated = app.run(
+        defs={
+            name: initial[name]
+            for name in (
+                "get_selection",
+                "initial_record",
+                "metrics",
+                "paths",
+                "select_key",
+                "tree_metric",
+                "x_axis",
+                "y_axis",
+            )
+        }
+    )
+
+    rendered = updated["plot_view"].text
+    assert "accuracy (maximize)" in rendered
+    assert "loss (minimize)" in rendered
+    assert "strong trade-offs" in rendered
+    assert rendered.index("strong trade-offs") < rendered.index(updated["x_axis"].text)
+    assert updated["y_axis"].text in rendered
+
+
+def test_leaderboard_table_shows_runs_across_records(project, monkeypatch):
+    monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
+    monkeypatch.setenv("HIRAKU_DASHBOARD_RECORD", "root/a/a")
+    from hiraku.resources.dashboards.dashboard.app import app
+
+    initial_outputs, initial = app.run()
+    header = next(
+        output.text
+        for output in initial_outputs
+        if "<h2>Leaderboard</h2>" in getattr(output, "text", "")
+    )
+    for name in ("leaderboard_selector", "include_unattributed", "leaderboard_mode"):
+        assert initial[name].text in header
+    mode = initial["leaderboard_mode"]
+    mode._update("1")
+    outputs, definitions = app.run(defs={"leaderboard_mode": mode})
+
+    assert mode.value == "Table"
+    table = definitions["raw_leaderboard"]
+    rendered = [getattr(output, "text", "") for output in outputs]
+    table_view = next(output for output in rendered if table.text in output)
+    for name in ("leaderboard_selector", "include_unattributed"):
+        assert definitions[name].text not in table_view
+    assert table.data["run"].tolist() == ["r0", "r1", "r2", "r3", "r5", "r4"]
+    assert {"record", "metric.loss"} <= set(table.data.columns)
 
 
 @pytest.mark.parametrize(
@@ -83,6 +151,8 @@ def test_record_details_follow_selection_without_changing_subtree_semantics(
                 "paths",
                 "select_key",
                 "tree_metric",
+                "x_axis",
+                "y_axis",
             )
         }
     )
@@ -111,6 +181,8 @@ def test_navigation_filter_toggles_preserve_selection(project, monkeypatch):
         "paths",
         "select_key",
         "tree_metric",
+        "x_axis",
+        "y_axis",
         "get_navigation_revision",
         "navigation",
     )
@@ -138,6 +210,8 @@ def test_navigation_mode_preserves_record_and_scope(project, monkeypatch):
         "paths",
         "select_key",
         "tree_metric",
+        "x_axis",
+        "y_axis",
         "get_navigation_revision",
         "navigation",
     )
@@ -170,6 +244,8 @@ def test_navigation_selection_updates_table_and_clears_run(
                 "paths",
                 "select_key",
                 "tree_metric",
+                "x_axis",
+                "y_axis",
             )
         }
     )
@@ -215,7 +291,7 @@ def test_dashboard_plots_a_leaderboard_without_records(tmp_path, monkeypatch):
     assert definitions["selected_record"] is None
     assert definitions["leaderboard_selector"].value == "local"
     assert definitions["metrics"] == ["missing", "score"]
-    assert definitions["metric"].value == "missing"
+    assert definitions["y_axis"].value == "missing"
     assert definitions["runs_df"].empty
     assert definitions["include_unattributed"].value is False
     definitions["include_unattributed"]._update(True)
