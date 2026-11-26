@@ -103,7 +103,11 @@ def data_setup():
 
 @app.cell
 def refresh_control():
-    refresh = mo.ui.button(label="Refresh", value=0, on_click=lambda count: count + 1)
+    refresh = mo.ui.button(
+        label='<span class="dashboard-refresh">Refresh</span>',
+        value=0,
+        on_click=lambda count: count + 1,
+    )
     mo.hstack([refresh], justify="end")
     return (refresh,)
 

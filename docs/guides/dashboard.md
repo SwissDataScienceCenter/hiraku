@@ -26,6 +26,9 @@ Hiraku opens the dashboard in your browser and prints its local URL in the
 terminal. For projects without a dashboard of their own, it opens the included
 dashboard without writing project files. Press Ctrl-C to stop the server.
 
+In the leaderboard's **Table** view, use **Columns** to show more metrics,
+parameters, or run provenance.
+
 | Option | What it does |
 | --- | --- |
 | `--record ID`, `--leaderboard NAME` | Select the initial record or leaderboard. |
@@ -55,7 +58,9 @@ hiraku dashboard serve overview
 If the project has only one dashboard, you can omit its name. Use
 `hiraku dashboard list` to see the available names.
 
-For a plain Marimo starter with the project and its local records already
-loaded, run `hiraku dashboard create exploration --template notebook`. It
-creates `hiraku/dashboards/exploration.py`, which you can edit and serve the
-same way.
+For a plain Marimo starter, run
+`hiraku dashboard create exploration --template notebook`. Edit and serve
+`hiraku/dashboards/exploration.py` the same way. The notebook exposes `project`,
+`records`, `leaderboard_names`, the selected `leaderboard`, and its `runs` to
+other cells. It loads the sole leaderboard automatically, or you can use
+the picker or `--leaderboard NAME` to select one.

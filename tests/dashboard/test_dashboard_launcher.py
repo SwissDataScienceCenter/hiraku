@@ -371,6 +371,7 @@ def test_notebook_template_runs_without_studio(project, monkeypatch, via_launche
     assert not (notebook.parent / "studio").exists()
     record = project.vault.create("example", type="note", title="Example")
     monkeypatch.delenv("HIRAKU_PROJECT_ROOT", raising=False)
+    monkeypatch.delenv("HIRAKU_DASHBOARD_LEADERBOARD", raising=False)
     if via_launcher:
         monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
     outputs, definitions = runpy.run_path(str(notebook))["app"].run()
@@ -378,10 +379,36 @@ def test_notebook_template_runs_without_studio(project, monkeypatch, via_launche
     records = project.vault.list()
     assert record in definitions["records"]
     assert definitions["records"] == records
+    assert definitions["leaderboard_names"] == ["default"]
+    assert definitions["leaderboard"].source.type == "csv"
+    assert {run.id for run in definitions["runs"]} == {f"r{i}" for i in range(6)}
     summary = f"<strong>Project records:</strong> {len(records)}"
     assert any(summary in getattr(output, "text", "") for output in outputs)
     with pytest.raises(ValidationError, match="already exists"):
         launcher.init_dashboard(project, "exploration", template="notebook")
+
+
+@pytest.mark.parametrize("requested", [None, "other"])
+def test_notebook_leaderboard_selection(project, monkeypatch, requested):
+    import runpy
+
+    notebook = launcher.init_dashboard(project, "exploration", template="notebook")
+    monkeypatch.delenv("HIRAKU_PROJECT_ROOT", raising=False)
+    original = project.leaderboards_dir / "default.yml"
+    other = project.leaderboards_dir / "other.yml"
+    if requested:
+        other.write_text(original.read_text(encoding="utf-8"), encoding="utf-8")
+        monkeypatch.setenv("HIRAKU_DASHBOARD_LEADERBOARD", requested)
+    else:
+        original.unlink()
+        monkeypatch.delenv("HIRAKU_DASHBOARD_LEADERBOARD", raising=False)
+    _, definitions = runpy.run_path(str(notebook))["app"].run()
+    assert definitions["leaderboard_selector"].value == requested
+    if requested:
+        assert len(definitions["runs"]) == 6
+    else:
+        assert definitions["leaderboard"] is None
+        assert definitions["runs"] == []
 
 
 def test_unknown_template_does_not_create_files(project):

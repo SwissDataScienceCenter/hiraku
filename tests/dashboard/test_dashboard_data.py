@@ -192,6 +192,7 @@ def test_tree_rows_nest_runs_under_records_in_execution_order(
     project: Project,
 ) -> None:
     records_df, runs_df = tables(project)
+    runs_df["param.dataset"] = "iris"
 
     rows = tree_rows(records_df, runs_df, "loss")
 
@@ -208,7 +209,9 @@ def test_tree_rows_nest_runs_under_records_in_execution_order(
         ("run:r5", 0),
     ]
     assert rows[0]["loss"] == ""
+    assert rows[0]["param.dataset"] is None
     assert rows[2]["loss"] == 0.9
+    assert rows[2]["param.dataset"] == "iris"
     assert rows[2]["Type"] == "run"
     assert rows[2]["Record / run"] == "r0"
     assert rows[-1]["Record / run"] == "r5"

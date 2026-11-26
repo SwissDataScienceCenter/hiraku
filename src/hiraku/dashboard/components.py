@@ -19,8 +19,10 @@ import pandas as pd
 from ..io import dump_yaml
 from ..record import Record
 from .data import (
+    RUN_TABLE_COLUMNS,
     lineage_records,
     plot_frame,
+    run_table_metric_column,
     run_text,
     safe_url,
     tradeoff_frame,
@@ -426,6 +428,7 @@ def run_table(
 ) -> mo.ui.table:
     """Build the selectable record/run table, retaining its hidden row keys."""
     _rows = tree_rows(records_df, runs_df, metric, include_records=include_records)
+    metric_column = run_table_metric_column(metric)
 
     def _style(row, column):
         style = {"fontWeight": "600"} if row["key"].startswith("record:") else {}
@@ -445,15 +448,22 @@ def run_table(
         on_change=(lambda rows: on_select(rows[0]["key"] if rows else None))
         if on_select
         else None,
-        hidden_columns=["key", "depth"] if _rows else None,
+        visible_columns=[
+            *RUN_TABLE_COLUMNS,
+            *([metric_column] if metric_column else []),
+        ]
+        if _rows
+        else None,
         page_size=50,
         show_column_summaries=False,
         show_data_types=False,
         show_download=False,
         format_mapping={
-            metric: lambda value: f"{value:.4g}" if isinstance(value, float) else value
+            metric_column: (
+                lambda value: f"{value:.4g}" if isinstance(value, float) else value
+            )
         }
-        if metric
+        if metric_column
         else None,
         style_cell=lambda row, column, value: _style(_rows[int(row)], column),
     )

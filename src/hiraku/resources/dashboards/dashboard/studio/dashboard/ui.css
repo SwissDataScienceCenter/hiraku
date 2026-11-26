@@ -20,8 +20,7 @@ h2 { font-size: 1.25rem; font-weight: 500; line-height: 1.4; }
 p { max-width: 72ch; }
 a { color: var(--link); }
 a:hover { color: var(--link-hover); }
-button {
-  min-width: 44px;
+button:has(.dashboard-refresh) {
   min-height: 44px;
   padding: 0.75rem 1.5rem;
   border: 1px solid var(--primary-color);
@@ -31,23 +30,13 @@ button {
   font: 400 0.875rem/1.4 var(--font-body);
   text-transform: uppercase;
   cursor: pointer;
-  transition: background-color 200ms ease, border-color 200ms ease;
 }
-button:hover { border-color: var(--secondary-color); background: var(--secondary-color); }
-button:disabled { cursor: not-allowed; opacity: 0.5; }
-select, input, textarea {
-  min-height: 44px;
-  max-width: 100%;
-  padding: 0.5rem 1rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-input);
-  background: var(--card);
-  color: var(--foreground);
-  font: 400 1rem/1.4 var(--font-body);
+button:has(.dashboard-refresh):hover {
+  border-color: var(--secondary-color);
+  background: var(--secondary-color);
 }
-input::placeholder, textarea::placeholder { color: var(--text-secondary-accessible); }
-button:focus-visible, a:focus-visible, select:focus-visible,
-input:focus-visible, textarea:focus-visible, summary:focus-visible {
+button:has(.dashboard-refresh):focus-visible,
+a:focus-visible, summary:focus-visible {
   outline: 3px solid var(--primary-color);
   outline-offset: 3px;
 }
@@ -85,7 +74,6 @@ body.dark-theme #app-shell h1, body.dark-theme #app-shell h2,
 body.dark-theme #app-shell h3, body.dark-theme #app-shell h4,
 body.dark-theme #app-shell h5, body.dark-theme #app-shell h6 { color: var(--foreground); }
 body.dark-theme nav a:hover { background: var(--card); color: var(--white); }
-body.dark-theme button { border-color: var(--primary-color); }
 @media (max-width: 760px) {
   nav { order: 3; width: 100%; }
 }

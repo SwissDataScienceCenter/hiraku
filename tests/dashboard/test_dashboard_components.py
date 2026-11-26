@@ -84,19 +84,32 @@ def test_markdown_view_handles_missing_or_empty_records() -> None:
     assert "type: record" in empty
 
 
-def test_run_table_retains_initial_record_and_selection_keys() -> None:
+@pytest.mark.parametrize(("metric", "label"), [("loss", "loss"), ("key", "metric.key")])
+def test_run_table_retains_initial_record_and_selection_keys(metric, label) -> None:
     records = arrow_frame(
         [{"record": "root", "record_path": "root", "type": "task"}], RECORD_COLUMNS
     )
     runs = arrow_frame(
-        [{"run": "r1", "record": "root", "metric.loss": 0.5}], RUN_COLUMNS
+        [
+            {
+                "run": "r1",
+                "record": "root",
+                f"metric.{metric}": 0.5,
+                "metric.accuracy": 0.8,
+                "param.seed": 42,
+            }
+        ],
+        RUN_COLUMNS,
     )
 
-    table = hc.run_table(records, runs, "loss", initial_record="root")
+    table = hc.run_table(records, runs, metric, initial_record="root")
 
     assert table.value[0]["key"] == "record:root"
     assert "run:r1" in table.text
     assert "0.5" in table.text
+    hidden = table._component_args["hidden-columns"]
+    assert label not in hidden
+    assert {"metric.accuracy", "param.seed", "source", "url"} <= set(hidden)
 
 
 def test_run_table_accepts_an_empty_project() -> None:

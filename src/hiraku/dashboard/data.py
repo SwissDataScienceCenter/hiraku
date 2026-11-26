@@ -46,6 +46,8 @@ RECORD_COLUMNS = (
     "commit",
     "description",
 )
+RUN_TABLE_COLUMNS = ("Record / run", "Type", "Commit", "Started", "Duration")
+_RUN_TABLE_PROVENANCE = ("run", "record", "record_path", "source", "url")
 
 
 def github_repository(project: Project) -> str | None:
@@ -229,6 +231,16 @@ def filter_leaderboard_runs(
     return runs_df[matching]
 
 
+def run_table_metric_column(metric: str | None) -> str | None:
+    """Keep the metric label short unless it would overwrite another column."""
+    if metric and (
+        metric in (*RUN_TABLE_COLUMNS, *_RUN_TABLE_PROVENANCE, "key", "depth")
+        or metric.startswith(("metric.", "param."))
+    ):
+        return f"metric.{metric}"
+    return metric
+
+
 def tree_rows(
     records_df: pd.DataFrame,
     runs_df: pd.DataFrame,
@@ -239,8 +251,27 @@ def tree_rows(
     """Interleave records (in tree order) with their runs as indented table rows.
 
     ``depth`` comes from ``record_path``, and ``metric`` adds one column, named
-    after the metric, with each run's value.
+    after the metric, with each run's value. Other metrics, parameters, and
+    provenance are available as additional columns.
     """
+    metric_column = run_table_metric_column(metric)
+    extra_columns = [
+        *_RUN_TABLE_PROVENANCE,
+        *(
+            name
+            for name in runs_df.columns
+            if name.startswith(("metric.", "param.")) and name != f"metric.{metric}"
+        ),
+    ]
+
+    def run_row(run: dict[str, Any], depth: int) -> dict[str, Any]:
+        row = _row(f"run:{run['run']}", depth, run["run"][:12], run)
+        row["Type"] = "run"
+        if metric_column:
+            row[metric_column] = run["value"]
+        row.update({name: run.get(name) for name in extra_columns})
+        return row
+
     values = metric_values(runs_df, metric).tolist()
     runs_by_record: dict[str, list[dict[str, Any]]] = {}
     for run, value in zip(_records(runs_df), values, strict=True):
@@ -254,19 +285,14 @@ def tree_rows(
         rows.append(
             _row(f"record:{record['record']}", depth, "▾ " + record["record"], record)
         )
-        if metric:
-            rows[-1][metric] = ""
+        if metric_column:
+            rows[-1][metric_column] = ""
+        rows[-1].update(dict.fromkeys(extra_columns))
         for run in runs_by_record.pop(record["record"], ()):
-            rows.append(_row(f"run:{run['run']}", depth + 1, run["run"][:12], run))
-            rows[-1]["Type"] = "run"
-            if metric:
-                rows[-1][metric] = run["value"]
+            rows.append(run_row(run, depth + 1))
     for remaining in runs_by_record.values():
         for run in remaining:
-            rows.append(_row(f"run:{run['run']}", 0, run["run"][:12], run))
-            rows[-1]["Type"] = "run"
-            if metric:
-                rows[-1][metric] = run["value"]
+            rows.append(run_row(run, 0))
     return rows
 
 
