@@ -43,16 +43,12 @@ def project_notebook(project: Project, name: str = "overview") -> Path:
 
 
 def list_dashboards(project: Project) -> dict[str, Path]:
-    """Discover top-level notebooks, including the legacy project's dashboard."""
-    dashboards = {
+    """Discover top-level notebooks in the project's dashboards directory."""
+    return {
         path.stem: path
         for path in sorted((project.hiraku_dir / "dashboards").glob("*.py"))
         if path.is_file() and path.stem != "__init__"
     }
-    legacy = project.hiraku_dir / "dashboard" / "app.py"
-    if legacy.is_file():
-        dashboards.setdefault("overview", legacy)
-    return dashboards
 
 
 def init_dashboard(

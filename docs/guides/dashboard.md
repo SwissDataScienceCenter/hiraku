@@ -31,8 +31,6 @@ Run every command from inside a Hiraku project.
 With no project dashboards, `hiraku dashboard serve` serves the bundled
 dashboard without writing project files. With one project dashboard, it serves
 that dashboard. With several, use `hiraku dashboard serve NAME`.
-Existing `hiraku/dashboard/app.py` copies remain
-available as `overview`; a new `hiraku/dashboards/overview.py` takes precedence.
 Use `hiraku dashboard edit` without a name to edit the sole project dashboard.
 
 ### View
@@ -315,9 +313,8 @@ queried runs to rows. Tracking errors leave record navigation available.
 | Performance plot | filtered `leaderboard_runs`; choose one metric |
 | Trade-off plot | filtered `leaderboard_runs`; choose two metrics |
 
-`record_path` is the record's ancestry, such as `digits/weak-l2`.
-`subtree(runs_df, "digits")` selects every run of `digits` and the records
-below it. Use these tables in your own cells, or mention `@runs_df` and
+`record_path` is the record's display ancestry, such as `digits/weak-l2`.
+Use these tables in your own cells, or mention `@runs_df` and
 `@records_df` in marimo's AI assistant to ask questions about your runs.
 Values keep the types the tracking backend reports; some backends, such as
 MLflow, report parameters as text, so cast them before comparing numbers, for

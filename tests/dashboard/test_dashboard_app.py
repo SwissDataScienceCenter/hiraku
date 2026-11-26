@@ -23,7 +23,6 @@ def test_app_runs_every_cell_against_a_project(
     assert "numbered by execution order." in rendered
     assert 'aria-label="Leaderboard filters"' in rendered
 
-    assert definitions["scope"] == "root/a/a"
     assert definitions["selected_record"].id == "root/a/a"
     assert definitions["selected_run"] is None
     assert definitions["leaderboard_error"] is None
@@ -72,9 +71,7 @@ def test_leaderboard_axes_switch_to_tradeoffs(project, monkeypatch):
             name: initial[name]
             for name in (
                 "get_selection",
-                "initial_record",
                 "metrics",
-                "paths",
                 "select_key",
                 "tree_metric",
                 "x_axis",
@@ -174,15 +171,13 @@ def test_clicking_plot_point_selects_run_and_record(project, monkeypatch):
     assert color["condition"]["test"] == "(datum.record === 'root/a/a')"
     assert "field" not in color
     chart._update({"picked_run": {"run": ["r1"]}})
-    assert initial["get_selection"]() == ("run:r1", "root/b/b")
+    assert initial["get_selection"]() == "run:r1"
     app.run(
         defs={
             name: initial[name]
             for name in (
                 "get_selection",
-                "initial_record",
                 "metrics",
-                "paths",
                 "select_key",
                 "tree_metric",
                 "x_axis",
@@ -196,18 +191,17 @@ def test_clicking_plot_point_selects_run_and_record(project, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("key", "scope", "record_id"),
+    ("key", "record_id"),
     [
-        ("record:root/a/a", "root/a/a", "root/a/a"),
-        ("run:r2", "root/a/a", "root/a/a1/a1"),
-        ("run:r1", "root/b/b", "root/b/b"),
+        ("record:root/a/a", "root/a/a"),
+        ("run:r2", "root/a/a1/a1"),
+        ("run:r1", "root/b/b"),
     ],
 )
-def test_record_details_follow_selection_without_changing_subtree_semantics(
+def test_record_details_follow_selection(
     project: Project,
     monkeypatch: pytest.MonkeyPatch,
     key: str,
-    scope: str,
     record_id: str,
 ) -> None:
     monkeypatch.setenv("HIRAKU_PROJECT_ROOT", str(project.root))
@@ -221,15 +215,13 @@ def test_record_details_follow_selection_without_changing_subtree_semantics(
     rows = initial["tree"].data
     index = next(index for index, row in enumerate(rows) if row["key"] == key)
     initial["tree"]._update([str(index)])
-    assert initial["get_selection"]() == (key, scope)
+    assert initial["get_selection"]() == key
     outputs, definitions = app.run(
         defs={
             name: initial[name]
             for name in (
                 "get_selection",
-                "initial_record",
                 "metrics",
-                "paths",
                 "select_key",
                 "tree_metric",
                 "x_axis",
@@ -239,7 +231,6 @@ def test_record_details_follow_selection_without_changing_subtree_semantics(
         }
     )
 
-    assert definitions["scope"] == scope
     assert definitions["selected_record"].id == record_id
     assert definitions["tree"].value[0]["key"] == key
     rendered = "\n".join(getattr(output, "text", "") for output in outputs)
@@ -266,9 +257,7 @@ def test_navigation_filter_toggles_preserve_selection(project, monkeypatch):
     initial["navigation"].filter_buttons["type", "task"]._update(1)
     names = (
         "get_selection",
-        "initial_record",
         "metrics",
-        "paths",
         "select_key",
         "tree_metric",
         "x_axis",
@@ -295,9 +284,7 @@ def test_navigation_mode_preserves_record_and_scope(project, monkeypatch):
     initial["navigation"].mode_control._update("1")
     names = (
         "get_selection",
-        "initial_record",
         "metrics",
-        "paths",
         "select_key",
         "tree_metric",
         "x_axis",
@@ -306,7 +293,6 @@ def test_navigation_mode_preserves_record_and_scope(project, monkeypatch):
         "navigation",
     )
     _, lineage = app.run(defs={name: initial[name] for name in names})
-    assert lineage["scope"] == initial["scope"]
     assert lineage["selected_record"].id == initial["selected_record"].id
     assert lineage["navigation"].mode == "Lineage"
     assert set(lineage["navigation"].record_buttons) == {
@@ -324,15 +310,13 @@ def test_navigation_selection_updates_table_and_clears_run(
     initial["include_records"]._update(True)
     initial["select_key"]("run:r1")
     initial["navigation"].record_buttons["root/a/a"]._update(1)
-    assert initial["get_selection"]() == ("record:root/a/a", "root/a/a")
+    assert initial["get_selection"]() == "record:root/a/a"
     _, definitions = app.run(
         defs={
             name: initial[name]
             for name in (
                 "get_selection",
-                "initial_record",
                 "metrics",
-                "paths",
                 "select_key",
                 "tree_metric",
                 "x_axis",
@@ -379,7 +363,6 @@ def test_dashboard_plots_a_leaderboard_without_records(tmp_path, monkeypatch):
 
     outputs, definitions = app.run()
 
-    assert definitions["scope"] is None
     assert definitions["selected_record"] is None
     assert definitions["leaderboard_selector"].value == "local"
     assert definitions["metrics"] == ["missing", "score"]
@@ -401,9 +384,7 @@ def test_dashboard_plots_a_leaderboard_without_records(tmp_path, monkeypatch):
             name: definitions[name]
             for name in (
                 "get_selection",
-                "initial_record",
                 "metrics",
-                "paths",
                 "select_key",
                 "tree_metric",
                 "x_axis",

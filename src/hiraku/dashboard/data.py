@@ -201,18 +201,6 @@ def metric_names(runs_df: pd.DataFrame) -> list[str]:
     return [name for name in names if metric_values(runs_df, name).notna().any()]
 
 
-def within(path: str, ancestor: str) -> bool:
-    """Return whether record ``path`` is ``ancestor`` or lies below it."""
-    return f"{path}/".startswith(f"{ancestor}/")
-
-
-def subtree(runs_df: pd.DataFrame, ancestor: str | None) -> pd.DataFrame:
-    """Return the rows of ``runs_df`` whose record lies in ``ancestor``'s subtree."""
-    if ancestor is None or runs_df.empty:
-        return runs_df
-    return runs_df[runs_df["record_path"].map(lambda path: within(path, ancestor))]
-
-
 def filter_leaderboard_runs(
     runs_df: pd.DataFrame,
     records: Sequence[Record],
@@ -318,27 +306,6 @@ def format_duration(seconds: float | None) -> str:
 def find_run(runs_df: pd.DataFrame, run_id: str) -> dict[str, Any] | None:
     """Return the ``runs_df`` row of ``run_id`` with missing values as ``None``."""
     return next(iter(_records(runs_df[runs_df["run"] == run_id])), None)
-
-
-def selection_scope(
-    key: str | None,
-    current_scope: str | None,
-    paths: Mapping[str, str],
-    runs_df: pd.DataFrame,
-) -> str | None:
-    """Resolve the comparison subtree after a record or run selection."""
-    if key is None:
-        return None
-    kind, _, identifier = key.partition(":")
-    if kind == "record" and identifier in paths:
-        return identifier
-    selected_run = find_run(runs_df, identifier) if kind == "run" else None
-    if selected_run is not None and (
-        current_scope not in paths
-        or not within(selected_run["record_path"], paths[current_scope])
-    ):
-        return selected_run["record"] if selected_run["record"] in paths else None
-    return current_scope
 
 
 def run_text(run: Mapping[str, Any]) -> str:

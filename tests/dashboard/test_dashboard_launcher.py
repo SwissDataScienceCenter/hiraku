@@ -331,15 +331,11 @@ def test_named_dashboard_missing_does_not_start_bundled_fallback(project, popen)
     assert not popen
 
 
-def test_legacy_dashboard_is_discovered_and_served(project, popen):
-    legacy = project.hiraku_dir / "dashboard/app.py"
-    legacy.parent.mkdir()
-    legacy.write_text("import marimo\napp = marimo.App()\n")
-    assert launcher.list_dashboards(project) == {"overview": legacy}
-    launcher.serve_dashboard(project)
-    assert popen["notebook"] == legacy
-    with pytest.raises(ValidationError, match="already exists"):
-        launcher.init_dashboard(project)
+def test_dashboard_discovery_uses_the_dashboards_directory(project):
+    other = project.hiraku_dir / "dashboard" / "app.py"
+    other.parent.mkdir()
+    other.touch()
+    assert launcher.list_dashboards(project) == {}
 
 
 def test_dashboard_subcommands_create_list_and_serve(project, popen, monkeypatch):

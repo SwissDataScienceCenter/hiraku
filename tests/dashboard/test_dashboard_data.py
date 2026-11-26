@@ -19,11 +19,8 @@ from hiraku.dashboard.data import (
     run_rows,
     run_text,
     safe_url,
-    selection_scope,
-    subtree,
     tradeoff_frame,
     tree_rows,
-    within,
 )
 from hiraku.project import Project
 from hiraku.record import Record
@@ -76,23 +73,6 @@ def test_leaderboard_filter_combines_run_sets(
         include_unattributed=unattributed,
     )
     assert filtered["run"].tolist() == expected
-
-
-@pytest.mark.parametrize(
-    ("key", "expected"),
-    [
-        ("record:root/b/b", "root/b/b"),
-        ("run:r2", "root/a/a"),
-        ("run:r1", "root/b/b"),
-        (None, None),
-    ],
-)
-def test_selection_scope_preserves_subtree_for_descendant_runs(
-    project: Project, key: str | None, expected: str
-) -> None:
-    records, runs = tables(project)
-    paths = dict(zip(records["record"], records["record_path"], strict=True))
-    assert selection_scope(key, "root/a/a", paths, runs) == expected
 
 
 def test_run_rows_keep_runs_without_matching_records() -> None:
@@ -317,16 +297,6 @@ def test_find_run_and_run_text(project: Project) -> None:
     )
 
 
-def test_subtree_selects_descendants_by_record_id(project: Project) -> None:
-    _, runs_df = tables(project)
-
-    assert subtree(runs_df, "root/a")["run"].tolist() == ["r0", "r2", "r3"]
-    assert subtree(runs_df, "root/b")["run"].tolist() == ["r1", "r4"]
-    assert subtree(runs_df, None).equals(runs_df)
-    # A sibling whose ID extends another's is not its descendant.
-    assert not within("root/ab", "root/a")
-
-
 def test_plot_frame_numbers_runs_and_skips_unusable_values(
     project: Project,
 ) -> None:
@@ -349,7 +319,7 @@ def test_plot_frame_numbers_runs_and_skips_unusable_values(
     assert plot_frame(runs_df, "accuracy")[1] == 5
     # A subtree keeps its original row labels; numbering restarts at 1.
     _, project_runs = tables(project)
-    scoped, _ = plot_frame(subtree(project_runs, "root/b"), "loss")
+    scoped, _ = plot_frame(project_runs[project_runs["record"] == "root/b/b"], "loss")
     assert scoped[["number", "run"]].values.tolist() == [[1, "r1"], [2, "r4"]]
     assert scoped["duration"].tolist() == ["1 m 15 s", ""]
 

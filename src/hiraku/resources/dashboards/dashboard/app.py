@@ -106,7 +106,6 @@ def selection_state(
     requested_record,
     run_filters,
 ):
-    paths = dict(zip(records_df["record"], records_df["record_path"], strict=True))
     metrics = hd.metric_names(all_runs_df)
     if leaderboard is not None and leaderboard.metrics is not None:
         metrics = [item.name for item in leaderboard.metrics]
@@ -120,26 +119,21 @@ def selection_state(
         label="X axis",
     )
     y_axis = mo.ui.dropdown(metrics, value=tree_metric, label="Y axis")
-    initial_record = requested_record if requested_record in paths else None
-    get_selection, _set_selection = mo.state(
-        (f"record:{initial_record}" if initial_record else None, initial_record)
+    _initial_key = (
+        f"record:{requested_record}"
+        if requested_record in set(records_df["record"])
+        else None
     )
+    get_selection, _set_selection = mo.state(_initial_key)
 
     def select_key(key):
         if key is None:
             run_filters.clear_record_filters()
-        _set_selection(
-            lambda previous: (
-                key,
-                hd.selection_scope(key, previous[1], paths, all_runs_df),
-            )
-        )
+        _set_selection(key)
 
     return (
         get_selection,
-        initial_record,
         metrics,
-        paths,
         select_key,
         tree_metric,
         x_axis,
@@ -149,15 +143,18 @@ def selection_state(
 
 @app.cell
 def selected_context(all_runs_df, get_selection, records):
-    _key, scope = get_selection()
-    _key = _key or ""
+    _key = get_selection() or ""
     _kind, _, _identifier = _key.partition(":")
     selected_run = hd.find_run(all_runs_df, _identifier) if _kind == "run" else None
-    _record_id = selected_run["record"] if selected_run is not None else scope
+    _record_id = (
+        selected_run["record"]
+        if selected_run is not None
+        else (_identifier if _kind == "record" else None)
+    )
     selected_record = next(
         (record for record in records if record.id == _record_id), None
     )
-    return scope, selected_record, selected_run
+    return selected_record, selected_run
 
 
 @app.cell
@@ -202,10 +199,10 @@ def record_editor(project_context):
 
 @app.cell
 def record_details(
+    all_runs_df,
     get_editor_revision,
     markdown_editor,
     repository_url,
-    runs_df,
     selected_record,
     selected_run,
 ):
@@ -216,7 +213,9 @@ def record_details(
         _details = hc.run_details(selected_run)
     else:
         _runs = (
-            runs_df.loc[runs_df["record"] == selected_record.id].to_dict("records")
+            all_runs_df.loc[all_runs_df["record"] == selected_record.id].to_dict(
+                "records"
+            )
             if selected_record is not None
             else []
         )
@@ -309,7 +308,7 @@ def leaderboard_table(
         records_df,
         leaderboard_runs,
         tree_metric,
-        selected_key=get_selection()[0],
+        selected_key=get_selection(),
         on_select=select_key,
         include_records=include_records.value,
     )
