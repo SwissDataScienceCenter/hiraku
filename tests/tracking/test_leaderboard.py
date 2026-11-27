@@ -1,4 +1,6 @@
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -130,6 +132,15 @@ def test_source_selects_configured_adapter(
     tmp_path, monkeypatch, source, adapter, attribute, expected
 ):
     monkeypatch.setattr(WandbBackend, "_get_api", lambda self: object())
+    monkeypatch.setitem(
+        sys.modules,
+        "mlflow.tracking",
+        SimpleNamespace(
+            MlflowClient=lambda **kwargs: SimpleNamespace(
+                get_experiment_by_name=lambda name: SimpleNamespace(experiment_id="e1")
+            )
+        ),
+    )
     backend = Leaderboard(source=source)._create_backend(Project(tmp_path))
     assert isinstance(backend, adapter)
     assert getattr(backend, attribute) == (

@@ -1,5 +1,18 @@
 # Leaderboards
 
+Use the MLflow backend Python API to set a tag on a run by its server-side
+run ID. For example, set the tag Hiraku uses for record attribution.
+
+```python
+from hiraku.tracking import MLflowBackend
+
+backend = MLflowBackend(project, experiment_name="validation")
+backend.set_tag(run_id, "hiraku.record_id", "experiments/baseline")
+```
+
+The backend creates its client and resolves the experiment during construction.
+Tag writes address the run ID directly on the configured server.
+
 A leaderboard's `source` tells Hiraku where to read runs. Set `source.type` to
 `csv`, `mlflow`, or `wandb` and supply the settings for that backend. Configure
 where runs are logged in your training script. A leaderboard can also select
