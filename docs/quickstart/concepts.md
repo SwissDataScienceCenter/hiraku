@@ -11,6 +11,14 @@ Hiraku connects four core components:
 | [Leaderboard](../guides/leaderboards.md) | A named configuration for retrieving and comparing runs from CSV, MLflow, or Weights & Biases. |
 | [Workflow](../guides/workflows.md) | A LangGraph graph that orchestrates multiple steps and can checkpoint progress between calls.  |
 
+## Project subagents
+
+`hiraku init` installs four research subagents for Codex and Claude Code:
+literature review, hypothesis design, experiment implementation, and results
+analysis. The bundled Hiraku skill routes matching work to these specialists
+when the host supports subagent delegation. Existing agent files are preserved
+so local edits survive project initialization.
+
 ## Architecture
 
 

@@ -248,6 +248,7 @@ class Project(BaseModel):
         project._install_agent_resources(
             install_skill=install_skill, install_mcp=install_mcp
         )
+        project.install_subagents()
         return project
 
     def _install_agent_resources(
@@ -260,6 +261,38 @@ class Project(BaseModel):
                     shutil.copytree(source, self.root / destination, dirs_exist_ok=True)
         if install_mcp:
             self.install_mcp()
+
+    def install_subagents(self) -> None:
+        """Install bundled agents for Codex and Claude Code, preserving local edits."""
+        resources = files("hiraku.resources")
+        with as_file(resources / "agents") as source:
+            for path in source.rglob("*.toml"):
+                relative_path = path.relative_to(source)
+                definition_text = path.read_text(encoding="utf-8")
+                definition = tomllib.loads(definition_text)
+                metadata = dump_yaml(
+                    {
+                        "name": definition["name"],
+                        "description": definition["description"].strip(),
+                    }
+                )
+                claude_text = (
+                    f"---\n{metadata}---\n\n{definition['developer_instructions']}"
+                )
+                destinations = (
+                    (self.root / ".codex/agents" / relative_path, definition_text),
+                    (
+                        self.root / ".claude/agents" / relative_path.with_suffix(".md"),
+                        claude_text,
+                    ),
+                )
+                for destination, content in destinations:
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    try:
+                        with destination.open("x", encoding="utf-8") as file:
+                            file.write(content)
+                    except FileExistsError:
+                        continue
 
     def _ignore_codex_config(self) -> None:
         """Keep local Codex MCP settings out of the project repository."""
