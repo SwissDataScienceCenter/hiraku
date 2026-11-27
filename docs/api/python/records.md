@@ -1,25 +1,50 @@
-# Records
+# Record
 
-## `BaseRecord`
+[View source on GitHub](https://github.com/SwissDataScienceCenter/hiraku/blob/main/src/hiraku/record.py)
 
-::: hiraku.base.BaseRecord
+Records hold document data. Use the project's Vault for filesystem access and
+collection operations. Pass `overwrite=True` to replace an existing record.
 
-`BaseRecord` provides generic Markdown/YAML persistence. Contexts extend it.
-
-Use `record.save_markdown(body)` to save a replacement body while preserving
-metadata. It returns a saved copy of the same subtype and leaves the supplied
-object unchanged. The record must already have a path; changes on disk since
-loading are rejected. This check does not lock the file against concurrent writers.
-
-## `Record`
+## Record
 
 ::: hiraku.record.Record
+    options:
+      members:
+        - type
+        - title
+        - description
+        - status
+        - resource
+        - tags
+        - generated
+        - verified
+        - id
+        - markdown
+        - parent_id
+        - related_to
+        - commit
+        - decision
+        - branch
+        - state
+        - metadata
+      show_if_no_docstring: true
+      show_signature_annotations: true
 
-`Record` is the research entity. It adds a single parent, optional related
-records, inheritance, entrypoints, run queries, and project registry methods.
+## Vault
 
-## Registry helpers
-
-::: hiraku.record.load_record
-
-::: hiraku.record.list_records
+::: hiraku.record.Vault
+    options:
+      members:
+        - root
+        - file_path
+        - load
+        - create
+        - list
+        - children
+        - descendants
+        - save
+        - update
+        - delete
+        - validate
+      show_if_no_docstring: true
+      show_signature_annotations: true

@@ -1,9 +1,9 @@
 import pytest
 from pydantic import ValidationError as PydanticValidationError
 
-from hiraku.base import BaseRecord
 from hiraku.errors import SectionNotFoundError, ValidationError
 from hiraku.markdown import Markdown, placeholders, render
+from hiraku.record import Record
 
 DOCUMENT = """\
 # Research
@@ -118,7 +118,7 @@ def test_missing_section(markdown: Markdown, selector: str, message: str) -> Non
 
 
 def test_markdown_field_stays_a_string() -> None:
-    record = BaseRecord(id="doc", markdown="## Old\n")
+    record = Record(id="doc", type="record", markdown="## Old\n")
     record.markdown = "## New\n"
     assert isinstance(record.markdown, Markdown)
     assert record.markdown == "## New\n"
@@ -128,8 +128,8 @@ def test_markdown_field_stays_a_string() -> None:
 @pytest.mark.parametrize("value", [None, 42])
 def test_markdown_field_rejects_invalid_values(value) -> None:
     with pytest.raises(PydanticValidationError, match="Input should be a valid string"):
-        BaseRecord(id="doc", markdown=value)
-    record = BaseRecord(id="doc", markdown="## Original\n")
+        Record(id="doc", type="record", markdown=value)
+    record = Record(id="doc", type="record", markdown="## Original\n")
     with pytest.raises(PydanticValidationError, match="Input should be a valid string"):
         record.markdown = value
     assert record.markdown == "## Original\n"

@@ -37,6 +37,7 @@ htmlcov/
 .idea/
 .vscode/
 *.code-workspace
+/.hiraku/
 
 scratch/
 worktrees/

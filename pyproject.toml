@@ -1,6 +1,6 @@
 [build-system]
-requires = ["uv_build>=0.11,<0.12"]
-build-backend = "uv_build"
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
 
 [project]
 name = "hiraku"
@@ -17,58 +17,73 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "Click>=8.1",
+    "packaging>=24",
     "filelock>=3.16",
     "markdown-it-py>=4.0",
-    "pydantic>=2.13.5",
+    "pydantic>=2.13.4",
     "PyYAML>=6.0",
     "mcp>=2.3.0",
+    "rich>=15.0.0",
+    "langgraph>=1.2.18",
+    "langgraph-checkpoint-sqlite>=3.1.2",
+    "python-frontmatter>=1.3.0",
+    "psij-python>=0.9.11",
+    "psutil>=7",
 ]
 
 [project.scripts]
 hiraku = "hiraku.cli:main"
 
+[project.entry-points."marimo_studio.view_provider"]
+html = "hiraku.dashboard.provider:provider"
+
 [project.optional-dependencies]
-mlflow = ["mlflow==3.16.0"]
+mlflow = ["mlflow-skinny==3.16.0"]
 wandb = ["wandb>=0.29.0"]
 dashboard = [
     "altair>=6.3.0",
-    "marimo>=0.25.1,<0.26",
-    "marimo-studio==0.3.0",
-    "pandas>=2.3.3",
+    "marimo>=0.25.2,<0.26",
+    "marimo-studio==0.4.1",
+    "pandas>=2.2.2",
     "pyarrow>=21",
 ]
 
 [dependency-groups]
-dev = [
+test = [
+  "mlflow==3.16.0",
   "tqdm>=4.70.0",
   "pytest>=8",
   "pytest-xdist>=3.8.0",
-  "pre-commit>=4.0",
-  "ruff>=0.8",
-  "build>=1.2",
   "numpy==2.4.6",
   "pandas==2.3.3",
   "scikit-learn==1.9.0",
+]
+lint = ["ruff>=0.8"]
+docs = [
   "zensical>=0.0.59",
   "mkdocstrings[python]>=1.0.6",
-  "mkdocs-click>=0.9.0",
+]
+dev = [
+  { include-group = "test" },
+  { include-group = "lint" },
+  { include-group = "docs" },
+  "pre-commit>=4.0",
   "ty>=0.0.79",
-  "bump-my-version>=1.5.1",
 ]
 
-[tool.uv.build-backend]
-source-exclude = [
-    "**/.artifacts",
-    "**/.locks",
-    "**/.owners",
-    "**/__marimo__",
-]
-
-[tool.hatch.build.targets.wheel]
-packages = ["src/hiraku"]
+[tool.hatch.build]
+exclude = [".artifacts", ".locks", ".owners", "__marimo__", "__pycache__"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/hiraku", "tests", "README.md", "docs", "pyproject.toml"]
+only-include = ["src", "examples"]
+
+[tool.hatch.build.targets.wheel]
+only-include = ["src/hiraku", "src/psij-descriptors", "examples"]
+dev-mode-dirs = ["src"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src" = ""
+"examples" = "hiraku/resources/examples"
 
 [tool.ruff]
 target-version = "py311"
@@ -80,50 +95,5 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["integration: end-to-end integration tests"]
-addopts = "-n auto --dist loadscope"
-
-[tool.bumpversion]
-current_version = "0.1.1"
-parse = "(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)"
-serialize = ["{major}.{minor}.{patch}"]
-search = "{current_version}"
-replace = "{new_version}"
-regex = false
-ignore_missing_version = false
-
-tag = true
-sign_tags = false
-tag_name = "v{new_version}"
-tag_message = "Release v{new_version}"
-
-allow_dirty = false
-commit = true
-message = "chore(release): bump version {current_version} → {new_version}"
-commit_args = ""
-
-allow_shell_hooks = true
-
-setup_hooks = [
-    "uv run python scripts/check_changelog.py"
-]
-
-pre_commit_hooks = ["uv lock"]
-post_commit_hooks = []
-
-[[tool.bumpversion.files]]
-filename = "pyproject.toml"
-search = 'version = "{current_version}"'
-replace = 'version = "{new_version}"'
-
-[[tool.bumpversion.files]]
-filename = "CHANGELOG.md"
-search = "## [Unreleased]"
-replace = "## [Unreleased]\n\n## [{new_version}] - {now:%Y-%m-%d}"
-
-[[tool.bumpversion.files]]
-filename = "uv.lock"
-search = '''name = "hiraku"
-version = "{current_version}"'''
-replace = '''name = "hiraku"
-version = "{new_version}"'''
+addopts = "-x -n auto --tb=no"
+markers = ["integration: tests requiring external services or optional integrations"]

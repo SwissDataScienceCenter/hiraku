@@ -1,10 +1,8 @@
 # Contributing to Hiraku
 
-## Issues and user stories
+## Feature requests and bug reports
 
 Submit issues and feature requests through the [GitHub issue tracker](https://github.com/SwissDataScienceCenter/hiraku/issues). Bug reports should include the command, a minimal reproduction, Python version, and operating system.
-
-Submit user stories through the [issue tracker](https://github.com/SwissDataScienceCenter/hiraku/issues/new?labels=%22user%20story%22). Describe the problem, intended workflow, desired outcome, and relevant context.
 
 ## Development setup
 
@@ -20,13 +18,13 @@ uv run hiraku --help
 Install the pre-commit hooks:
 
 ```bash
-uv run pre-commit install
+pre-commit install
 ```
 
 Run the hooks manually across the repository with:
 
 ```bash
-uv run pre-commit run --all-files
+pre-commit run --all-files
 ```
 
 Install optional tracking integrations when needed:
@@ -44,12 +42,16 @@ uv sync --all-extras
 Run these checks before opening a pull request:
 
 ```bash
-uv run pytest
-uv run ruff check src tests
-uv run zensical build --clean
+pytest -n auto
+ruff check src tests
+zensical build --clean --strict
 ```
 
-Tests should not require network access or W&B/MLflow credentials.
+Pytest uses parallel workers, capped at four to limit memory use.
+Write tests as pytest functions; do not use `unittest.TestCase`. Tests should
+not require network access or W&B/MLflow credentials.
+
+Remove Python cache debris with `uvx pyclean . --debris`.
 
 Keep public models and CLI behavior explicit. Add tests for new behavior and
 update the relevant documentation when a public interface changes.
@@ -59,7 +61,7 @@ update the relevant documentation when a public interface changes.
 Preview the documentation locally:
 
 ```bash
-uv run zensical serve
+zensical serve
 ```
 
 Keep onboarding instructions short. Examples should have simple commands and
@@ -71,14 +73,23 @@ Use a feature branch and focused commits. [Conventional Commit](https://www.conv
 
 ## Release a new version
 
-Release permissions are restricted to maintainers and administrators. Make sure the release notes are current under `## [Unreleased]` in `CHANGELOG.md`, then update a clean, up-to-date `main` branch:
+Release permissions are restricted to maintainers and administrators.
 
-```bash
-git switch main
-git pull --ff-only
-uv run python scripts/release.py patch
-```
+1. Make sure `## [Unreleased]` in `CHANGELOG.md` has at least one entry. In
+   GitHub Actions, run **Prepare release** from `main` and select `patch`,
+   `minor`, or `major`. The workflow bumps the version, updates the lockfile and
+   changelog, and opens a PR. [Prepare release](https://github.com/SwissDataScienceCenter/hiraku/actions/workflows/prepare-release.yml)
+2. Select **Approve workflows to run** on the PR to start CI. Review and merge
+   the PR once the checks pass.
+3. Tag the merged commit using the version and commit SHA shown by GitHub.
 
-The script calculates the next version, checks the changelog, runs tests, linting, and the documentation build, then asks for confirmation. After confirmation, `bump-my-version` updates `pyproject.toml`, `CHANGELOG.md`, and `uv.lock`, creates the release commit and `vX.Y.Z` tag, and pushes both to `main`. The tag starts the release workflow, which builds the wheel and source distribution and attaches them to a new GitHub Release.
+   ```bash
+   git fetch origin main
+   git tag vX.Y.Z <merge-commit-sha>
+   git push origin vX.Y.Z
+   gh workflow run release.yml --ref vX.Y.Z
+   ```
 
-Use `--dry-run` to run checks without changing Git. Use `--skip-checks` only when checks have already been run separately.
+The Release workflow checks the tag against the project version and confirms the
+tagged commit is on `main`. It builds the distributions, publishes them to PyPI,
+and attaches the same files to the GitHub release.

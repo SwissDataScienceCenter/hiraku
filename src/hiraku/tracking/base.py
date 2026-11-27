@@ -2,19 +2,215 @@
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
+import math
+import os
 from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from pathlib import Path
+from types import MappingProxyType
+from typing import Annotated, Any, Literal, Protocol
+from urllib.parse import urlsplit
 
-from ..errors import BackendError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+)
 
-if TYPE_CHECKING:
-    from ..run import Run
+from ..errors import (
+    BackendError,
+    ValidationError,
+)
 
 
-class TrackingBackend(ABC):
-    """Abstract tracking backend implemented by every run-tracking adapter."""
+class Run(BaseModel):
+    """
+    Immutable normalized run returned by tracking backends.
+
+    Attributes:
+        id: Unique run ID.
+        job_id: Optional execution attempt ID reported by the tracking source.
+        metrics: Mapping of metric names to float values.
+        params: Mapping of parameter names to string values.
+        record_id: Optional bundle-relative concept path associated with the run.
+        commit: Optional commit hash reported by the tracking source.
+        timestamp: Optional run start time as a timezone-aware UTC datetime.
+        duration: Optional run duration in seconds; ``None`` while running.
+        url: Optional URL to the run in the backend's UI.
+        raw: Backend-specific public metadata for the run.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    id: str = Field(min_length=1)
+    job_id: str | None = None
+    metrics: Mapping[str, float] = Field(default_factory=dict)
+    params: Mapping[str, str] = Field(default_factory=dict)
+    record_id: str | None = None
+    commit: str | None = None
+    timestamp: datetime | None = None
+    duration: float | None = None
+    url: str | None = None
+    raw: Mapping[str, Any] = Field(default_factory=dict, repr=False)
+
+    @field_validator("duration")
+    @classmethod
+    def validate_duration(cls, value: float | None) -> float | None:
+        if value is not None and not (math.isfinite(value) and value >= 0):
+            raise ValidationError(
+                f"Run duration must be a non-negative number of seconds: {value!r}"
+            )
+        return value
+
+    @field_validator("metrics", "params", "raw", mode="after")
+    @classmethod
+    def snapshot_mapping(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
+        return MappingProxyType(dict(value))
+
+    @field_validator("timestamp")
+    @classmethod
+    def normalize_timestamp(cls, value: datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
+
+
+class TrackingBackend(Protocol):
+    """Structural contract implemented by run tracking adapters."""
+
+    backend_name: str
+
+    def list_runs(
+        self,
+        *,
+        record_id: str | None = None,
+        include_unattributed: bool = False,
+        sort: str | None = None,
+        ascending: bool | None = None,
+        limit: int | None = None,
+    ) -> list[Run]: ...
+
+
+class CSVBackendConfig(BaseModel):
+    """Settings for reading runs from a CSV file.
+
+    Attributes:
+        type: Discriminator identifying the CSV backend.
+        path: Required CSV path, relative to the project root or absolute.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["csv"] = "csv"
+    path: Path
+
+    @field_validator("path", mode="before")
+    @classmethod
+    def validate_path(cls, value: Any) -> Any:
+        if isinstance(value, str) and not value.strip():
+            raise ValueError("CSV path must not be blank")
+        return value
+
+
+class MLflowBackendConfig(BaseModel):
+    """Connection and experiment settings for MLflow tracking.
+
+    Attributes:
+        type: Discriminator identifying the MLflow backend.
+        tracking_uri: HTTP(S) server URL; defaults to MLFLOW_TRACKING_URI.
+        experiment_name: Optional experiment name to query.
+        ui_url: Optional base URL used when constructing run links.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["mlflow"] = "mlflow"
+    tracking_uri: str | None = Field(default=None, min_length=1)
+    experiment_name: str | None = Field(default=None, min_length=1)
+    ui_url: str | None = Field(default=None, min_length=1)
+
+    @field_validator("tracking_uri", "ui_url")
+    @classmethod
+    def validate_url(cls, value: str | None, info: ValidationInfo) -> str | None:
+        return (
+            _validate_mlflow_url(value, field=info.field_name)
+            if value is not None
+            else None
+        )
+
+
+def _validate_mlflow_url(value: str, *, field: str = "tracking_uri") -> str:
+    """Validate a server URL, excluding credentials from UI links."""
+    try:
+        parsed = urlsplit(value)
+        _ = parsed.port  # urlsplit validates the port only when accessed.
+        valid = (
+            parsed.scheme in {"http", "https"}
+            and bool(parsed.hostname)
+            and not any(character.isspace() for character in value)
+            and not parsed.query
+            and not parsed.fragment
+            and (
+                field != "ui_url"
+                or (parsed.username is None and parsed.password is None)
+            )
+        )
+    except ValueError:
+        valid = False
+    if not valid:
+        excluded = (
+            "credentials, query, or fragment"
+            if field == "ui_url"
+            else ("query or fragment")
+        )
+        raise BackendError(
+            f"mlflow {field} must be an absolute HTTP(S) server URL without {excluded}"
+        )
+    return value
+
+
+class WandbBackendConfig(BaseModel):
+    """Settings for querying a Weights & Biases project.
+
+    Attributes:
+        type: Discriminator identifying the W&B backend.
+        entity: Optional W&B account or team name.
+        project: W&B project name.
+        id: Optional run ID to select.
+        experiment_name: Optional experiment name.
+        notes: Optional run notes filter.
+        tags: Optional run tags filter.
+        group: Optional run group filter.
+        job_type: Optional run job type filter.
+        mode: W&B connection mode.
+        api_key: Optional API key; defaults to ``WANDB_API_KEY``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["wandb"] = "wandb"
+    entity: str | None = None
+    project: str = Field(min_length=1)
+    id: str | None = None
+    experiment_name: str | None = Field(default=None, min_length=1)
+    notes: str | None = None
+    tags: list[str] | None = None
+    group: str | None = None
+    job_type: str | None = None
+    mode: Literal["online", "offline"] = "online"
+    api_key: str | None = Field(
+        default_factory=lambda: os.environ.get("WANDB_API_KEY"), exclude=True
+    )
+
+
+BackendConfig = Annotated[
+    CSVBackendConfig | MLflowBackendConfig | WandbBackendConfig,
+    Field(discriminator="type"),
+]
+
+
+class BackendOperations:
+    """Shared query behavior for built-in tracking adapters."""
 
     @staticmethod
     def _validate_filters(record_id: str) -> None:
@@ -44,50 +240,18 @@ class TrackingBackend(ABC):
 
     @staticmethod
     def _apply_query(
-        runs: list[Run], query: Mapping[str, Any], backend: str
+        runs: list[Run],
+        *,
+        sort: str | None,
+        ascending: bool | None,
+        limit: int | None,
     ) -> list[Run]:
-        allowed = {"sort", "ascending", "limit"}
-        unknown = set(query) - allowed
-        if unknown:
-            raise BackendError(
-                f"{backend} backend does not support query options: {sorted(unknown)}"
-            )
         result = list(runs)
-        sort = query.get("sort")
-        if sort is None and "ascending" in query:
-            raise BackendError(f"{backend} backend ascending requires a sort field")
         if sort is not None:
-            if not isinstance(sort, str):
-                raise BackendError(f"{backend} backend sort must be a string")
-
-            def value(run: Run) -> Any:
-                value = getattr(run, sort, None)
-                if value is None:
-                    value = run.metrics.get(sort, run.params.get(sort))
-                return value
-
-            def numeric(run: Run) -> float | None:
-                candidate = value(run)
-                if isinstance(candidate, bool) or candidate is None:
-                    return None
-                try:
-                    return float(candidate)
-                except (TypeError, ValueError):
-                    return None
-
-            ranked = [run for run in result if numeric(run) is not None]
-            unranked = [run for run in result if numeric(run) is None]
+            ranked = [run for run in result if sort in run.metrics]
+            unranked = [run for run in result if sort not in run.metrics]
             ranked.sort(key=lambda run: run.id)
-
-            def numeric_key(run: Run) -> float:
-                number = numeric(run)
-                assert number is not None
-                return number
-
-            ranked.sort(
-                key=numeric_key,
-                reverse=not bool(query.get("ascending", True)),
-            )
+            ranked.sort(key=lambda run: run.metrics[sort], reverse=ascending is False)
             result = [*ranked, *sorted(unranked, key=lambda run: run.id)]
         else:
             result.sort(
@@ -97,35 +261,76 @@ class TrackingBackend(ABC):
                     run.id,
                 )
             )
-        limit = query.get("limit")
         if limit is not None:
-            if not isinstance(limit, int) or isinstance(limit, bool) or limit < 0:
-                raise BackendError(
-                    f"{backend} backend limit must be a non-negative integer"
-                )
             result = result[:limit]
         return result
 
-    def list_runs(self, *, record_id: str | None = None, **query: Any) -> list[Run]:
-        """Return normalized runs with record attribution.
+    def _validate_query(
+        self,
+        *,
+        sort: str | None,
+        ascending: bool | None,
+        limit: int | None,
+    ) -> None:
+        if sort is not None and (not isinstance(sort, str) or not sort):
+            raise BackendError(
+                f"{self.backend_name} backend sort must be a non-empty metric name"
+            )
+        if ascending is not None and not isinstance(ascending, bool):
+            raise BackendError(
+                f"{self.backend_name} backend ascending must be a boolean"
+            )
+        if sort is None and ascending is not None:
+            raise BackendError(
+                f"{self.backend_name} backend ascending requires a sort field"
+            )
+        if limit is not None and (
+            not isinstance(limit, int) or isinstance(limit, bool) or limit < 0
+        ):
+            raise BackendError(
+                f"{self.backend_name} backend limit must be a non-negative integer"
+            )
+
+    def list_runs(
+        self,
+        *,
+        record_id: str | None = None,
+        include_unattributed: bool = False,
+        sort: str | None = None,
+        ascending: bool | None = None,
+        limit: int | None = None,
+    ) -> list[Run]:
+        """Return normalized attributed runs by default.
 
         Args:
-            record_id: Optional record ID to filter runs by; all attributed runs
-                are returned when omitted.
-            query: Optional query parameters to sort, limit, or filter the results.
+            record_id: Optional record ID to match exactly.
+            include_unattributed: Include runs without a record ID. Defaults to false.
+            sort: Plain metric name. Runs missing that metric follow, ordered by ID.
+            ascending: Sort order; requires ``sort``. Defaults to ascending.
+            limit: Maximum number of returned runs. Without ``sort``, runs are
+                ordered by timestamp, with missing timestamps last.
 
         Returns:
             A list of normalized Run objects matching the specified filters and query.
         """
         if record_id is not None:
             self._validate_filters(record_id)
-        runs = [run for run in self._read_source_runs() if run.record_id]
+        if not isinstance(include_unattributed, bool):
+            raise BackendError("include_unattributed must be a boolean")
+        self._validate_query(sort=sort, ascending=ascending, limit=limit)
+        runs = self._read_source_runs()
+        if not include_unattributed:
+            runs = [run for run in runs if run.record_id]
         if record_id is not None:
             runs = [run for run in runs if run.record_id == record_id]
-        return self._apply_query(runs, query, self.backend_name)
+        return self._apply_query(
+            runs,
+            sort=sort,
+            ascending=ascending,
+            limit=limit,
+        )
 
-    @abstractmethod
-    def _read_source_runs(self, **options: Any) -> list[Run]:
+    def _read_source_runs(self) -> list[Run]:
         """Read all runs from the configured source once."""
         raise NotImplementedError
 

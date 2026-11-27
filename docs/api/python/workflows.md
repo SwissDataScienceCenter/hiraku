@@ -1,49 +1,29 @@
-# Workflows API
+# Workflow
 
-For authoring and execution examples, see the [Workflows guide](../../guides/workflows.md).
+[View source on GitHub](https://github.com/SwissDataScienceCenter/hiraku/blob/main/src/hiraku/workflows/langgraph.py)
 
-## Graph
+See [Workflows](../../guides/workflows.md) for a graph and CLI walkthrough.
 
-::: hiraku.workflows.graph.State
+::: hiraku.workflows.langgraph.workflow_ids
+    options:
+      show_root_heading: true
+      show_root_full_path: false
+      show_signature_annotations: true
 
-::: hiraku.workflows.graph.EventArguments
+::: hiraku.workflows.langgraph.start_workflow
+    options:
+      show_root_heading: true
+      show_root_full_path: false
+      show_signature_annotations: true
 
-::: hiraku.workflows.graph.Node
+::: hiraku.workflows.langgraph.resume_workflow
+    options:
+      show_root_heading: true
+      show_root_full_path: false
+      show_signature_annotations: true
 
-::: hiraku.workflows.graph.Event
-
-::: hiraku.workflows.graph.WorkflowGraph
-
-::: hiraku.workflows.graph.start
-
-::: hiraku.workflows.graph.event
-
-::: hiraku.workflows.graph.node
-
-## Workflow
-
-::: hiraku.workflows.workflow.Workflow
-
-::: hiraku.workflows.markdown.MarkdownWorkflow
-
-::: hiraku.workflows.workflow.Instruction
-
-::: hiraku.workflows.workflow.load_workflow
-
-::: hiraku.workflows.workflow.list_workflows
-
-## Session
-
-::: hiraku.workflows.session.Session
-
-::: hiraku.workflows.session.EventResult
-
-::: hiraku.workflows.session.load_session
-
-::: hiraku.workflows.session.list_sessions
-
-## Errors
-
-::: hiraku.errors.EventRejected
-
-::: hiraku.errors.NotReady
+::: hiraku.workflows.langgraph.workflow_status
+    options:
+      show_root_heading: true
+      show_root_full_path: false
+      show_signature_annotations: true

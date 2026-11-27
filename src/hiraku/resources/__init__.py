@@ -1,1 +1,1 @@
-"""Bundled editable project initialization resources."""
+"""Project initialization resources included with Hiraku."""

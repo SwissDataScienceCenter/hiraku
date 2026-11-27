@@ -1,17 +1,21 @@
-# Guides
+# User guide
 
-Practical workflows for setting up Hiraku, choosing a tracking backend, and
-working with research records.
+New to Hiraku? [Run your first experiment](../quickstart/first_experiment.md) to create a record and inspect two runs.
 
-- [Start from scratch](../examples/minimal/README.md)
-- [Workflows](workflows.md): run and write research workflows in your coding
-  agent.
-- Tracking backends:
-    - [CSV](tracking-csv.md)
-    - [Weights &amp; Biases](tracking-wandb.md)
-    - [MLflow](tracking-mlflow.md)
-    - [Custom backend](tracking-custom.md)
-- [MCP server](mcp.md)
-- [Dashboard](dashboard.md)
-- Advanced usage:
-    - [Branches and record provenance](experiment-branches.md)
+Continue with [Run an experiment with a coding agent](../quickstart/agentic_workflows.md)
+to review an agent's proposal, implementation, and results. 
+
+For client setup and MCP reference, see [Connect a coding agent](mcp.md).
+
+| Concept | Guide |
+| --- | --- |
+| Project | Initialize Hiraku in an existing repository with `hiraku init`. |
+| Record | [Records](records.md) for an experiment. |
+| Job | [Run a command locally or submit it to an executor](jobs.md). |
+| Leaderboard | [Choose a data source and compare metrics](leaderboards.md). |
+| Workflow | [Define a repeatable procedure with LangGraph](workflows.md). |
+
+Other guides:
+
+- [Tracking backends](tracking-csv.md): CSV, MLflow, and Weights & Biases.
+- [Dashboard](dashboard.md): browse records and results in a browser.

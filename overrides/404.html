@@ -6,15 +6,19 @@
 
 {% block content %}
   <main class="sdsc-error" aria-labelledby="sdsc-error-title">
-    <div class="sdsc-error__mark" aria-hidden="true">404</div>
-    <p class="sdsc-eyebrow">Hiraku · SDSC</p>
-    <h1 id="sdsc-error-title">This page went off the experiment track.</h1>
+    <div class="sdsc-error__brand">
+      <img src="{{ config.theme.favicon | url }}" alt="" aria-hidden="true">
+      <p>Swiss Data Science Center <span>·</span> Hiraku</p>
+    </div>
+    <p class="sdsc-error__code">404 <span>PAGE NOT FOUND</span></p>
+    <h1 id="sdsc-error-title">This page isn't in the research record.</h1>
     <p class="sdsc-error__message">
-      The address does not point to a published page. Return to the documentation
-      and continue from a known starting point.
+      The address may be outdated or mistyped. Return to the documentation or
+      start with the Hiraku guide.
     </p>
-    <a class="md-button sdsc-error__button" href="{{ config.site_url | default('/') }}">
-      Back to documentation
-    </a>
+    <div class="sdsc-error__actions">
+      <a class="md-button md-button--primary" href="{{ config.site_url | default('/') }}">Back to documentation</a>
+      <a class="md-button" href="{{ config.site_url | default('/') }}getting_started/">Get started</a>
+    </div>
   </main>
 {% endblock %}

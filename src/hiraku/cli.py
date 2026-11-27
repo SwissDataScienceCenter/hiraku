@@ -4,65 +4,87 @@ from __future__ import annotations
 
 import json
 import os
-import runpy
 import shlex
 import subprocess
+import sys
 from collections.abc import Callable, Mapping, Sequence
-from contextlib import suppress
 from datetime import UTC, datetime
-from importlib.resources import as_file, files
+from importlib import metadata
 from pathlib import Path
 from typing import Any
 
 import click
 import yaml
+from packaging.requirements import Requirement
+from psij import (
+    InvalidJobException,
+    JobAttributes,
+    JobStatus,
+    SubmitException,
+)
 from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
+from rich import box, print_json
+from rich.console import Console
+from rich.table import Table
+from rich.text import Text
 
-from .base import BaseRecord
-from .config import HirakuConfig
-from .context import Context, list_contexts, load_context
-from .errors import GitError, HirakuError, NoActiveRecordError, ValidationError
+from .errors import (
+    HirakuError,
+    ValidationError,
+)
+from .examples import Example
 from .git import GitRepository, init_code_repository, require_git
 from .io import dump_yaml
-from .launch import _dispatcher, launch, render_arguments
-from .record import Record, list_records, load_record
-from .run import Run
-from .validation import validate_identifier
+from .job import Submission, observe_submission, prepare_job, run_local, submit_job
+from .project import Project
+from .record import Record, RecordUpdate, validate_identifier
+from .tracking import Leaderboard, Run
+from .tracking.leaderboard import _leaderboard_path
 
 
 class CLIContext:
     def __init__(self) -> None:
-        self._config: HirakuConfig | None = None
+        self._project: Project | None = None
 
     @property
-    def config(self) -> HirakuConfig:
-        if self._config is None:
-            self._config = HirakuConfig.discover()
-        return self._config
+    def project(self) -> Project:
+        if self._project is None:
+            self._project = Project.discover()
+        return self._project
 
 
 class HirakuGroup(click.Group):
     def invoke(self, ctx: click.Context) -> Any:
         try:
             return super().invoke(ctx)
-        except (HirakuError, PydanticValidationError) as exc:
+        except (
+            HirakuError,
+            PydanticValidationError,
+            InvalidJobException,
+            SubmitException,
+            ValueError,
+        ) as exc:
             raise click.ClickException(str(exc)) from exc
 
 
 def _json_value(value: Any) -> Any:
-    if isinstance(value, BaseRecord):
-        return {**_json_value(value.to_dict()), "markdown": value.markdown}
+    if isinstance(value, Record):
+        return {
+            **_json_value(value.metadata),
+            "id": value.id,
+            "markdown": value.markdown,
+        }
     if isinstance(value, Run):
         return {
             "id": value.id,
+            "job_id": value.job_id,
             "metrics": _json_value(value.metrics),
             "params": _json_value(value.params),
             "record_id": value.record_id,
             "commit": value.commit,
             "timestamp": _json_value(value.timestamp),
             "duration": value.duration,
-            "entrypoint": value.entrypoint,
             "url": value.url,
             "raw": _json_value(value.raw),
         }
@@ -79,23 +101,32 @@ def _json_value(value: Any) -> Any:
     return value
 
 
-def _emit_json(value: Any) -> None:
-    click.echo(json.dumps(_json_value(value), sort_keys=True, ensure_ascii=False))
+def _emit_json(value: Any, pretty: bool = False) -> None:
+    serialized = json.dumps(_json_value(value), sort_keys=True, ensure_ascii=False)
+    if not pretty:
+        click.echo(serialized)
+    else:
+        print_json(json=serialized)
 
 
-def _table(columns: Sequence[str], rows: Sequence[Sequence[Any]]) -> str:
-    rendered = [["" if item is None else str(item) for item in row] for row in rows]
-    widths = [
-        max([len(name), *(len(row[index]) for row in rendered)])
-        for index, name in enumerate(columns)
-    ]
-    lines = ["  ".join(name.ljust(widths[i]) for i, name in enumerate(columns))]
-    lines.append("  ".join("-" * width for width in widths))
-    lines.extend(
-        "  ".join(item.ljust(widths[i]) for i, item in enumerate(row)).rstrip()
-        for row in rendered
-    )
-    return "\n".join(lines)
+def _validate_json_options(json_output: bool, pretty: bool) -> None:
+    if pretty and not json_output:
+        raise ValidationError("--pretty requires --json")
+
+
+def _print_table(columns: Sequence[str], rows: Sequence[Sequence[Any]]) -> None:
+    table = Table(box=box.SIMPLE_HEAD, header_style="bold cyan", show_edge=False)
+    for column in columns:
+        table.add_column(column, overflow="fold")
+    for row in rows:
+        table.add_row(
+            *(
+                item if isinstance(item, Text) else "" if item is None else str(item)
+                for item in row
+            )
+        )
+    console = Console()
+    console.print(table)
 
 
 def _fields(values: Sequence[str]) -> dict[str, Any]:
@@ -131,13 +162,6 @@ def _markdown(path: Path | None) -> str:
         raise ValidationError(f"Cannot read {path}: {exc}") from exc
 
 
-def _active(config: HirakuConfig, record_id: str | None = None) -> Record:
-    identifier = record_id or config.active_record_id
-    if identifier is None:
-        raise NoActiveRecordError("No active record; supply --record or set one")
-    return load_record(identifier, config=config)
-
-
 def _edit(path: Path) -> None:
     editor = shlex.split(os.environ.get("EDITOR", "vim"))
     if not editor:
@@ -147,9 +171,7 @@ def _edit(path: Path) -> None:
         raise ValidationError(f"Editor exited with status {result.returncode}")
 
 
-def _edit_recoverable(
-    path: Path, loader: Callable[[], BaseRecord], label: str
-) -> BaseRecord:
+def _edit_recoverable(path: Path, loader: Callable[[], Any], label: str) -> Any:
     try:
         loader()
     except (ValidationError, PydanticValidationError) as exc:
@@ -163,77 +185,64 @@ def _edit_recoverable(
     return loader()
 
 
-def _overrides(tokens: Sequence[str]) -> dict[str, Any]:
-    result: dict[str, Any] = {}
-    index = 0
-    while index < len(tokens):
-        token = tokens[index]
-        if not token.startswith("--") or token == "--":
-            raise ValidationError(f"Invalid entrypoint argument: {token!r}")
-        key, separator, raw = token[2:].partition("=")
-        if not key:
-            raise ValidationError("Entrypoint argument name must be non-empty")
-        if not separator:
-            if index + 1 < len(tokens) and not tokens[index + 1].startswith("--"):
-                index += 1
-                raw = tokens[index]
-            else:
-                raw = True
-        key = key.replace("-", "_")
-        if key in result:
-            previous = result[key]
-            result[key] = (
-                [*previous, raw] if isinstance(previous, list) else [previous, raw]
-            )
+def _extra_status(extra: str, requirements: Sequence[str]) -> str:
+    missing = False
+    incompatible = False
+    for raw in requirements:
+        requirement = Requirement(raw)
+        if requirement.marker is None or not requirement.marker.evaluate(
+            {"extra": extra}
+        ):
+            continue
+        # Ignore base requirements that also apply without selecting an extra.
+        if requirement.marker.evaluate({"extra": ""}):
+            continue
+        try:
+            version = metadata.version(requirement.name)
+        except metadata.PackageNotFoundError:
+            missing = True
         else:
-            result[key] = raw
-        index += 1
-    return result
+            if not requirement.specifier.contains(version, prereleases=True):
+                incompatible = True
+    if missing:
+        return "not installed"
+    return "incompatible" if incompatible else "available"
 
 
-def _update_fields(
-    record: BaseRecord,
-    set_values: Sequence[str],
-    unset_values: Sequence[str],
-    markdown_file: Path | None,
-    *,
-    immutable: set[str] | None = None,
-) -> None:
-    changes = _fields(set_values)
-    protected = immutable or {"id"}
-    if set(changes).intersection(protected) or set(unset_values).intersection(
-        protected
-    ):
-        raise ValidationError(f"Cannot change {sorted(protected)}")
-    if set(changes).intersection(unset_values):
-        raise ValidationError("A field cannot be set and unset together")
-    for key, value in changes.items():
-        setattr(record, key, value)
-    for key in unset_values:
-        if key in type(record).model_fields:
-            record.__dict__.pop(key, None)
-            record.__pydantic_fields_set__.discard(key)
-        elif record.__pydantic_extra__ is not None:
-            record.__pydantic_extra__.pop(key, None)
-    if markdown_file is not None:
-        record.markdown = _markdown(markdown_file)
-    record.save()
+def _show_version(ctx: click.Context, param: click.Parameter, value: bool) -> None:
+    if not value or ctx.resilient_parsing:
+        return
+    distribution = metadata.distribution("hiraku")
+    click.echo(f"hiraku {distribution.version}")
+    click.echo(f"Executable: {Path(sys.argv[0]).absolute()}")
+    click.echo(f"Python: {sys.executable} ({sys.version.split()[0]})")
+    click.echo("Extras:")
+    for extra in sorted(distribution.metadata.get_all("Provides-Extra") or []):
+        click.echo(f"  {extra}: {_extra_status(extra, distribution.requires or [])}")
+    ctx.exit()
 
 
 @click.group(name="hiraku", cls=HirakuGroup)
+@click.option(
+    "--version",
+    is_flag=True,
+    is_eager=True,
+    expose_value=False,
+    callback=_show_version,
+    help="Show version and installation details.",
+)
 @click.pass_context
 def main(ctx: click.Context) -> None:
-    """Manage research records, launches, and tracked runs."""
+    """Manage research records, leaderboards, job submissions, and workflows."""
     ctx.ensure_object(CLIContext)
 
 
-@main.command("mcp")
-def mcp_command() -> None:
+def _serve_mcp() -> None:
     """Serve the Hiraku project discovered from the current directory over stdio."""
     try:
         from .mcp import create_server
 
-        server = create_server(HirakuConfig.discover())
+        server = create_server(Project.discover())
     except ModuleNotFoundError as exc:
         if exc.name == "mcp" or (exc.name or "").startswith("mcp."):
             raise click.ClickException(
@@ -243,68 +252,81 @@ def mcp_command() -> None:
     server.run(transport="stdio")
 
 
+@main.group("mcp")
+def mcp_group() -> None:
+    """Install, remove, or serve the Hiraku MCP server."""
+
+
+@mcp_group.command("serve")
+def mcp_serve_command() -> None:
+    """Serve the Hiraku project discovered from the current directory over stdio."""
+    _serve_mcp()
+
+
+@mcp_group.command("install")
+def mcp_install_command() -> None:
+    """Install the Hiraku MCP server in supported client configurations."""
+    project = Project.discover()
+    project.install_mcp()
+    click.echo(f"Installed Hiraku MCP server for {project.root}")
+
+
 @main.command("init")
 @click.argument("path", required=False, type=click.Path(path_type=Path))
-@click.option("--tracking-backend")
-@click.option("--template", type=click.Path(path_type=Path))
 @click.option(
     "--git", "init_git", is_flag=True, help="Initialize the code Git repository."
 )
 def init_command(
     path: Path | None,
-    tracking_backend: str | None,
-    template: Path | None,
     init_git: bool,
 ) -> None:
     """Initialize PATH (default: current directory)."""
     root = path if path is not None else Path.cwd()
-    marker = root.expanduser().absolute() / "hiraku.yml"
     if init_git:
         require_git()
-    if marker.is_file() and tracking_backend is None and template is None:
-        config = HirakuConfig.load(marker)
+    absolute_root = root.expanduser().absolute()
+    markers = [absolute_root / "hiraku.yml"]
+    if absolute_root.is_dir():
+        markers.extend(
+            child / "hiraku.yml"
+            for child in absolute_root.iterdir()
+            if child.is_dir() and not child.name.startswith(".")
+        )
+    existing_marker = next((marker for marker in markers if marker.is_file()), None)
+    if existing_marker is not None:
+        project = Project.load(existing_marker)
         message = "Hiraku project already initialized"
     else:
-        config = HirakuConfig.init(
-            root, tracking_backend=tracking_backend, template=template
-        )
+        project = Project.create(root)
         message = "Initialized Hiraku project"
     if init_git:
-        init_code_repository(config)
-    click.echo(f"{message} at {config.path}")
+        init_code_repository(project)
+    click.echo(f"{message} at {project.path}")
 
 
 @main.group("example")
 def example_group() -> None:
-    """List and create bundled examples."""
+    """List and create examples."""
 
 
 @example_group.command("list")
 def example_list_command() -> None:
-    """List available bundled examples."""
-    examples = files("hiraku.resources") / "examples"
+    """List available examples."""
     rows = []
-    for example in sorted(examples.iterdir(), key=lambda item: item.name):
-        manifest = example / "example.yml"
-        if example.is_dir() and manifest.is_file():
-            metadata = yaml.safe_load(manifest.read_text(encoding="utf-8"))
-            rows.append((example.name, metadata.get("description", "")))
-    click.echo(_table(("name", "description"), rows))
+    for name in Example.list():
+        example = Example.load(Example.source(name))
+        rows.append((name, example.title, example.description))
+    _print_table(("name", "title", "description"), rows)
 
 
 @example_group.command("create")
 @click.argument("example")
 @click.argument("path", required=False, type=click.Path(path_type=Path))
-@click.option("--tracking-backend")
-@click.option("--with-generator", is_flag=True, help="Copy the example generator.")
-@click.option(
-    "--generate", is_flag=True, help="Generate example runs after initialization."
-)
 @click.option(
     "--with-results",
     "results",
     is_flag=True,
-    help="Copy bundled research records and tracked runs.",
+    help="Copy the example's prepared records and tracked runs.",
 )
 @click.option(
     "--git", "init_git", is_flag=True, help="Initialize the code Git repository."
@@ -312,70 +334,22 @@ def example_list_command() -> None:
 def example_create_command(
     example: str,
     path: Path | None,
-    tracking_backend: str | None,
     results: bool,
-    with_generator: bool,
-    generate: bool,
     init_git: bool,
 ) -> None:
-    """Create PATH from a bundled EXAMPLE (default: ./EXAMPLE).
+    """Create PATH from an available EXAMPLE (default: ./EXAMPLE).
 
-    Copies example files without Git history or network access.
+    Copies example files and sets up agent integrations without network access.
     """
-    if generate and results:
-        raise click.UsageError("--generate cannot use --with-results")
     validate_identifier(example, label="example name")
     root = path if path is not None else Path(example)
     if init_git:
         require_git()
-    generator = None
-    if generate:
-        generator = (
-            files("hiraku.resources") / "examples" / example / "generate_results.py"
-        )
-        if not generator.is_file():
-            raise click.UsageError(f"Example {example!r} has no generator")
-    config = HirakuConfig.init(
-        root,
-        tracking_backend=tracking_backend,
-        example=example,
-        results=results,
-        with_generator=with_generator,
-    )
+    project = Project.load(Example.create(example, root, with_results=results))
+    project._install_agent_resources()
     if init_git:
-        init_code_repository(config)
-    click.echo(f"Initialized Hiraku project at {config.path}")
-    if generator is not None:
-        with as_file(generator) as source:
-            try:
-                runpy.run_path(str(source))["generate"](config)
-            except Exception as exc:
-                raise click.ClickException(
-                    "Generation failed; initialized project and completed runs kept: "
-                    f"{exc}"
-                ) from exc
-
-
-@main.command("status")
-@click.option("--json", "json_output", is_flag=True)
-@click.pass_obj
-def status_command(state: CLIContext, json_output: bool) -> None:
-    """Show project and active record."""
-    config = state.config
-    try:
-        branch = GitRepository(config).current_branch
-    except GitError:
-        branch = None
-    result = {
-        "project_root": config.root,
-        "active_record_id": config.active_record_id,
-        "tracking_backend": config.tracking_backend,
-        "git_branch": branch,
-    }
-    if json_output:
-        _emit_json(result)
-    else:
-        click.echo(_table(("field", "value"), list(result.items())))
+        init_code_repository(project)
+    click.echo(f"Copied Hiraku example to {project.root}")
 
 
 @main.group("record")
@@ -385,139 +359,118 @@ def record_group() -> None:
 
 @record_group.command("create")
 @click.argument("record_id")
+@click.option("--title")
 @click.option("--parent", "parent_id")
 @click.option("--related-to", multiple=True)
 @click.option("--type")
 @click.option("--commit")
 @click.option("--markdown-file", type=click.Path(path_type=Path))
 @click.option("--set", "set_values", multiple=True, metavar="KEY=VALUE")
-@click.option("--no-activate", is_flag=True)
 @click.pass_obj
 def record_create(
     state: CLIContext,
     record_id: str,
+    title: str | None,
     parent_id: str | None,
     related_to: tuple[str, ...],
     type: str | None,
     commit: str | None,
     markdown_file: Path | None,
     set_values: tuple[str, ...],
-    no_activate: bool,
 ) -> None:
     """Create a root or child record."""
     fields = _fields(set_values)
-    if any(key in fields for key in ("id", "parent_id", "related_to")):
-        raise ValidationError("Use dedicated options for id, parent_id and related_to")
+    if any(key in fields for key in ("id", "title", "parent_id", "related_to")):
+        raise ValidationError(
+            "Use the record_id argument and dedicated metadata options"
+        )
     if type is not None:
         fields["type"] = type
+    if title is not None:
+        fields["title"] = title
     if commit is not None:
-        fields["commit"] = GitRepository(state.config).resolve(commit)
-    record = Record.create(
+        fields["commit"] = GitRepository(state.project.root).resolve(commit)
+    record = state.project.vault.create(
         record_id,
         parent_id=parent_id,
         related_to=list(related_to),
         markdown=_markdown(markdown_file),
-        activate=not no_activate,
-        config=state.config,
         **fields,
     )
-    click.echo(f"Created record {record.id} at {record.path}")
+    target = state.project.vault.file_path(record.id)
+    click.echo(f"Created a new record {record.id!r} at {target}")
 
 
 @record_group.command("list")
 @click.option("--json", "json_output", is_flag=True)
+@click.option("--pretty", is_flag=True, help="Pretty-print JSON output.")
 @click.pass_obj
-def record_list(state: CLIContext, json_output: bool) -> None:
+def record_list(state: CLIContext, json_output: bool, pretty: bool) -> None:
     """List all research records."""
-    records = list_records(config=state.config)
+    _validate_json_options(json_output, pretty)
+    records = state.project.vault.list()
     if json_output:
-        _emit_json(records)
+        _emit_json(records, pretty=pretty)
     else:
-        click.echo(
-            _table(
-                ("id", "parent", "type", "status"),
-                [(r.id, r.parent_id, r.type, r.status) for r in records],
-            )
+        _print_table(
+            ("id", "title", "parent", "type", "state"),
+            [(r.id, r.title, r.parent_id, r.type, r.state) for r in records],
         )
 
 
 @record_group.command("show")
-@click.argument("record_id", required=False)
-@click.option("--raw", is_flag=True)
+@click.argument("record_id")
 @click.option("--json", "json_output", is_flag=True)
+@click.option("--pretty", is_flag=True, help="Pretty-print JSON output.")
 @click.pass_obj
 def record_show(
-    state: CLIContext, record_id: str | None, raw: bool, json_output: bool
+    state: CLIContext,
+    record_id: str,
+    json_output: bool,
+    pretty: bool,
 ) -> None:
-    """Show stored or effective fields with their sources."""
-    record = _active(state.config, record_id)
-    if raw:
-        values = record.to_dict()
-        sources = {}
-    else:
-        resolved = record.resolve(config=state.config)
-        values, sources = resolved.values, resolved.sources
+    """Show the document's local fields and Markdown."""
+    _validate_json_options(json_output, pretty)
+    record = state.project.vault.load(record_id)
     if json_output:
-        _emit_json({"values": values, "sources": sources, "markdown": record.markdown})
+        _emit_json(record, pretty=pretty)
     else:
-        click.echo(
-            f"---\n{dump_yaml(_json_value(values))}---\n{record.markdown}", nl=False
-        )
-        if sources:
-            click.echo("\nSources:\n" + dump_yaml(sources), nl=False)
+        click.echo(f"---\n{dump_yaml(record.metadata)}---\n{record.markdown}", nl=False)
 
 
 @record_group.command("update")
 @click.argument("record_id")
-@click.option("--parent", "parent_id")
-@click.option("--root", "make_root", is_flag=True)
 @click.option("--related-to", multiple=True)
 @click.option("--commit")
 @click.option("--set", "set_values", multiple=True, metavar="KEY=VALUE")
-@click.option("--unset", "unset_values", multiple=True)
 @click.option("--markdown-file", type=click.Path(path_type=Path))
 @click.pass_obj
 def record_update(
     state: CLIContext,
     record_id: str,
-    parent_id: str | None,
-    make_root: bool,
     related_to: tuple[str, ...],
     commit: str | None,
     set_values: tuple[str, ...],
-    unset_values: tuple[str, ...],
     markdown_file: Path | None,
 ) -> None:
-    """Update stored fields; --unset removes an override."""
-    record = load_record(record_id, config=state.config)
-    if parent_id is not None and make_root:
-        raise ValidationError("--parent and --root are mutually exclusive")
+    """Update stored fields; set optional fields to null with --set KEY=null."""
+    record = state.project.vault.load(record_id)
     changes = _fields(set_values)
-    if any(key in changes for key in ("id", "parent_id")):
-        raise ValidationError("id and parent_id require dedicated operations")
+    if "markdown" in changes:
+        raise ValidationError("Use --markdown-file to update record Markdown")
+    if "id" in changes:
+        raise ValidationError("id cannot be updated")
     if related_to:
         changes["related_to"] = list(related_to)
     if commit is not None:
-        changes["commit"] = GitRepository(state.config).resolve(commit)
-    fields = record.to_dict()
-    fields.update(changes)
-    for key in unset_values:
-        if key in {"id", "parent_id"}:
-            raise ValidationError(f"Cannot unset {key}")
-        if key in changes:
-            raise ValidationError(f"Cannot set and unset {key!r} together")
-        fields.pop(key, None)
-    new_parent = None if make_root else parent_id
-    if make_root or parent_id is not None:
-        fields["parent_id"] = new_parent
-    body = _markdown(markdown_file) if markdown_file is not None else record.markdown
-    candidate = Record.model_validate({**fields, "markdown": body})
-    candidate.path = record.path
-    candidate._persisted_id = record.id
-    if make_root or parent_id is not None:
-        candidate.reparent(new_parent, config=state.config)
-    else:
-        candidate.save()
+        changes["commit"] = GitRepository(state.project.root).resolve(commit)
+    state.project.vault.update(
+        record,
+        RecordUpdate(
+            **changes,
+            markdown=(_markdown(markdown_file) if markdown_file is not None else None),
+        ),
+    )
     click.echo(f"Updated record {record_id}")
 
 
@@ -526,13 +479,10 @@ def record_update(
 @click.pass_obj
 def record_edit(state: CLIContext, record_id: str) -> None:
     """Edit a record's stored Markdown file."""
-    validate_identifier(record_id)
-    paths = list(state.config.records_dir.glob(f"*/{record_id}.md"))
-    if len(paths) != 1:
-        raise ValidationError(f"Expected one record path for {record_id!r}")
+    record = state.project.vault.load(record_id)
     _edit_recoverable(
-        paths[0],
-        lambda: load_record(record_id, config=state.config),
+        state.project.vault.file_path(record.id),
+        lambda: state.project.vault.load(record_id),
         f"Record {record_id!r}",
     )
     click.echo(f"Validated record {record_id}")
@@ -542,192 +492,81 @@ def record_edit(state: CLIContext, record_id: str) -> None:
 @click.argument("record_id")
 @click.pass_obj
 def record_delete(state: CLIContext, record_id: str) -> None:
-    """Delete a leaf record."""
-    record = load_record(record_id, config=state.config)
-    parent = record.path.parent
-    record.delete(config=state.config)
-    if state.config.active_record_id == record_id:
-        state.config.clear_active_record()
-    with suppress(OSError):
-        parent.rmdir()
+    """Delete the document at the given OKF ID."""
+    state.project.vault.load(record_id)
+    state.project.vault.delete(record_id)
     click.echo(f"Deleted record {record_id}")
-
-
-@record_group.command("set")
-@click.argument("record_id")
-@click.pass_obj
-def record_set(state: CLIContext, record_id: str) -> None:
-    """Set the active record."""
-    state.config.set_active_record(record_id)
-    click.echo(f"Active record: {record_id}")
 
 
 @record_group.command("tree")
 @click.option("--json", "json_output", is_flag=True)
+@click.option("--pretty", is_flag=True, help="Pretty-print JSON output.")
 @click.pass_obj
-def record_tree(state: CLIContext, json_output: bool) -> None:
+def record_tree(state: CLIContext, json_output: bool, pretty: bool) -> None:
     """Show the logical parent tree."""
-    records = list_records(config=state.config)
+    _validate_json_options(json_output, pretty)
+    records = state.project.vault.list()
     if json_output:
-        _emit_json([{"id": r.id, "parent_id": r.parent_id} for r in records])
+        _emit_json(
+            [{"id": r.id, "parent_id": r.parent_id} for r in records],
+            pretty=pretty,
+        )
         return
     children: dict[str | None, list[Record]] = {}
     for record in records:
         children.setdefault(record.parent_id, []).append(record)
 
-    def visit(parent: str | None, depth: int) -> None:
-        for child in children.get(parent, []):
-            click.echo("  " * depth + child.id)
-            visit(child.id, depth + 1)
-
-    visit(None, 0)
-
-
-@record_group.command("entrypoints")
-@click.argument("record_id", required=False)
-@click.option("--json", "json_output", is_flag=True)
-@click.pass_obj
-def record_entrypoints(
-    state: CLIContext, record_id: str | None, json_output: bool
-) -> None:
-    """List effective entrypoints and their defining records."""
-    resolved = _active(state.config, record_id).resolve(config=state.config)
-    entries = resolved.values.get("entrypoints") or {}
-    sources = resolved.sources.get("entrypoints") or {}
-    if json_output:
-        _emit_json({"entrypoints": entries, "sources": sources})
-    else:
-        click.echo(
-            _table(
-                ("name", "command", "source"),
-                [
-                    (
-                        name,
-                        shlex.join([*entry.command, *render_arguments(entry.args)]),
-                        sources.get(name),
-                    )
-                    for name, entry in entries.items()
-                ],
-            )
+    known = {record.id for record in records}
+    roots = [record for record in records if record.parent_id not in known]
+    seen: set[str] = set()
+    # Remaining records seed components without roots, such as cycles.
+    stack = [(record, 0) for record in reversed(roots + records)]
+    while stack:
+        record, depth = stack.pop()
+        if record.id in seen:
+            continue
+        seen.add(record.id)
+        click.echo("  " * depth + record.id)
+        stack.extend(
+            (child, depth + 1) for child in reversed(children.get(record.id, []))
         )
-
-
-def _install_generic(
-    name: str, cls: type[BaseRecord], loader: Any, lister: Any, directory: str
-) -> None:
-    @main.group(name=name)
-    def group() -> None:
-        """Manage generic Markdown records."""
-
-    @group.command("create")
-    @click.argument("identifier")
-    @click.option("--set", "set_values", multiple=True)
-    @click.option("--markdown-file", type=click.Path(path_type=Path))
-    @click.pass_obj
-    def create(
-        state: CLIContext,
-        identifier: str,
-        set_values: tuple[str, ...],
-        markdown_file: Path | None,
-    ) -> None:
-        validate_identifier(identifier)
-        record = cls(
-            id=identifier, markdown=_markdown(markdown_file), **_fields(set_values)
-        )
-        path = getattr(state.config, directory) / identifier / f"{name}.md"
-        record.save(path)
-        click.echo(f"Created {name} {identifier} at {path}")
-
-    @group.command("list")
-    @click.option("--json", "json_output", is_flag=True)
-    @click.pass_obj
-    def listing(state: CLIContext, json_output: bool) -> None:
-        records = lister(config=state.config)
-        _emit_json(records) if json_output else click.echo(
-            _table(("id",), [(r.id,) for r in records])
-        )
-
-    @group.command("show")
-    @click.argument("identifier")
-    @click.option("--json", "json_output", is_flag=True)
-    @click.pass_obj
-    def show(state: CLIContext, identifier: str, json_output: bool) -> None:
-        record = loader(identifier, config=state.config)
-        _emit_json(record) if json_output else click.echo(
-            f"---\n{dump_yaml(record.to_dict())}---\n{record.markdown}", nl=False
-        )
-
-    @group.command("update")
-    @click.argument("identifier")
-    @click.option("--set", "set_values", multiple=True)
-    @click.option("--unset", "unset_values", multiple=True)
-    @click.option("--markdown-file", type=click.Path(path_type=Path))
-    @click.pass_obj
-    def update(
-        state: CLIContext,
-        identifier: str,
-        set_values: tuple[str, ...],
-        unset_values: tuple[str, ...],
-        markdown_file: Path | None,
-    ) -> None:
-        record = loader(identifier, config=state.config)
-        _update_fields(record, set_values, unset_values, markdown_file)
-        click.echo(f"Updated {name} {identifier}")
-
-    @group.command("edit")
-    @click.argument("identifier")
-    @click.pass_obj
-    def edit(state: CLIContext, identifier: str) -> None:
-        path = getattr(state.config, directory) / identifier / f"{name}.md"
-        _edit_recoverable(
-            path,
-            lambda: loader(identifier, config=state.config),
-            f"{name} {identifier!r}",
-        )
-        click.echo(f"Validated {name} {identifier}")
-
-    @group.command("delete")
-    @click.argument("identifier")
-    @click.pass_obj
-    def delete(state: CLIContext, identifier: str) -> None:
-        record = loader(identifier, config=state.config)
-        record.delete()
-        click.echo(f"Deleted {name} {identifier}")
-
-
-_install_generic("context", Context, load_context, list_contexts, "contexts_dir")
 
 
 @main.group("workflow")
 def workflow_group() -> None:
-    """List, start, and reply to project workflows."""
+    """List and run project LangGraph workflows."""
 
 
 @workflow_group.command("list")
 @click.option("--json", "json_output", is_flag=True)
+@click.option("--pretty", is_flag=True, help="Pretty-print JSON output.")
 @click.pass_obj
-def workflow_list(state: CLIContext, json_output: bool) -> None:
-    """List the project's workflows."""
-    from .workflows.workflow import list_workflows
+def workflow_list(state: CLIContext, json_output: bool, pretty: bool) -> None:
+    """List project LangGraph workflows."""
+    _validate_json_options(json_output, pretty)
+    from .workflows.langgraph import workflow_details
 
-    workflows = list_workflows(config=state.config)
+    workflows = workflow_details(project=state.project)
     if json_output:
-        _emit_json(
-            [
-                {"id": workflow.id, "description": workflow.description}
-                for workflow in workflows
-            ]
-        )
+        _emit_json(workflows, pretty=pretty)
         return
-    click.echo(
-        _table(
-            ("id", "description"),
-            [
-                (workflow.id, (workflow.description or "").split("\n", 1)[0])
-                for workflow in workflows
-            ],
-        )
+    _print_table(
+        ("id", "description"),
+        [
+            (workflow["id"], (workflow["description"] or "").split("\n", 1)[0])
+            for workflow in workflows
+        ],
     )
+
+
+@workflow_group.command("graph")
+@click.argument("workflow_id")
+@click.pass_obj
+def workflow_graph_command(state: CLIContext, workflow_id: str) -> None:
+    """Print a workflow's LangGraph topology as a Mermaid diagram."""
+    from .workflows.langgraph import workflow_mermaid
+
+    click.echo(workflow_mermaid(workflow_id, project=state.project), nl=False)
 
 
 _ARGUMENTS_FILE = click.option(
@@ -737,227 +576,402 @@ _ARGUMENTS_FILE = click.option(
 )
 
 
-def _arguments(arguments_file: Any) -> dict[str, Any]:
+def _arguments(arguments_file: Any, *, name: str = "arguments") -> dict[str, Any]:
     if arguments_file is None:
         return {}
     try:
         arguments = json.load(arguments_file)
     except ValueError as exc:
-        raise ValidationError(f"Cannot read arguments: {exc}") from exc
+        raise ValidationError(f"Cannot read {name}: {exc}") from exc
     if not isinstance(arguments, dict):
-        raise ValidationError("Arguments must be a JSON object")
+        raise ValidationError(f"{name.capitalize()} must be a JSON object")
     return arguments
 
 
 @workflow_group.command("start")
 @click.argument("workflow_id")
 @_ARGUMENTS_FILE
+@click.option("--pretty", is_flag=True, help="Pretty-print the JSON response.")
 @click.pass_obj
-def workflow_start(state: CLIContext, workflow_id: str, arguments_file: Any) -> None:
-    """Start a workflow session and print the JSON response."""
-    from .workflows.session import Session, load_session
-    from .workflows.workflow import load_workflow
-
-    workflow = load_workflow(workflow_id, config=state.config)
-    result = Session.run_start(workflow, _arguments(arguments_file))
-    response = result.model_dump(exclude_none=True)
-    if result.status == "accepted":
-        session = load_session(result.session_id, config=state.config)
-        response.update(session.get_instruction(workflow))
-    _emit_json(response)
-
-
-@workflow_group.command("send-event")
-@click.argument("session_id")
-@click.argument("event")
-@click.option(
-    "--instruction-id",
-    type=int,
-    required=True,
-    help="ID of the current instruction the event answers.",
-)
-@_ARGUMENTS_FILE
-@click.pass_obj
-def workflow_send_event(
+def workflow_start(
     state: CLIContext,
-    session_id: str,
-    event: str,
-    instruction_id: int,
+    workflow_id: str,
     arguments_file: Any,
+    pretty: bool,
 ) -> None:
-    """Send EVENT to a session's current instruction and print the response."""
-    from .workflows.session import load_session
-    from .workflows.workflow import load_workflow
+    """Start a LangGraph workflow and print its interrupt or result."""
+    from .workflows.langgraph import start_workflow
 
-    session = load_session(session_id, config=state.config)
-    workflow = load_workflow(session.workflow, config=state.config)
     _emit_json(
-        session.run_event(
-            workflow, instruction_id, event, _arguments(arguments_file)
-        ).model_dump(exclude_none=True)
+        start_workflow(
+            workflow_id,
+            _arguments(arguments_file),
+            project=state.project,
+        ),
+        pretty=pretty,
     )
 
 
-@workflow_group.command("graph")
-@click.argument("workflow_id")
-@click.option(
-    "--session",
-    "session_id",
-    default=None,
-    help="Highlight the current state of this session.",
-)
+@workflow_group.command("status")
+@click.argument("workflow_session_id")
+@click.option("--pretty", is_flag=True, help="Pretty-print JSON output.")
 @click.pass_obj
-def workflow_graph_command(
-    state: CLIContext, workflow_id: str, session_id: str | None
+def workflow_status_command(
+    state: CLIContext, workflow_session_id: str, pretty: bool
 ) -> None:
-    """Print a workflow's states and events as a Mermaid state diagram."""
-    from .workflows.session import load_session
-    from .workflows.workflow import load_workflow
+    """Inspect a checkpointed LangGraph workflow run."""
+    from .workflows.langgraph import workflow_status
 
-    workflow = load_workflow(workflow_id, config=state.config)
-    current = None
-    if session_id is not None:
-        session = load_session(session_id, config=state.config)
-        if session.workflow != workflow_id:
-            raise ValidationError(
-                f"Session {session_id!r} belongs to workflow {session.workflow!r}"
-            )
-        current = session.state.node
-    click.echo(workflow.graph.to_mermaid(current=current), nl=False)
-
-
-@main.group("session")
-def session_group() -> None:
-    """Inspect and cancel workflow sessions."""
-
-
-@session_group.command("list")
-@click.option("--json", "json_output", is_flag=True)
-@click.pass_obj
-def session_list(state: CLIContext, json_output: bool) -> None:
-    """List workflow sessions, newest first."""
-    from .workflows.session import list_sessions
-
-    sessions = [
-        {
-            "session_id": s.id,
-            "workflow": s.workflow,
-            "status": s.status,
-            "node": s.state.node,
-            "updated_at": s.updated_at.isoformat(),
-        }
-        for s in list_sessions(config=state.config)
-    ]
-    if json_output:
-        _emit_json(sessions)
-        return
-    click.echo(
-        _table(
-            ("session", "workflow", "status", "updated"),
-            [
-                (
-                    item["session_id"],
-                    item["workflow"],
-                    item["status"],
-                    item["updated_at"],
-                )
-                for item in sessions
-            ],
-        )
+    _emit_json(
+        workflow_status(workflow_session_id, project=state.project), pretty=pretty
     )
 
 
-@session_group.command("show")
-@click.argument("session_id")
+@workflow_group.command("resume")
+@click.argument("workflow_session_id")
+@click.option("--checkpoint-id", required=True, help="Checkpoint ID from status.")
+@_ARGUMENTS_FILE
+@click.option("--pretty", is_flag=True, help="Pretty-print the JSON response.")
+@click.pass_obj
+def workflow_resume_command(
+    state: CLIContext,
+    workflow_session_id: str,
+    checkpoint_id: str,
+    arguments_file: Any,
+    pretty: bool,
+) -> None:
+    """Resume a paused LangGraph workflow with a JSON response."""
+    from .workflows.langgraph import resume_workflow
+
+    _emit_json(
+        resume_workflow(
+            workflow_session_id,
+            _arguments(arguments_file),
+            project=state.project,
+            checkpoint_id=checkpoint_id,
+        ),
+        pretty=pretty,
+    )
+
+
+@main.group("job")
+def job_group() -> None:
+    """Submit, inspect, and cancel PSI/J jobs."""
+
+
+def _exit_job(status: JobStatus) -> None:
+    code = status.exit_code
+    if code is None:
+        code = {"COMPLETED": 0, "CANCELED": 130}.get(status.state.name, 1)
+    if status.message:
+        click.echo(status.message, err=True)
+    raise click.exceptions.Exit(128 - code if code < 0 else code)
+
+
+@job_group.command("submit")
+@click.argument("command", required=True, nargs=-1, type=click.UNPROCESSED)
+@click.option("--record", "record_id")
+@click.option(
+    "--executor", default="local-detached", show_default=True, help="PSI/J executor."
+)
+@click.option("--executor-url")
+@click.option("--launcher", help="Registered PSI/J launcher name.")
+@click.option(
+    "--custom-attribute",
+    "custom_attributes",
+    type=(str, str),
+    multiple=True,
+    metavar="KEY VALUE",
+    help="Executor-specific PSI/J custom attribute.",
+)
+@click.option("--directory", type=click.Path(path_type=Path))
+@click.pass_obj
+def job_submit(
+    state: CLIContext,
+    command: tuple[str, ...],
+    record_id: str | None,
+    executor: str,
+    executor_url: str | None,
+    launcher: str | None,
+    custom_attributes: tuple[tuple[str, str], ...],
+    directory: Path | None,
+) -> None:
+    """Submit and return history keyed by the original PSI/J job ID as JSON."""
+    if executor == "local":
+        raise ValidationError(
+            "Native local execution cannot recover submission status; "
+            "use hiraku run or the local-detached executor"
+        )
+    job = prepare_job(
+        command,
+        record_id=record_id,
+        project=state.project,
+        directory=directory,
+        launcher=launcher,
+        attributes=JobAttributes(custom_attributes=dict(custom_attributes))
+        if custom_attributes
+        else None,
+    )
+    entry = submit_job(job, project=state.project, executor=executor, url=executor_url)
+    _emit_json(entry.model_dump(mode="json"))
+
+
+@main.command("run")
+@click.argument("command", required=True, nargs=-1, type=click.UNPROCESSED)
+@click.option("--record", "record_id")
+@click.option("--launcher", help="Registered PSI/J launcher name.")
+@click.option(
+    "--custom-attribute",
+    "custom_attributes",
+    type=(str, str),
+    multiple=True,
+    metavar="KEY VALUE",
+    help="Executor-specific PSI/J custom attribute.",
+)
+@click.option("--directory", type=click.Path(path_type=Path))
+@click.pass_obj
+def run(
+    state: CLIContext,
+    command: tuple[str, ...],
+    record_id: str | None,
+    launcher: str | None,
+    custom_attributes: tuple[tuple[str, str], ...],
+    directory: Path | None,
+) -> None:
+    """Run locally, stream output, and return the command's exit code."""
+    job = prepare_job(
+        command,
+        record_id=record_id,
+        project=state.project,
+        directory=directory,
+        launcher=launcher,
+        attributes=JobAttributes(custom_attributes=dict(custom_attributes))
+        if custom_attributes
+        else None,
+    )
+    _exit_job(run_local(job, project=state.project))
+
+
+@job_group.command("status")
+@click.argument("job_id")
 @click.option("--json", "json_output", is_flag=True)
 @click.pass_obj
-def session_show(state: CLIContext, session_id: str, json_output: bool) -> None:
-    """Show a session's status, pending instruction or result, and data."""
-    from .workflows.session import load_session
-    from .workflows.workflow import load_workflow
+def job_status(state: CLIContext, job_id: str, json_output: bool) -> None:
+    """Sync and show status by full ID or unique nonempty prefix."""
+    entry = Submission.from_prefix(state.project, job_id)
+    entry.refresh(state.project)
+    _show_submission(entry.model_dump(mode="json"), json_output)
 
-    session = load_session(session_id, config=state.config)
-    try:
-        workflow = load_workflow(session.workflow, config=state.config)
-    except HirakuError:
-        workflow = None
-    result = session.show(workflow)
+
+@job_group.command("logs")
+@click.argument("job_id")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_obj
+def job_logs(state: CLIContext, job_id: str, json_output: bool) -> None:
+    """Read stdout and stderr by full job ID or unique nonempty prefix."""
+    entry = Submission.from_prefix(state.project, job_id)
+    streams = entry.logs(state.project)
+    if json_output:
+        _emit_json(streams)
+        return
+    for name, contents in streams.items():
+        click.echo(f"--- {name} ---")
+        if contents is None:
+            click.echo("(not available)")
+        elif contents:
+            click.echo(contents, nl=not contents.endswith("\n"))
+
+
+@job_group.command("cancel")
+@click.argument("job_id")
+@click.option("--json", "json_output", is_flag=True)
+@click.pass_obj
+def job_cancel(state: CLIContext, job_id: str, json_output: bool) -> None:
+    """Cancel a job by full ID or unique nonempty prefix."""
+    entry = Submission.from_prefix(state.project, job_id)
+    entry.cancel(state.project)
+    _show_submission(entry.model_dump(mode="json"), json_output)
+
+
+def _show_submission(result: dict[str, Any], json_output: bool) -> None:
     if json_output:
         _emit_json(result)
-        return
-    click.echo(f"Session:  {result['session_id']}")
-    click.echo(f"Workflow: {result['workflow']}")
-    click.echo(f"Status:   {result['status']}")
-    click.echo(f"State:    {result['state']}")
-    if "message" in result:
-        click.echo(result["message"])
-    if "instruction" in result:
-        from .workflows.workflow import Instruction
+    else:
+        _print_table(
+            ("field", "value"),
+            [
+                ("id", result["id"]),
+                (
+                    "command",
+                    shlex.join(
+                        [
+                            result["spec"]["executable"],
+                            *result["spec"].get("arguments", []),
+                        ]
+                    ),
+                ),
+                ("record_id", result["record_id"]),
+                ("submitted_at", result["submitted_at"]),
+                ("observed_at", result["observed_at"]),
+                ("executor", result["executor"]),
+                ("executor_url", result["executor_url"]),
+                ("native_id", result["native_id"]),
+                *result["status"].items(),
+            ],
+        )
 
-        click.echo(Instruction.model_validate(result["instruction"]).to_text())
 
-
-@session_group.command("cancel")
-@click.argument("session_id")
-@click.pass_obj
-def session_cancel(state: CLIContext, session_id: str) -> None:
-    """Cancel a session; records, code, and runs are kept."""
-    from .workflows.session import load_session
-
-    result = load_session(session_id, config=state.config).cancel()
-    click.echo(f"Session {session_id} is {result['status']}. {result['note']}")
-
-
-@main.command("launch")
-@click.argument("entrypoint_name")
-@click.argument("entrypoint_overrides", nargs=-1, type=click.UNPROCESSED)
+@job_group.command("list")
 @click.option("--record", "record_id")
-@click.option("--commit")
-@click.option("--dispatch")
-@click.option("--dry-run", is_flag=True)
+@click.option("--json", "json_output", is_flag=True)
 @click.pass_obj
-def launch_command(
-    state: CLIContext,
-    entrypoint_name: str,
-    entrypoint_overrides: tuple[str, ...],
-    record_id: str | None,
-    commit: str | None,
-    dispatch: str | None,
-    dry_run: bool,
+def job_list(state: CLIContext, record_id: str | None, json_output: bool) -> None:
+    """List jobs and status, refreshing nonfinal submissions."""
+    submissions = Submission.list(state.project, record_id=record_id)
+    entries = [observe_submission(entry, state.project) for entry in submissions]
+    for result in entries:
+        if "observation_error" in result:
+            click.echo(
+                f"Warning: cannot sync job {result['id']}: "
+                f"{result['observation_error']}",
+                err=True,
+            )
+    if json_output:
+        _emit_json(entries)
+    else:
+        status_colors = {"COMPLETED": "green", "FAILED": "red", "CANCELED": "red"}
+        id_width = 8
+        while len({entry["id"][:id_width] for entry in entries}) < len(entries):
+            id_width += 1
+        _print_table(
+            (
+                "id",
+                "record",
+                "submitted_at",
+                "executor",
+                "state",
+                "command",
+            ),
+            [
+                (
+                    entry["id"][:id_width],
+                    entry["record_id"],
+                    datetime.fromisoformat(entry["submitted_at"])
+                    .astimezone()
+                    .strftime("%Y-%m-%d %H:%M:%S"),
+                    entry["executor"],
+                    Text(
+                        entry["status"]["state"],
+                        style=status_colors.get(entry["status"]["state"], "white"),
+                    ),
+                    shlex.join(
+                        [
+                            entry["spec"]["executable"],
+                            *entry["spec"].get("arguments", []),
+                        ]
+                    ),
+                )
+                for entry in entries
+            ],
+        )
+
+
+@main.group("leaderboard")
+def leaderboard_group() -> None:
+    """Manage leaderboard definitions and their tracking sources."""
+
+
+@leaderboard_group.command("list")
+@click.option("--json", "json_output", is_flag=True)
+@click.option("--pretty", is_flag=True)
+@click.pass_obj
+def leaderboard_list(state: CLIContext, json_output: bool, pretty: bool) -> None:
+    """List leaderboard names without loading their definitions."""
+    _validate_json_options(json_output, pretty)
+    names = Leaderboard.list(state.project)
+    if json_output:
+        _emit_json(names, pretty=pretty)
+    else:
+        _print_table(("name",), [(name,) for name in names])
+
+
+@leaderboard_group.command("show")
+@click.argument("name")
+@click.option("--json", "json_output", is_flag=True)
+@click.option("--pretty", is_flag=True)
+@click.pass_obj
+def leaderboard_show(
+    state: CLIContext, name: str, json_output: bool, pretty: bool
 ) -> None:
-    """Launch an effective record entrypoint."""
-    record = _active(state.config, record_id)
-    entrypoint = record.entrypoint(entrypoint_name, config=state.config)
-    overrides = _overrides(entrypoint_overrides)
-    if dry_run:
-        click.echo(f"Dispatcher: {_dispatcher(state.config, dispatch)}")
-        arguments = dict(entrypoint.args)
-        arguments.update(overrides)
-        command = [*entrypoint.command, *render_arguments(arguments)]
-        click.echo(f"Command: {shlex.join(command)}")
-        return
-    result = launch(
-        entrypoint,
-        name=entrypoint_name,
-        args=overrides,
-        record_id=record.id,
-        commit=commit,
-        dispatch=dispatch,
-        check=False,
-        config=state.config,
+    """Show validated leaderboard configuration without API keys."""
+    _validate_json_options(json_output, pretty)
+    data = Leaderboard.load(state.project, name).model_dump(
+        mode="json", exclude_none=True
     )
-    if result.returncode:
-        raise click.exceptions.Exit(result.returncode)
+    if json_output:
+        _emit_json(data, pretty=pretty)
+    else:
+        click.echo(dump_yaml(data), nl=False)
 
 
-@main.command("runs")
-@click.option("--record", "record_id")
+@leaderboard_group.command("create")
+@click.argument("name")
 @click.option(
-    "--all",
-    "all_records",
-    is_flag=True,
-    help="List all attributed runs from the record's tracking source.",
+    "--source",
+    "source_type",
+    type=click.Choice(["csv", "mlflow", "wandb"]),
+    required=True,
 )
+@click.option(
+    "--path",
+    type=click.Path(),
+    help="Required for CSV. Absolute or project-relative path; supports ${NAME}.",
+)
+@click.option("--tracking-uri", help="MLflow HTTP(S) tracking server URL.")
+@click.option("--experiment-name", help="MLflow experiment name.")
+@click.option("--entity", help="W&B account or team.")
+@click.option("--project", help="W&B project name.")
+@click.pass_obj
+def leaderboard_create(
+    state: CLIContext, name: str, source_type: str, **options: Any
+) -> None:
+    """Create a leaderboard; edit its YAML to declare comparison metrics."""
+    source = {
+        "type": source_type,
+        **{key: value for key, value in options.items() if value is not None},
+    }
+    Leaderboard.create(state.project, name, source)
+    click.echo(f"Created leaderboard {name}")
+
+
+@leaderboard_group.command("edit")
+@click.argument("name")
+@click.pass_obj
+def leaderboard_edit(state: CLIContext, name: str) -> None:
+    """Edit a definition and validate it after the editor exits."""
+    _edit_recoverable(
+        _leaderboard_path(state.project, name),
+        lambda: Leaderboard.load(state.project, name),
+        f"Leaderboard {name!r}",
+    )
+    click.echo(f"Validated leaderboard {name}")
+
+
+@leaderboard_group.command("delete")
+@click.argument("name")
+@click.pass_obj
+def leaderboard_delete(state: CLIContext, name: str) -> None:
+    """Delete a definition, leaving its tracked runs untouched."""
+    Leaderboard.delete(state.project, name)
+    click.echo(f"Deleted leaderboard {name}")
+
+
+@leaderboard_group.command("runs")
+@click.argument("name", required=False)
+@click.option(
+    "--include-unattributed", is_flag=True, help="Include runs without a record ID."
+)
+@click.option("--record", "record_id")
 @click.option("--metrics")
 @click.option("--params")
 @click.option("--sort")
@@ -965,11 +979,13 @@ def launch_command(
 @click.option("--descending", is_flag=True)
 @click.option("--limit", type=click.IntRange(min=0))
 @click.option("--json", "json_output", is_flag=True)
+@click.option("--pretty", is_flag=True, help="Pretty-print JSON output.")
 @click.pass_obj
 def run_list(
     state: CLIContext,
+    name: str | None,
     record_id: str | None,
-    all_records: bool,
+    include_unattributed: bool,
     metrics: str | None,
     params: str | None,
     sort: str | None,
@@ -977,47 +993,46 @@ def run_list(
     descending: bool,
     limit: int | None,
     json_output: bool,
+    pretty: bool,
 ) -> None:
-    """List runs attributed to the selected record.
-
-    Use --all for every attributed run in the record's tracking source.
-    """
+    """List attributed runs. Omit NAME to select the sole leaderboard."""
+    _validate_json_options(json_output, pretty)
     if ascending and descending:
         raise ValidationError("--ascending and --descending are mutually exclusive")
     if (ascending or descending) and sort is None:
         raise ValidationError("A sort direction requires --sort")
-    record = _active(state.config, record_id)
-    declarations = record.resolve(config=state.config).values.get("metrics") or []
+    leaderboard = Leaderboard.load(state.project, name)
+    runs = leaderboard.list_runs(
+        state.project,
+        record_id=record_id,
+        include_unattributed=include_unattributed,
+        sort=sort,
+        ascending=(ascending if ascending or descending else None),
+        limit=limit,
+    )
     metric_names = (
         _names(metrics, "metric")
         if metrics is not None
-        else [item.name for item in declarations]
+        else leaderboard.metric_names(runs)
     )
-    param_names = _names(params, "parameter")
-    query = {
-        key: value
-        for key, value in {"sort": sort, "limit": limit}.items()
-        if value is not None
-    }
-    if sort is not None:
-        directions = {item.name: item.direction for item in declarations}
-        query["ascending"] = (
-            ascending if ascending or descending else directions.get(sort) != "maximize"
-        )
-    runs = record.resolve_tracking_backend(config=state.config).list_runs(
-        record_id=None if all_records else record.id,
-        **query,
+    param_names = (
+        _names(params, "parameter")
+        if params is not None
+        else list(dict.fromkeys(name for run in runs for name in run.params))
     )
     if json_output:
-        _emit_json(runs)
+        _emit_json(runs, pretty=pretty)
     else:
+        record_names = {
+            item.id: item.title or item.id for item in state.project.vault.list()
+        }
         columns = ["id", "record", "timestamp", "duration", "commit"]
         columns.extend(f"param:{name}" for name in param_names)
-        columns.extend(f"metric:{name}" for name in metric_names)
+        columns.extend(metric_names)
         rows = [
             [
                 run.id,
-                run.record_id,
+                record_names.get(run.record_id, run.record_id),
                 run.timestamp or "",
                 run.duration,
                 run.commit or "",
@@ -1026,56 +1041,77 @@ def run_list(
             ]
             for run in runs
         ]
-        click.echo(_table(columns, rows))
+        _print_table(columns, rows)
 
 
-@main.command("dashboard")
-@click.option("--record", "record_id", help="Record selected when the page opens.")
+@main.group("dashboard")
+def dashboard_command() -> None:
+    """Serve, edit, and manage project dashboards."""
+
+
+@dashboard_command.command("create")
+@click.argument("name", required=False)
 @click.option(
-    "--port",
-    type=click.IntRange(1, 65535),
-    help="Use this port; otherwise automatically choose a free port from 2718.",
-)
-@click.option("--no-browser", is_flag=True, help="Do not open a browser window.")
-@click.option(
-    "--init",
-    "initialize",
-    is_flag=True,
-    help="Copy the dashboard notebook into the project; exit unless --edit is given.",
-)
-@click.option(
-    "--edit", is_flag=True, help="Open the project's notebook in marimo-studio."
-)
-@click.option(
-    "--include-code",
-    is_flag=True,
-    help="Let the read-only dashboard show its notebook code.",
+    "--template",
+    type=click.Choice(["dashboard", "notebook"]),
+    default="dashboard",
+    show_default=True,
+    help="Bundled starter to copy.",
 )
 @click.pass_obj
-def dashboard_command(
-    state: CLIContext,
-    record_id: str | None,
-    port: int | None,
-    no_browser: bool,
-    initialize: bool,
-    edit: bool,
-    include_code: bool,
-) -> None:
-    """Browse records and tracked runs in a local, read-only dashboard."""
-    from .dashboard.launcher import init_dashboard, serve_dashboard
+def dashboard_create(state: CLIContext, name: str | None, template: str) -> None:
+    """Create a dashboard notebook (default: dashboard.py)."""
+    from .dashboard.launcher import DEFAULT_NAME, init_dashboard
 
-    if initialize:
-        click.echo(f"Created dashboard: {init_dashboard(state.config)}")
-        if not edit:
-            return
-    exit_code = serve_dashboard(
-        state.config,
-        record_id=record_id,
-        port=port,
-        no_browser=no_browser,
-        edit=edit,
-        include_code=include_code,
+    notebook = init_dashboard(
+        state.project, DEFAULT_NAME if name is None else name, template=template
     )
+    click.echo(f"Created dashboard: {notebook}")
+
+
+@dashboard_command.command("list")
+@click.pass_obj
+def dashboard_list(state: CLIContext) -> None:
+    """List project dashboards."""
+    from .dashboard.launcher import list_dashboards
+
+    dashboards = list_dashboards(state.project)
+    if not dashboards:
+        click.echo("No project dashboards. Use: hiraku dashboard create")
+    for name in sorted(dashboards):
+        click.echo(name)
+
+
+@dashboard_command.command("serve")
+@click.argument("name", required=False)
+@click.option("--leaderboard", "leaderboard_name", help="Initial leaderboard.")
+@click.option("--record", "record_id", help="Initial record.")
+@click.option("--port", type=click.IntRange(1, 65535), help="Server port.")
+@click.option("--no-browser", is_flag=True, help="Do not open a browser window.")
+@click.option("--watch", is_flag=True, help="Reload when the notebook changes.")
+@click.option("--include-code", is_flag=True, help="Include read-only notebook code.")
+@click.pass_obj
+def dashboard_serve(state: CLIContext, name: str | None, **options: Any) -> None:
+    """Serve a dashboard (default: local or bundled dashboard.py)."""
+    from .dashboard.launcher import serve_dashboard
+
+    exit_code = serve_dashboard(state.project, name=name, **options)
+    if exit_code:
+        raise click.exceptions.Exit(exit_code)
+
+
+@dashboard_command.command("edit")
+@click.argument("name", required=False)
+@click.option("--leaderboard", "leaderboard_name", help="Initial leaderboard.")
+@click.option("--record", "record_id", help="Initial record.")
+@click.option("--port", type=click.IntRange(1, 65535), help="Server port.")
+@click.option("--no-browser", is_flag=True, help="Do not open a browser window.")
+@click.pass_obj
+def dashboard_edit(state: CLIContext, name: str | None, **options: Any) -> None:
+    """Edit a dashboard (default: dashboard.py, copied into the project if needed)."""
+    from .dashboard.launcher import serve_dashboard
+
+    exit_code = serve_dashboard(state.project, name=name, edit=True, **options)
     if exit_code:
         raise click.exceptions.Exit(exit_code)
 

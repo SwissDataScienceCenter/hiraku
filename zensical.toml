@@ -6,83 +6,64 @@ site_author = "Hiraku contributors"
 copyright = "Hiraku · Swiss Data Science Center (SDSC)"
 repo_url = "https://github.com/SwissDataScienceCenter/hiraku"
 repo_name = "SwissDataScienceCenter/hiraku"
-plugins = [
-  "search",
-  { "mkdocstrings" = { "handlers" = { "python" = { "paths" = ["src"], "options" = {
-    "docstring_style" = "google",
-    "members_order" = "alphabetical",
-    "show_source" = false,
-    "filters" = ["!^_"],
-  } } } } },
-]
 docs_dir = "docs"
 site_dir = "site"
 dev_addr = "localhost:8000"
 
 nav = [
-  { "Get started" = [
-      { "Overview" = "index.md" },
-      # { "Examples" = "examples/" },
-      # { "Examples" = [
-      #   { "Heart Disease (CSV)" = "examples/heart-disease/README.md" },
-      #   { "Iris (W&B)" = "examples/iris-wandb/README.md" },
-      #   { "Digits (MLflow)" = "examples/digits-mlflow/README.md" },
-      #   { "Kaparthy's Autoresearch" = "examples/autoresearch/README.md" },
-      # ]},
-      { "Essential Concepts" = "concepts.md" },
-      # { "Examples" = "examples/#examples" },  # Reference link
+  { "Introduction" = [
+      { "Hiraku" = "index.md" },
+      { "Changelog" = "about/changelog.md" },
+      { "Contributing" = "about/contributing.md" },
+      { "License" = "about/license.md" },
+      { "About" = "about/authors.md" },
+  ] },
+  { "Quickstart" = [
+      { "1. Installation" = "quickstart/installation.md" },
+      { "2. Hiraku concepts" = "quickstart/concepts.md" },
+      { "3. First experiment" = "quickstart/first_experiment.md" },
+      { "4. Agentic workflows" = "quickstart/agentic_workflows.md" },
+  ] },
+  { "User Guides" = [
+      { "Overview" = "guides/index.md" },
+      { "Records" = "guides/records.md" },
+      { "Jobs" = "guides/jobs.md" },
+      { "Leaderboards" = [
+          { "Overview" = "guides/leaderboards.md" },
+          { "CSV" = "guides/tracking-csv.md" },
+          { "MLflow" = "guides/tracking-mlflow.md" },
+          { "Weights & Biases" = "guides/tracking-wandb.md" },
+      ] },
+      { "Workflows" = "guides/workflows.md" },
+      { "User Interfaces" = [
+        { "MCP server" = "guides/mcp.md" },
+        { "Dashboard" = "guides/dashboard.md" },
+      ] },
   ] },
   { "Examples" = [
       { "Overview" = "examples/index.md" },
-      { "Heart Disease (CSV)" = "examples/heart-disease/README.md" },
-      { "Iris (W&B)" = "examples/iris-wandb/README.md" },
-      { "Digits (MLflow)" = "examples/digits-mlflow/README.md" },
-      { "EuroSAT RGB" = "examples/eurosat-rgb/README.md" },
-      { "Kaparthy's Autoresearch" = "examples/autoresearch/README.md" },
-      { "Workflow Examples" = "examples/workflows/README.md" },
+      { "Digits" = "examples/digits/README.md" },
   ] },
-  { "Guides" = [
-      { "Overview" = "guides/index.md" },
-      { "Start from scratch" = "examples/minimal/README.md" },
-      { "Workflows" = "guides/workflows.md" },
-      { "Tracking Backends" = [
-        { "CSV" = "guides/tracking-csv.md" },
-        { "W&B" = "guides/tracking-wandb.md" },
-        { "MLflow" = "guides/tracking-mlflow.md" },
-        { "Custom Backend" = "guides/tracking-custom.md"}
-      ] },
-      { "MCP server" = "guides/mcp.md" },
-      { "Dashboard" = "guides/dashboard.md" },
+  { "API reference" = [
+      { "Overview" = "api/index.md" },
+      { "Project" = "api/python/project.md" },
+      { "Record" = "api/python/records.md" },
+      { "Job" = "api/python/jobs.md" },
+      { "Leaderboard" = "api/python/leaderboards.md" },
+      { "Workflow" = "api/python/workflows.md" },
   ] },
-  { "CLI" = "api/cli.md" },
-  { "Python API" = [
-      { "Overview" = "api/python/index.md" },
-      { "Configuration" = "api/python/config.md" },
-      { "Records" = "api/python/records.md" },
-      { "Workflows" = "api/python/workflows.md" },
-      { "Data models" = [
-          { "Record" = "api/python/records.md" },
-          { "Run" = "api/python/run.md" },
-          { "Metric" = "api/python/metric.md" },
-          { "Entrypoint" = "api/python/entrypoint.md" },
-      ] },
-      { "Tracking" = "api/python/tracking.md" },
-      { "Launching" = "api/python/launch.md" },
-      ] },
 ]
 
 extra_css = ["stylesheets/extra.css"]
 extra_javascript = [
   "https://unpkg.com/tablesort@5.3.0/dist/tablesort.min.js",
   "javascripts/tablesort.js",
-  { path = "javascripts/extra.js", async = true },
 ]
 
 [project.theme]
 variant = "modern"
 language = "en"
-logo = "assets/sdsc-symbol-rgb.svg"
-favicon = "assets/sdsc-symbol-rgb.svg"
+favicon = "assets/SDSC_04_symbol-color-RGB.svg"
 custom_dir = "overrides"
 features = [
   "header.autohide",
@@ -138,7 +119,7 @@ toggle.name = "Switch to system preference"
 repo = "fontawesome/brands/github"
 
 [project.extra]
-homepage = "https://datascience.ch"
+sdsc_url = "https://datascience.ch"
 
 [[project.extra.social]]
 icon = "fontawesome/brands/github"
@@ -157,7 +138,6 @@ footnotes = {}
 md_in_html = {}
 toc.permalink = true
 toc.toc_depth = 3
-"mkdocs-click" = {}
 pymdownx.arithmatex.generic = true
 pymdownx.betterem = {}
 pymdownx.caret = {}
@@ -172,7 +152,8 @@ pymdownx.keys = {}
 pymdownx.magiclink = {}
 pymdownx.mark = {}
 pymdownx.smartsymbols = {}
-# pymdownx.snippets.base_path = "includes"
+pymdownx.snippets.base_path = "."
+pymdownx.snippets.check_paths = true
 pymdownx.superfences.custom_fences = [
   { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
 ]
@@ -180,3 +161,27 @@ pymdownx.tabbed.alternate_style = true
 pymdownx.tabbed.combine_header_slug = true
 pymdownx.tasklist.custom_checkbox = true
 pymdownx.tilde = {}
+
+[project.plugins.search]
+
+[project.plugins.mkdocstrings]
+custom_templates = "docs-templates"
+
+[project.plugins.mkdocstrings.handlers.python]
+paths = ["src"]
+
+[project.plugins.mkdocstrings.handlers.python.options]
+docstring_style = "google"
+members_order = "alphabetical"
+show_source = false
+show_root_full_path = false
+show_object_full_path = false
+docstring_section_style = "table"
+separate_signature = true
+show_signature_annotations = true
+inherited_members = false
+merge_init_into_class = true
+filters = ["!^_"]
+
+[project.plugins.minify]
+minify_html = true

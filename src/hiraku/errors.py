@@ -29,20 +29,16 @@ class AmbiguousReferenceError(ValidationError):
     """A record reference cannot be resolved to one record."""
 
 
-class NoActiveRecordError(HirakuError):
-    """An operation requires an active research record."""
-
-
-class EntrypointNotFoundError(HirakuError):
-    """A named entrypoint is absent from a record."""
-
-
 class GitError(HirakuError):
     """A Git operation failed."""
 
 
-class LaunchError(HirakuError):
-    """A launch could not be completed successfully."""
+class ExecutionError(HirakuError):
+    """A job could not be submitted, stored, or observed."""
+
+
+class ObservationError(ExecutionError):
+    """A native job could not be attached or its status could not be read."""
 
 
 class BackendError(HirakuError):
@@ -55,15 +51,3 @@ class WorkflowError(HirakuError):
 
 class SectionNotFoundError(HirakuError):
     """A Markdown body has no section with the requested heading."""
-
-
-class SessionNotFoundError(HirakuError):
-    """A workflow session does not exist."""
-
-
-class EventRejected(HirakuError):
-    """A workflow event was invalid and did not advance its session."""
-
-
-class NotReady(EventRejected):
-    """A valid workflow event whose evidence is not available yet."""

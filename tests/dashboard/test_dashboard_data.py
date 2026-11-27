@@ -5,89 +5,92 @@ from datetime import UTC, datetime
 import pandas as pd
 import pytest
 
-from hiraku.config import HirakuConfig
 from hiraku.dashboard.data import (
     RECORD_COLUMNS,
     RUN_COLUMNS,
     arrow_frame,
-    default_metric,
     execution_order,
+    filter_leaderboard_runs,
     find_run,
     format_duration,
-    load,
     metric_names,
     plot_frame,
     record_rows,
     run_rows,
     run_text,
     safe_url,
-    selection_scope,
-    subtree,
     tradeoff_frame,
     tree_rows,
-    within,
 )
-from hiraku.errors import BackendError
+from hiraku.project import Project
 from hiraku.record import Record
-from hiraku.run import Run
+from hiraku.tracking import Leaderboard, Run
 
 
-def tables(project: HirakuConfig) -> tuple[pd.DataFrame, pd.DataFrame]:
+def tables(project: Project) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Build ``records_df`` and ``runs_df`` as the notebook does."""
-    loaded = load(project)
+    records = project.vault.list()
+    leaderboard = Leaderboard.load(project)
+    runs = leaderboard.list_runs(project)
     return (
-        arrow_frame(record_rows(loaded.records), RECORD_COLUMNS),
-        arrow_frame(run_rows(loaded), RUN_COLUMNS),
+        arrow_frame(record_rows(records), RECORD_COLUMNS),
+        arrow_frame(
+            run_rows(runs, records=records, source=leaderboard.source.type), RUN_COLUMNS
+        ),
     )
 
 
 @pytest.mark.parametrize(
-    ("key", "expected"),
-    [("record:b", "b"), ("run:r2", "a"), ("run:r1", "b"), (None, "a")],
+    ("scope", "unattributed", "expected"),
+    [
+        (None, False, ["direct", "child", "other"]),
+        ("root/a/a", False, ["direct", "child"]),
+        ("root/a/a", True, ["direct", "child", "unattributed"]),
+    ],
 )
-def test_selection_scope_preserves_subtree_for_descendant_runs(
-    project: HirakuConfig, key: str | None, expected: str
-) -> None:
-    records, runs = tables(project)
-    paths = dict(zip(records["record"], records["record_path"], strict=True))
-    assert selection_scope(key, "a", paths, runs) == expected
-
-
-def test_load_reads_records_and_attributed_runs(project: HirakuConfig) -> None:
-    loaded = load(project)
-
-    assert [record.id for record in loaded.records] == ["a", "a1", "b", "root"]
-    # Runs attributed to records outside the project are dropped.
-    assert sorted(run.id for run in loaded.runs) == ["r0", "r1", "r2", "r3", "r4"]
-    assert set(loaded.sources.values()) == {"csv"}
-    assert loaded.errors == []
-
-
-def test_load_reports_unavailable_source_without_failing(
-    project: HirakuConfig, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    Record.create(
-        "broken", tracking_backend={"type": "csv", "path": "other.csv"}, config=project
+def test_leaderboard_filter_combines_run_sets(project, scope, unattributed, expected):
+    runs = arrow_frame(
+        [
+            {"run": "direct", "record": "root/a/a"},
+            {"run": "child", "record": "root/a/a1/a1"},
+            {"run": "other", "record": "root/b/b"},
+            {"run": "unattributed", "record": None},
+        ],
+        RUN_COLUMNS,
     )
-    original = Record.resolve_tracking_backend
-
-    def resolve(self: Record, **options):
-        if self.id == "broken":
-            raise BackendError("source offline")
-        return original(self, **options)
-
-    monkeypatch.setattr(Record, "resolve_tracking_backend", resolve)
-
-    loaded = load(project)
-
-    assert loaded.errors == ["Tracking source for 'broken' unavailable: source offline"]
-    assert len(loaded.runs) == 5
+    records = project.vault.list()
+    for record in records:
+        record.title = "Same title"
+    filtered = filter_leaderboard_runs(
+        runs,
+        records,
+        scope,
+        include_unattributed=unattributed,
+    )
+    assert filtered["run"].tolist() == expected
 
 
-def test_run_rows_flatten_runs_in_execution_order(project: HirakuConfig) -> None:
-    rows = run_rows(load(project))
+def test_run_rows_keep_runs_without_matching_records() -> None:
+    records = [Record(id="known", type="task")]
+    rows = run_rows(
+        [Run(id="a", record_id="known"), Run(id="b", record_id="unknown"), Run(id="c")],
+        records=records,
+        source="csv",
+    )
+    assert [row["run"] for row in rows] == ["a", "b", "c"]
+    assert [row["record_path"] for row in rows] == ["known", None, None]
+    assert [row["source"] for row in rows] == ["csv", "csv", "csv"]
 
-    assert [row["run"] for row in rows] == ["r0", "r1", "r2", "r3", "r4"]
+
+def test_run_rows_flatten_runs_in_execution_order(project: Project) -> None:
+    leaderboard = Leaderboard.load(project)
+    rows = run_rows(
+        leaderboard.list_runs(project),
+        records=project.vault.list(),
+        source=leaderboard.source.type,
+    )
+
+    assert [row["run"] for row in rows] == ["r0", "r1", "r2", "r3", "r5", "r4"]
     assert rows[0]["record_path"] == "root/a"
     assert rows[0]["source"] == "csv"
     assert rows[0]["started"] == datetime(2026, 10, 14, 10, 0, tzinfo=UTC)
@@ -109,7 +112,7 @@ def test_execution_order_breaks_ties_by_id_and_puts_untimed_runs_last() -> None:
     assert [run.id for run in execution_order(runs)] == ["a", "b", "untimed"]
 
 
-def test_tradeoff_frame_identifies_non_dominated_runs() -> None:
+def test_tradeoff_frame_keeps_all_runs_with_finite_metrics() -> None:
     runs = pd.DataFrame(
         [
             {"run": "best", "record": "a", "metric.cost": 1, "metric.score": 9},
@@ -125,10 +128,9 @@ def test_tradeoff_frame_identifies_non_dominated_runs() -> None:
         ]
     )
 
-    points, excluded = tradeoff_frame(runs, "cost", "score", "minimize", "maximize")
+    points = tradeoff_frame(runs, "cost", "score")
 
-    assert points.loc[points["non_dominated"], "run"].tolist() == ["best", "tradeoff"]
-    assert excluded == 2
+    assert points["run"].tolist() == ["best", "tradeoff", "dominated"]
 
 
 def test_tradeoff_frame_accepts_arrow_metrics_with_missing_values() -> None:
@@ -143,18 +145,20 @@ def test_tradeoff_frame_accepts_arrow_metrics_with_missing_values() -> None:
         }
     )
 
-    points, excluded = tradeoff_frame(runs, "steps", "score", "minimize", "maximize")
+    points = tradeoff_frame(runs, "steps", "score")
 
     assert points["run"].tolist() == ["a", "b"]
-    assert excluded == 1
 
 
 def test_record_rows_list_records_in_tree_order() -> None:
     records = [
-        Record(id="root", metrics=[{"name": "loss", "direction": "minimize"}]),
-        Record(id="a-b", parent_id="root"),
-        Record(id="a", parent_id="root"),
-        Record(id="x", parent_id="a"),
+        Record(
+            id="root",
+            type="task",
+        ),
+        Record(id="a-b", type="record", parent_id="root"),
+        Record(id="a", type="record", parent_id="root"),
+        Record(id="x", type="record", parent_id="a"),
     ]
 
     rows = record_rows(records)
@@ -166,8 +170,6 @@ def test_record_rows_list_records_in_tree_order() -> None:
         "root/a/x",
         "root/a-b",
     ]
-    assert rows[0]["metrics"] == [{"name": "loss", "direction": "minimize"}]
-    assert rows[1]["metrics"] == []
 
 
 def test_arrow_frame_types_columns_and_falls_back_to_text() -> None:
@@ -187,28 +189,34 @@ def test_arrow_frame_types_columns_and_falls_back_to_text() -> None:
 
 
 def test_tree_rows_nest_runs_under_records_in_execution_order(
-    project: HirakuConfig,
+    project: Project,
 ) -> None:
     records_df, runs_df = tables(project)
+    runs_df["param.dataset"] = "iris"
 
     rows = tree_rows(records_df, runs_df, "loss")
 
     assert [(row["key"], row["depth"]) for row in rows] == [
-        ("record:root", 0),
-        ("record:a", 1),
+        ("record:root/root", 0),
+        ("record:root/a/a", 1),
         ("run:r0", 2),
         ("run:r3", 2),
-        ("record:a1", 2),
+        ("record:root/a/a1/a1", 2),
         ("run:r2", 3),
-        ("record:b", 1),
+        ("record:root/b/b", 1),
         ("run:r1", 2),
         ("run:r4", 2),
+        ("run:r5", 0),
     ]
     assert rows[0]["loss"] == ""
+    assert rows[0]["param.dataset"] is None
     assert rows[2]["loss"] == 0.9
+    assert rows[2]["param.dataset"] == "iris"
     assert rows[2]["Type"] == "run"
+    assert rows[2]["Record / run"] == "r0"
+    assert rows[-1]["Record / run"] == "r5"
     assert rows[2]["Started"] == "2026-10-14 10:00:00"
-    assert rows[-1]["Started"] == ""
+    assert rows[-2]["Started"] == ""
     assert [row["Duration"] for row in rows] == [
         "",
         "",
@@ -219,6 +227,7 @@ def test_tree_rows_nest_runs_under_records_in_execution_order(
         "",
         "1 m 15 s",
         "",
+        "1.0 s",
     ]
 
 
@@ -243,7 +252,11 @@ def test_format_duration(seconds: float | None, expected: str) -> None:
 def test_deep_trees_do_not_hit_the_recursion_limit() -> None:
     depth = 5000
     records = [
-        Record(id=f"r{index}", parent_id=f"r{index - 1}" if index else None)
+        Record(
+            id=f"r{index}",
+            type="record",
+            parent_id=f"r{index - 1}" if index else None,
+        )
         for index in range(depth)
     ]
     records_df = arrow_frame(record_rows(records), RECORD_COLUMNS)
@@ -253,55 +266,40 @@ def test_deep_trees_do_not_hit_the_recursion_limit() -> None:
     assert [row["depth"] for row in rows] == list(range(depth))
 
 
-def test_metric_choice_prefers_declared_metrics(project: HirakuConfig) -> None:
-    records_df, _ = tables(project)
+def test_metric_names_exclude_non_numeric_columns() -> None:
     runs_df = arrow_frame(
         [{"run": "r0", "metric.runtime": 1.0, "metric.loss": 0.1, "metric.note": "x"}]
     )
-
     assert metric_names(runs_df) == ["runtime", "loss"]
-    assert default_metric(records_df, ["runtime", "loss"]) == "loss"
-    assert default_metric(records_df, ["runtime"]) == "runtime"
-    assert default_metric(records_df, []) is None
 
 
-def test_find_run_and_run_text(project: HirakuConfig) -> None:
+def test_find_run_and_run_text(project: Project) -> None:
     _, runs_df = tables(project)
 
     run = find_run(runs_df, "r0")
 
     assert find_run(runs_df, "missing") is None
-    # Values appear as the backend reports them; the CSV backend reports text.
+    assert "dataset" not in runs_df.columns
+    # Dashboard rows use the normalized Run model's numeric metric values.
     assert run_text(run) == (
         "id: r0\n"
-        "record: a\n"
-        "entrypoint: train\n"
+        "record: root/a/a\n"
         "commit: null\n"
         "started: '2026-10-14T10:00:00+00:00'\n"
         "duration: 4.5\n"
         "params: {}\n"
         "metrics:\n"
-        "  loss: '0.9'\n"
+        "  loss: 0.9\n"
     )
 
 
-def test_subtree_selects_descendants_by_record_path(project: HirakuConfig) -> None:
-    _, runs_df = tables(project)
-
-    assert subtree(runs_df, "root/a")["run"].tolist() == ["r0", "r2", "r3"]
-    assert subtree(runs_df, "root/b")["run"].tolist() == ["r1", "r4"]
-    assert subtree(runs_df, None).empty
-    # A sibling whose ID extends another's is not its descendant.
-    assert not within("root/ab", "root/a")
-
-
 def test_plot_frame_numbers_runs_and_skips_unusable_values(
-    project: HirakuConfig,
+    project: Project,
 ) -> None:
     loss = ["0.5", "nan", "n/a", None, 0.25]
     runs_df = arrow_frame(
         [
-            {"run": f"r{index}", "record": "a", "metric.loss": value}
+            {"run": f"r{index}", "record": "root/a/a", "metric.loss": value}
             for index, value in enumerate(loss)
         ],
         RUN_COLUMNS,
@@ -317,7 +315,7 @@ def test_plot_frame_numbers_runs_and_skips_unusable_values(
     assert plot_frame(runs_df, "accuracy")[1] == 5
     # A subtree keeps its original row labels; numbering restarts at 1.
     _, project_runs = tables(project)
-    scoped, _ = plot_frame(subtree(project_runs, "root/b"), "loss")
+    scoped, _ = plot_frame(project_runs[project_runs["record"] == "root/b/b"], "loss")
     assert scoped[["number", "run"]].values.tolist() == [[1, "r1"], [2, "r4"]]
     assert scoped["duration"].tolist() == ["1 m 15 s", ""]
 

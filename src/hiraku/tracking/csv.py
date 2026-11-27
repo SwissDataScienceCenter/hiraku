@@ -3,72 +3,71 @@
 from __future__ import annotations
 
 import csv
+import os
+import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, ConfigDict
-
-from ..config import HirakuConfig
 from ..errors import BackendError, ValidationError
-from .base import TrackingBackend
-
-if TYPE_CHECKING:
-    from ..run import Run
+from ..project import Project
+from .base import BackendOperations, CSVBackendConfig, Run
 
 
-class CSVBackendConfig(BaseModel):
-    """Validated options for the CSV tracking backend.
-
-    Attributes:
-        type: Backend discriminator; must be "csv".
-        path: Optional CSV path override.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-    type: Literal["csv"] = "csv"
-    path: Path | None = None
-
-
-class CSVBackend(TrackingBackend):
+class CSVBackend(BackendOperations):
     """Normalize runs from a project CSV file.
 
     Args:
-        config: Project configuration used to resolve the default CSV path.
-        path: Optional explicit CSV path.
+        project: Hiraku project used to resolve relative CSV paths.
+        path: Explicit CSV path; required unless settings are supplied.
     """
 
     STANDARD = {
         "id",
+        "hiraku_job_id",
         "record_id",
         "commit",
         "timestamp",
         "duration",
-        "entrypoint",
         "url",
     }
 
-    def __init__(self, config: HirakuConfig, path: Path | str | None = None) -> None:
+    def __init__(
+        self,
+        project: Project,
+        path: Path | str | None = None,
+        *,
+        settings: CSVBackendConfig | None = None,
+    ) -> None:
         """Create a CSV adapter.
 
         Args:
-            config: Project configuration.
-            path: Optional CSV path override.
+            project: Hiraku project.
+            path: CSV path, supporting ``${NAME}`` environment references.
+            settings: Pre-validated CSV backend settings supplied by a leaderboard.
         """
-        self.config = config
-        if path is None:
-            self.path = None
-        else:
-            candidate = Path(path).expanduser()
-            self.path = (
-                candidate.resolve()
-                if candidate.is_absolute()
-                else (config.root / candidate).resolve()
-            )
+        if settings is not None and path is not None:
+            raise BackendError("Pass CSV backend settings or path, not both")
+        if settings is None:
+            if path is None:
+                raise BackendError("CSV backend requires a path")
+            settings = CSVBackendConfig(path=path)
+        if not isinstance(settings, CSVBackendConfig):
+            raise BackendError("CSV backend settings must be CSVBackendConfig")
+        self.project = project
 
-    def _read_source_runs(self, **options: Any) -> list[Run]:
-        from ..run import Run
+        def expand(match: re.Match[str]) -> str:
+            name = match.group(1)
+            if name not in os.environ:
+                raise BackendError(f"CSV path environment variable {name!r} is not set")
+            return os.environ[name]
 
-        path = self.path or self.config.root / "runs.csv"
+        expanded = re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", expand, str(settings.path))
+        if not expanded.strip():
+            raise BackendError("CSV path must not be blank after variable expansion")
+        candidate = Path(expanded).expanduser()
+        self.path = (project.root / candidate).resolve()
+
+    def _read_source_runs(self) -> list[Run]:
+        path = self.path
         if not path.exists():
             return []
         runs: list[Run] = []
@@ -77,10 +76,6 @@ class CSVBackend(TrackingBackend):
                 reader = csv.DictReader(stream)
                 if reader.fieldnames is None or "id" not in reader.fieldnames:
                     raise BackendError(f"csv backend file {path} has no id column")
-                if "record_id" not in reader.fieldnames:
-                    raise BackendError(
-                        f"csv backend file {path} has no record_id column"
-                    )
                 if any(not name for name in reader.fieldnames) or len(
                     set(reader.fieldnames)
                 ) != len(reader.fieldnames):
@@ -115,9 +110,11 @@ class CSVBackend(TrackingBackend):
                             key: (value if value != "" else None)
                             for key, value in row.items()
                         }
+                        record_reference = normalized.get("record_id")
                         run = Run(
                             id=run_id,
-                            record_id=normalized.get("record_id"),
+                            job_id=normalized.get("hiraku_job_id"),
+                            record_id=record_reference,
                             commit=normalized.get("commit"),
                             timestamp=self._timestamp(
                                 normalized.get("timestamp"),
@@ -125,7 +122,6 @@ class CSVBackend(TrackingBackend):
                                 context=f"{path} row {row_number}",
                             ),
                             duration=normalized.get("duration"),
-                            entrypoint=normalized.get("entrypoint"),
                             url=normalized.get("url"),
                             metrics=metrics,
                             params=params,

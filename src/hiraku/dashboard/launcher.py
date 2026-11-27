@@ -1,53 +1,97 @@
-"""Serve the bundled marimo dashboard or a project's editable copy."""
+"""Discover, create, and serve named Marimo dashboards."""
 
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
+from importlib.resources import files
+from importlib.resources.abc import Traversable
 from importlib.util import find_spec
 from pathlib import Path
+from typing import Literal
 
-from ..config import HirakuConfig
 from ..errors import ValidationError
-from ..record import load_record
+from ..project import Project
+from ..record import validate_identifier
+from ..tracking import Leaderboard
 
 DEFAULT_HOST = "127.0.0.1"
-BUNDLED_NOTEBOOK = Path(__file__).with_name("app.py")
-# marimo-studio serves the notebook through the view in this folder.
-BUNDLED_VIEWS = Path(__file__).with_name("studio")
+DEFAULT_NAME = "dashboard"
+TEMPLATES = files("hiraku") / "resources" / "dashboards"
 
 
-def project_notebook(config: HirakuConfig) -> Path:
-    """Return where ``hiraku dashboard --init`` places the project's notebook."""
-    return config.hiraku_dir / "dashboard" / "app.py"
+def _copy_resources(source: Traversable, destination: Path) -> None:
+    """Copy a resource tree, including on Python 3.11 without directory as_file."""
+    destination.mkdir(parents=True)
+    for item in source.iterdir():
+        target = destination / item.name
+        if item.is_dir():
+            if item.name != "__pycache__":
+                _copy_resources(item, target)
+        elif item.is_file():
+            target.write_bytes(item.read_bytes())
 
 
-def init_dashboard(config: HirakuConfig) -> Path:
-    """Copy the bundled notebook into the project so it can be edited.
+def project_notebook(project: Project, name: str = DEFAULT_NAME) -> Path:
+    """Return a named dashboard's destination in the project."""
+    validate_identifier(name, label="dashboard name")
+    path = project.hiraku_dir / "dashboards" / f"{name}.py"
+    if not path.resolve().is_relative_to(project.hiraku_dir.resolve()):
+        raise ValidationError(f"Dashboard path is outside the project: {path}")
+    return path
+
+
+def list_dashboards(project: Project) -> dict[str, Path]:
+    """Discover top-level notebooks in the project's dashboards directory."""
+    return {
+        path.stem: path
+        for path in sorted((project.hiraku_dir / "dashboards").glob("*.py"))
+        if path.is_file()
+    }
+
+
+def init_dashboard(
+    project: Project,
+    name: str = DEFAULT_NAME,
+    *,
+    template: Literal["dashboard", "notebook"] = "dashboard",
+) -> Path:
+    """Create a named project notebook and its independent Studio views.
 
     Raises:
-        hiraku.errors.ValidationError: If the project already has a dashboard.
+        hiraku.errors.ValidationError: If the name or destination already exists.
     """
-    notebook = project_notebook(config)
-    if notebook.parent.exists():
-        raise ValidationError(f"Dashboard already exists: {notebook.parent}")
-    notebook.parent.mkdir(parents=True)
-    _copy_bundled(notebook.parent)
+    if template not in {"dashboard", "notebook"}:
+        raise ValidationError(f"Unknown dashboard template: {template}")
+    notebook = project_notebook(project, name)
+    views = notebook.parent / "studio" / name
+    if name in list_dashboards(project) or notebook.exists() or views.exists():
+        raise ValidationError(f"Dashboard already exists: {name}")
+    notebook.parent.mkdir(parents=True, exist_ok=True)
+    _copy_bundled(notebook.parent, name, template=template)
     # marimo keeps session caches in __marimo__/ beside the notebook, and
     # marimo-studio keeps build state and locks beside its views.
-    (notebook.parent / ".gitignore").write_text(
-        "__marimo__/\nstudio/.locks/\nstudio/*/.artifacts/\n", encoding="utf-8"
-    )
+    ignore = notebook.parent / ".gitignore"
+    if not ignore.exists():
+        ignore.write_text("__marimo__/\n.locks/\n.artifacts/\n", encoding="utf-8")
     return notebook
 
 
-def _copy_bundled(directory: Path) -> Path:
+def _copy_bundled(
+    directory: Path, name: str = DEFAULT_NAME, *, template: str = "dashboard"
+) -> Path:
     """Copy the bundled notebook and its Studio views into ``directory``."""
-    shutil.copytree(BUNDLED_VIEWS, directory / BUNDLED_VIEWS.name)
-    return Path(shutil.copy2(BUNDLED_NOTEBOOK, directory))
+    bundle = TEMPLATES / template
+    if (bundle / "studio").is_dir():
+        _copy_resources(bundle / "studio", directory / "studio" / name)
+    notebook = directory / f"{name}.py"
+    source = (bundle / "app.py").read_text(encoding="utf-8")
+    source = source.replace('view_root = "studio"', f'view_root = "studio/{name}"')
+    source = source.replace('css_file="studio/', f'css_file="studio/{name}/')
+    notebook.write_text(source, encoding="utf-8")
+    return notebook
 
 
 def build_command(
@@ -58,6 +102,7 @@ def build_command(
     no_browser: bool = False,
     edit: bool = False,
     include_code: bool = False,
+    watch: bool = False,
 ) -> list[str]:
     """Return the marimo command serving ``notebook`` on localhost.
 
@@ -70,9 +115,9 @@ def build_command(
     command.extend(["--host", DEFAULT_HOST])
     if port is not None:
         command.extend(["--port", str(port)])
-    if edit:
+    if edit or watch:
         command.append("--watch")
-    else:
+    if not edit:
         command.append("--no-token")
         if include_code:
             command.append("--include-code")
@@ -83,33 +128,35 @@ def build_command(
 
 
 def serve_dashboard(
-    config: HirakuConfig,
+    project: Project,
     *,
+    name: str | None = None,
     record_id: str | None = None,
+    leaderboard_name: str | None = None,
     port: int | None = None,
     no_browser: bool = False,
     edit: bool = False,
     include_code: bool = False,
+    watch: bool = False,
 ) -> int:
     """Serve the dashboard until interrupted and return marimo's exit code.
 
-    The project's notebook from ``init_dashboard`` is served when it exists,
-    otherwise the bundled one.
+    With no name, use the project's dashboard.py or the bundled dashboard.
+    Editing the bundled dashboard first copies it into the project.
 
     Raises:
-        hiraku.errors.ValidationError: If the dashboard extra is missing, or if
-            ``edit`` is requested for a project without its own notebook.
+        hiraku.errors.ValidationError: If the dashboard extra is missing or the
+            requested notebook is unavailable.
         hiraku.errors.RecordNotFoundError: If ``record_id`` does not exist.
     """
-    local = project_notebook(config)
-    if edit and not local.is_file():
-        # The bundled notebook is installed package data; edits would be lost.
-        raise ValidationError(
-            "This project has no dashboard to edit. "
-            "Create one with: hiraku dashboard --init"
-        )
+    local = project_notebook(project, DEFAULT_NAME if name is None else name)
+    has_local = local.is_file()
+    if name is not None and not has_local:
+        raise ValidationError(f"Dashboard not found: {name}")
     if record_id is not None:
-        load_record(record_id, config=config)
+        project.vault.load(record_id)
+    if leaderboard_name is not None:
+        Leaderboard.load(project, leaderboard_name)
     if any(find_spec(name) is None for name in ("marimo", "marimo_studio", "altair")):
         raise ValidationError(
             "The dashboard requires the optional 'dashboard' dependencies. "
@@ -117,8 +164,9 @@ def serve_dashboard(
         )
     environment = {
         **os.environ,
-        "HIRAKU_PROJECT_ROOT": str(config.root),
+        "HIRAKU_PROJECT_ROOT": str(project.root),
         "HIRAKU_DASHBOARD_RECORD": record_id or "",
+        "HIRAKU_DASHBOARD_LEADERBOARD": leaderboard_name or "",
     }
 
     def serve(notebook: Path) -> int:
@@ -129,11 +177,14 @@ def serve_dashboard(
             no_browser=no_browser,
             edit=edit,
             include_code=include_code,
+            watch=watch,
         )
         return _wait(subprocess.Popen(command, cwd=notebook.parent, env=environment))
 
-    if local.is_file():
+    if has_local:
         return serve(local)
+    if edit:
+        return serve(init_dashboard(project))
     # marimo writes session caches beside the notebook and in its working
     # directory, so run a copy from a scratch directory outside the project.
     with tempfile.TemporaryDirectory(prefix="hiraku-dashboard-") as directory:

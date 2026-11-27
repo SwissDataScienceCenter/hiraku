@@ -1,96 +1,151 @@
-"""Research records, entrypoints, and metric declarations."""
+"""Validated Markdown records and their filesystem vault."""
 
 from __future__ import annotations
 
-import json
-from collections.abc import Mapping, Sequence
+import builtins
+import re
 from contextlib import suppress
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal, Self, TypeAlias
+from typing import Any, Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-
-from .base import BaseRecord
-from .errors import RecordExistsError, RecordNotFoundError, ValidationError
-from .io import atomic_write, dump_yaml
-from .run import Run
-from .tracking import TrackingBackend, create_backend
-from .validation import validate_identifier
-
-ArgumentScalar: TypeAlias = str | int | float | Path
-ArgumentValue: TypeAlias = ArgumentScalar | bool | None | Sequence[ArgumentScalar]
-
-
-class Entrypoint(BaseModel):
-    """A command and default named arguments."""
-
-    model_config = ConfigDict(extra="forbid")
-    command: list[str]
-    args: dict[str, ArgumentValue] = Field(default_factory=dict)
-
-    @field_validator("args", mode="before")
-    @classmethod
-    def validate_args_mapping(cls, value: Any) -> Any:
-        if not isinstance(value, Mapping):
-            raise ValueError("Entrypoint args must be a mapping")
-        return value
-
-    @field_validator("command")
-    @classmethod
-    def validate_command(cls, value: list[str]) -> list[str]:
-        if not value or any(not item for item in value):
-            raise ValidationError("Entrypoint command must be non-empty strings")
-        return value
-
-
-class Metric(BaseModel):
-    """A declared metric and its preferred direction."""
-
-    name: str = Field(min_length=1)
-    direction: Literal["minimize", "maximize"]
-
-
-_LOCAL_FIELDS = frozenset(
-    {"id", "parent_id", "related_to", "type", "commit", "status", "decision"}
+import frontmatter
+import yaml
+from frontmatter.default_handlers import YAMLHandler
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
 )
+from pydantic_core import PydanticSerializationError
+
+from .errors import (
+    RecordExistsError,
+    RecordNotFoundError,
+    ValidationError,
+)
+from .io import atomic_write
+from .markdown import Markdown
+
+_SAFE_ID = re.compile(r'^[^<>:"/\\|?*\x00-\x1f\x7f]+$')
+_YAML_HANDLER = YAMLHandler()
 
 
-@dataclass(frozen=True)
-class ResolvedRecord:
-    values: dict[str, Any]
-    sources: dict[str, Any]
+def validate_identifier(identifier: str, *, label: str = "record ID") -> None:
+    if (
+        not isinstance(identifier, str)
+        or not identifier
+        or identifier in {".", ".."}
+        or identifier != identifier.strip()
+        or any(character.isspace() for character in identifier)
+        or identifier.endswith(".")
+        or not _SAFE_ID.fullmatch(identifier)
+    ):
+        raise ValidationError(f"Invalid {label}: {identifier!r}")
 
 
-class Record(BaseRecord):
-    """A research record with one organizational parent and optional links."""
+class Record(BaseModel):
+    """
+    A lightweight, validated research document.
 
-    parent_id: str | None = None
-    related_to: list[str] = Field(default_factory=list)
-    type: str | None = None
-    commit: str | None = None
-    status: str | None = None
-    decision: str | None = None
-    branch: str | None = None
-    entrypoints: dict[str, Any] | None = None
-    metrics: list[Any] | None = None
-    tracking_backend: str | dict[str, Any] | None = None
+    Attributes:
+        id: Bundle-relative concept path, without the .md suffix.
+        title: Optional OKF display title.
+        markdown: Markdown content of the record.
+        parent_id: Optional relative path of a parent record.
+        related_to: Optional relative paths of related records.
+        type: Nonblank, producer-defined OKF concept type.
+        commit: Optional commit hash associated with the record.
+        status: OKF concept lifecycle: draft, stable, or deprecated.
+        state: Optional workflow-defined research progress.
+        decision: Optional record decision.
+        branch: Optional record branch.
+    """
+
+    model_config = ConfigDict(extra="allow", validate_assignment=True)
+
+    # OKF fields
+    type: str = Field(..., description="OKF concept type.", min_length=1)
+    title: str | None = Field(default=None, description="Optional OKF display title.")
+    description: str | None = Field(
+        default=None, description="Optional short description of the concept."
+    )
+    status: Literal["draft", "stable", "deprecated"] = Field(
+        default="stable", description="OKF concept lifecycle status."
+    )
+    resource: str | None = Field(
+        default=None, description="Optional URI or path to an associated resource."
+    )
+    tags: list[str] = Field(
+        default_factory=list, description="Tags that categorize this concept."
+    )
+    generated: dict[str, Any] = Field(
+        default_factory=dict, description="Generated metadata for this concept."
+    )
+    verified: list[dict[str, Any]] | None = Field(
+        default=None, description="Verification evidence associated with this concept."
+    )
+
+    # Hiraku fields
+    id: str = Field(
+        ..., description="Bundle-relative concept path, without the .md suffix."
+    )
+    markdown: Markdown = Field(
+        default_factory=lambda: Markdown(""),
+        description="Markdown content of the record.",
+    )
+    parent_id: str | None = Field(
+        default=None, description="Optional bundle-relative ID of a parent record."
+    )
+    related_to: list[str] = Field(
+        default_factory=list,
+        description="Bundle-relative IDs of related records.",
+    )
+    commit: str | None = Field(
+        default=None, description="Optional commit hash associated with the record."
+    )
+    decision: str | None = Field(
+        default=None, description="Optional decision recorded for this concept."
+    )
+    branch: str | None = Field(
+        default=None, description="Optional version-control branch associated with it."
+    )
+    state: str | None = Field(
+        default=None, description="Optional workflow-defined research progress state."
+    )
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, value: str) -> str:
+        return cast(str, cls._validate_reference_id(value, "record ID"))
+
+    @field_validator("type")
+    @classmethod
+    def validate_type(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Record type must be a non-empty string")
+        return value
+
+    @field_validator("verified", mode="before")
+    @classmethod
+    def normalize_verified(cls, value: Any) -> Any:
+        return [value] if isinstance(value, dict) else value
 
     @field_validator("parent_id")
     @classmethod
-    def validate_parent(cls, value: str | None) -> str | None:
-        if value is not None:
-            validate_identifier(value, label="parent ID")
-        return value
+    def validate_parent_id(cls, value: str | None) -> str | None:
+        return cls._validate_reference_id(value, "parent ID")
 
     @field_validator("related_to")
     @classmethod
-    def validate_links(cls, value: list[str]) -> list[str]:
-        for identifier in value:
-            validate_identifier(identifier, label="related record ID")
-        if len(value) != len(set(value)):
-            raise ValidationError("related_to contains duplicate IDs")
-        return value
+    def validate_related_to(cls, values: list[str]) -> list[str]:
+        result = [
+            cast(str, cls._validate_reference_id(value, "related record ID"))
+            for value in values
+        ]
+        if len(result) != len(set(result)):
+            raise ValueError("related_to contains duplicate IDs")
+        return result
 
     @field_validator("commit")
     @classmethod
@@ -99,492 +154,255 @@ class Record(BaseRecord):
             len(value) not in {40, 64}
             or any(character not in "0123456789abcdef" for character in value)
         ):
-            raise ValidationError("commit must be a full lowercase Git hash")
+            raise ValueError("commit must be a full lowercase Git hash")
         return value
 
-    @model_validator(mode="after")
-    def validate_research_fields(self) -> Self:
-        if self.parent_id == self.id or self.id in self.related_to:
-            raise ValidationError("A record cannot refer to itself")
-        if self.entrypoints is not None:
-            for name in self.entrypoints:
-                validate_identifier(name, label="entrypoint name")
-            self.__dict__["entrypoints"] = {
-                name: Entrypoint.model_validate(value)
-                for name, value in self.entrypoints.items()
-            }
-        if self.metrics is not None:
-            self.__dict__["metrics"] = [
-                Metric.model_validate(item) for item in self.metrics
-            ]
-        return self
+    @staticmethod
+    def _validate_reference_id(value: str | None, label: str) -> str | None:
+        if value is None:
+            return None
+        try:
+            for part in value.split("/"):
+                validate_identifier(part, label=label)
+        except ValidationError as exc:
+            raise ValueError(str(exc)) from exc
+        return value
 
-    def save(self, path: Path | str | None = None, *, overwrite: bool = False) -> Path:
-        """Persist only when project references and root placement are valid."""
-        from .config import HirakuConfig
+    @property
+    def metadata(self) -> dict[str, Any]:
+        """Return the record's serialized metadata, excluding its Markdown body."""
+        try:
+            return self.model_dump(
+                mode="json",
+                exclude={"markdown", "id"},
+                warnings=False,
+            )
+        except PydanticSerializationError as exc:
+            raise ValidationError(f"Unsupported YAML value: {exc}") from exc
 
-        target = Path(path).expanduser().absolute() if path is not None else self.path
-        if target is None:
-            raise ValidationError(f"Detached record {self.id!r} requires a save path")
-        selected = HirakuConfig.discover(target)
-        index = _record_index(selected)
-        existing = index.get(self.id)
-        if existing is not None and existing.path != target:
-            raise RecordExistsError(f"Record {self.id!r} already exists")
-        candidate = self.model_copy(deep=True)
-        candidate.path = target
-        index[self.id] = candidate
-        _validate_tree(index, selected.records_dir)
-        return super().save(target, overwrite=overwrite)
 
-    def resolve(self, *, config: Any = None) -> ResolvedRecord:
-        """Return inherited values and their defining record IDs."""
-        selected = _config(config)
-        index = _record_index(selected)
-        _validate_tree(index, selected.records_dir)
-        return _resolve(self, index, set())
+class RecordUpdate(BaseModel):
+    """Partial update payload for an existing research record."""
 
-    @classmethod
-    def create(
-        cls,
-        record_id: str,
-        *,
-        parent_id: str | None = None,
-        related_to: list[str] | None = None,
-        markdown: str = "",
-        activate: bool = True,
-        config: Any = None,
-        **fields: Any,
-    ) -> Record:
-        selected = _config(config)
-        index = _record_index(selected)
-        if record_id in index:
-            raise RecordExistsError(f"Record {record_id!r} already exists")
-        if parent_id is not None and parent_id not in index:
-            raise RecordNotFoundError(f"Parent record {parent_id!r} not found")
-        links = related_to or []
-        for link in links:
-            if link not in index:
-                raise RecordNotFoundError(f"Related record {link!r} not found")
-        record = cls(
-            id=record_id,
-            parent_id=parent_id,
-            related_to=links,
-            markdown=markdown,
-            **fields,
-        )
-        root_id = _root_id(parent_id, index) if parent_id else record_id
-        record.save(selected.records_dir / root_id / f"{record_id}.md")
-        if activate:
-            selected.set_active_record(record)
+    # Updates may include producer-defined front matter fields.
+    model_config = ConfigDict(extra="allow")
+
+    type: str | None = Field(default=None, description="OKF concept type.")
+    title: str | None = Field(default=None, description="Optional OKF display title.")
+    description: str | None = Field(
+        default=None, description="Short summary of the record."
+    )
+    status: Literal["draft", "stable", "deprecated"] | None = Field(
+        default=None, description="OKF concept lifecycle."
+    )
+    resource: str | None = Field(
+        default=None, description="External URI or resource reference."
+    )
+    tags: list[str] | None = Field(
+        default=None, description="Replaces existing categorization tags."
+    )
+    verified: list[dict[str, Any]] | None = Field(
+        default=None, description="Replacement verification evidence."
+    )
+    generated: dict[str, Any] | None = Field(
+        default=None, description="Replacement generated metadata."
+    )
+    parent_id: str | None = Field(
+        default=None, description="Relative path of a parent record."
+    )
+    related_to: list[str] | None = Field(
+        default=None, description="Replaces existing related record paths."
+    )
+    commit: str | None = Field(default=None, description="Associated git commit hash.")
+    decision: str | None = Field(default=None, description="Recorded decision.")
+    branch: str | None = Field(default=None, description="Research branch name.")
+    state: str | None = Field(
+        default=None, description="Workflow-defined research progress."
+    )
+    markdown: str | None = Field(
+        default=None, description="Updated Markdown body content."
+    )
+
+
+class Vault:
+    """Read and write Markdown records under a bundle root.
+
+    Record IDs are paths relative to ``root`` without the ``.md`` suffix.
+    Call :meth:`validate` to check relationships across the collection.
+    """
+
+    def __init__(self, *, root: Path) -> None:
+        """Create a vault for the given records directory without creating it."""
+        self.root = Path(root).absolute()
+
+    def file_path(self, record_id: str) -> Path:
+        """Return the contained Markdown path for an ID without checking existence."""
+        if not isinstance(record_id, str):
+            raise ValidationError("Record ID must be a string")
+        try:
+            Record._validate_reference_id(record_id, "record ID")
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
+        target = self.root / f"{record_id}.md"
+        if target.name.casefold() in {"index.md", "log.md"}:
+            raise ValidationError(f"Reserved OKF filename: {target.name}")
+        self._check_vault_path(target)
+        return target
+
+    def load(self, record_id: str) -> Record:
+        """Load one record by ID without scanning or validating other records."""
+        target = self.file_path(record_id)
+        if not target.is_file():
+            raise RecordNotFoundError(f"Record {record_id!r} not found")
+        data, markdown = self._parse_markdown(target)
+        return Record.model_validate({**data, "id": record_id, "markdown": markdown})
+
+    def create(self, id: str, **fields: Any) -> Record:
+        """Validate and save a new record at ``id``.
+
+        Refuses to replace existing files.
+        """
+        record = Record(id=id, **fields)
+        self.save(record)
         return record
 
-    def children(self, *, config: Any = None) -> list[Record]:
+    def list(self) -> builtins.list[Record]:
+        """Load records recursively in ID order; ignore ``index.md`` and ``log.md``.
+
+        Relationships between records are not checked.
+        """
         return [
-            item for item in list_records(config=config) if item.parent_id == self.id
+            self.load(path.relative_to(self.root).with_suffix("").as_posix())
+            for path in sorted(self.root.rglob("*.md"))
+            if path.name not in {"index.md", "log.md"}
         ]
 
-    def reparent(self, parent_id: str | None, *, config: Any = None) -> None:
-        """Change parent and relocate this subtree when its root changes."""
-        selected = _config(config)
-        index = _record_index(selected)
-        _validate_tree(index, selected.records_dir)
-        if self.id not in index:
-            raise RecordNotFoundError(f"Record {self.id!r} not found")
-        if self.path != index[self.id].path:
-            raise ValidationError("Reparenting requires the persisted record")
-        journal_path = _reparent_journal_path(selected)
-        if journal_path.exists():
-            raise ValidationError(
-                f"A previous reparent operation still needs recovery: {journal_path}"
+    def children(self, record_id: str) -> builtins.list[Record]:
+        """Return records that declare ``record_id`` as their parent, sorted by ID."""
+        return [record for record in self.list() if record.parent_id == record_id]
+
+    def descendants(self, record_id: str) -> builtins.list[Record]:
+        """Return transitive descendants by declared parent IDs.
+
+        Tolerates cycles and missing nodes.
+        """
+        records = self.list()
+        seen = {record_id}
+        pending = [record_id]
+        result = []
+        while pending:
+            parent = pending.pop()
+            for record in records:
+                if record.parent_id == parent and record.id not in seen:
+                    seen.add(record.id)
+                    pending.append(record.id)
+                    result.append(record)
+        return sorted(result, key=lambda record: record.id)
+
+    def save(self, record: Record, *, overwrite: bool = False) -> Path:
+        """Validate and atomically write one record.
+
+        Replace existing files only with ``overwrite=True``. Relationships are
+        not checked.
+        """
+        try:
+            keys = (
+                record.model_fields_set
+                | record.model_dump(exclude_defaults=True).keys()
             )
-        if parent_id is not None:
-            validate_identifier(parent_id, label="parent ID")
-            if parent_id not in index:
-                raise RecordNotFoundError(f"Parent record {parent_id!r} not found")
-            if parent_id == self.id or _is_descendant(index[parent_id], self.id, index):
-                raise ValidationError("A record cannot become its own ancestor")
-        old_root = _root_id(self.id, index)
-        new_root = _root_id(parent_id, index) if parent_id else self.id
-        old_folder = selected.records_dir / old_root
-        if old_root == self.id and old_root != new_root:
-            record_paths = {item.path for item in index.values()}
-            extras = [
-                path
-                for path in old_folder.rglob("*")
-                if path.is_file() and path not in record_paths
-            ]
-            if extras:
-                raise ValidationError(
-                    f"Move files in {old_folder} before reparenting its root"
-                )
-        old_parent_id = self.parent_id
-        if old_root == new_root:
-            self.parent_id = parent_id
-            try:
-                self.save()
-            except Exception:
-                self.parent_id = old_parent_id
-                raise
-            return
-        affected = [
-            item
-            for item in index.values()
-            if item.id == self.id or _is_descendant(item, self.id, index)
-        ]
-        old_paths = {item.id: item.path for item in affected if item.path is not None}
-        if len(old_paths) != len(affected):
-            raise ValidationError("Reparenting requires persisted records")
-        targets = {
-            item.id: selected.records_dir / new_root / f"{item.id}.md"
-            for item in affected
+            candidate = Record.model_validate(record.model_dump(include=keys))
+        except (TypeError, ValueError) as exc:
+            raise ValidationError(f"Invalid record {record.id!r}: {exc}") from exc
+        target = self.file_path(candidate.id)
+        if target.exists() and not overwrite:
+            raise RecordExistsError(f"Record already exists: {target}")
+        metadata = {
+            key: value for key, value in candidate.metadata.items() if key in keys
         }
-        if any(target.exists() for target in targets.values()):
-            raise RecordExistsError(f"Destination root folder {new_root!r} conflicts")
-        moves = [(old_paths[item.id], targets[item.id]) for item in affected]
-        journal = {
-            "phase": "preparing",
-            "old_root": old_root,
-            "new_root": new_root,
-            "affected_ids": [item.id for item in affected],
-            "moves": [
-                {
-                    "old": old.relative_to(selected.records_dir).as_posix(),
-                    "new": new.relative_to(selected.records_dir).as_posix(),
-                }
-                for old, new in moves
-            ],
-        }
-        atomic_write(journal_path, json.dumps(journal))
-        self.parent_id = parent_id
         try:
-            for item in affected:
-                target = targets[item.id]
-                if item.id == self.id:
-                    content = f"---\n{dump_yaml(self.to_dict())}---\n{self.markdown}"
-                else:
-                    content = old_paths[item.id].read_text(encoding="utf-8")
-                atomic_write(target, content)
-                if target.read_text(encoding="utf-8") != content:
-                    raise OSError(f"Destination copy verification failed for {target}")
-                if Record.load(target).id != item.id:
-                    raise ValidationError(
-                        f"Destination copy has an invalid ID: {target}"
-                    )
-        except Exception as exc:
-            self.parent_id = old_parent_id
-            _, cleanup_errors, complete = _recover_reparenting(selected)
-            if not complete:
-                raise ExceptionGroup(
-                    f"Could not write destination records; recovery is pending at "
-                    f"{journal_path}",
-                    [exc, *cleanup_errors],
-                ) from exc
-            raise
+            post = frontmatter.Post(str(candidate.markdown))
+            post.metadata = metadata
+            content = frontmatter.dumps(post, handler=_YAML_HANDLER, sort_keys=False)
+            atomic_write(target, content)
+        except (OSError, yaml.YAMLError) as exc:
+            raise ValidationError(f"Cannot save record at {target}: {exc}") from exc
+        return target
 
-        journal["phase"] = "committed"
+    def update(
+        self,
+        record: Record,
+        patch: RecordUpdate,
+    ) -> Record:
+        """Apply supplied fields and save the record; ``markdown`` replaces its body.
+
+        The ID cannot be changed, and relationships to other records are not checked.
+        """
+        changes = patch.model_dump(exclude_unset=True)
+        markdown = changes.pop("markdown", None)
+        fields = changes
+        if {"id", "markdown"}.intersection(fields):
+            raise ValidationError("Cannot update ID or set Markdown through metadata")
+        values = record.model_dump(include=record.model_fields_set)
+        values.update(fields)
+        if markdown is not None:
+            values["markdown"] = markdown
+        updated = Record.model_validate(values)
+        self.save(updated, overwrite=True)
+        return updated
+
+    def delete(self, record_id: str) -> None:
+        """Delete one record and remove its empty parent directory if possible.
+
+        Other records' references are unchanged; call :meth:`validate` to find
+        dangling IDs.
+        """
+        target = self.file_path(record_id)
+        if not target.is_file():
+            raise RecordNotFoundError(f"Record {record_id!r} not found")
         try:
-            atomic_write(journal_path, json.dumps(journal))
-        except Exception as exc:
-            try:
-                persisted_phase = json.loads(
-                    journal_path.read_text(encoding="utf-8")
-                ).get("phase")
-            except (OSError, AttributeError, ValueError):
-                persisted_phase = None
-            if persisted_phase == "committed":
-                self.path = targets[self.id]
-                for old_path, _ in moves:
-                    with suppress(OSError):
-                        old_path.unlink()
-                _recover_reparenting(selected)
-                with suppress(OSError):
-                    old_folder.rmdir()
-                return
-            self.parent_id = old_parent_id
-            _, cleanup_errors, complete = _recover_reparenting(selected)
-            if not complete:
-                raise ExceptionGroup(
-                    f"Could not start reparenting; recovery is pending at "
-                    f"{journal_path}",
-                    [exc, *cleanup_errors],
-                ) from exc
-            raise
-
-        for old_path, _ in moves:
+            target.unlink()
             with suppress(OSError):
-                old_path.unlink()
-        self.path = targets[self.id]
-        _recover_reparenting(selected)
-        with suppress(OSError):
-            old_folder.rmdir()
-
-    def descendants(self, *, config: Any = None) -> list[Record]:
-        index = {item.id: item for item in list_records(config=config)}
-        return [item for item in index.values() if _is_descendant(item, self.id, index)]
-
-    def entrypoint(self, name: str, *, config: Any = None) -> Any:
-        from .errors import EntrypointNotFoundError
-
-        entrypoints = self.resolve(config=config).values.get("entrypoints") or {}
-        try:
-            return entrypoints[name]
-        except KeyError as exc:
-            raise EntrypointNotFoundError(
-                f"Record {self.id!r} has no entrypoint {name!r}"
-            ) from exc
-
-    def resolve_tracking_backend(self, *, config: Any = None) -> TrackingBackend:
-        """Create the tracking backend inherited by this record."""
-        selected = _config(config)
-        specification = self.resolve(config=selected).values.get("tracking_backend")
-        return create_backend(specification or selected.tracking_backend, selected)
-
-    def runs(self, *, config: Any = None, **query: Any) -> list[Run]:
-        """Return runs attributed to this record."""
-        return self.resolve_tracking_backend(config=config).list_runs(
-            record_id=self.id, **query
-        )
-
-    def delete(self, *, config: Any = None) -> None:
-        records = list_records(config=config)
-        selected = _config(config)
-        if _reparent_journal_path(selected).exists():
-            raise ValidationError(
-                "Cannot delete records until pending reparent recovery is complete"
-            )
-        persisted = next((item for item in records if item.id == self.id), None)
-        if persisted is not None and self.path != persisted.path:
-            raise ValidationError("Cannot delete a stale record instance; reload it")
-        if any(item.parent_id == self.id for item in records):
-            raise ValidationError(f"Cannot delete record {self.id!r} with children")
-        if any(self.id in item.related_to for item in records if item.id != self.id):
-            raise ValidationError(f"Cannot delete referenced record {self.id!r}")
-        super().delete()
-
-
-def _config(config: Any) -> Any:
-    if config is not None:
-        return config
-    from .config import HirakuConfig
-
-    return HirakuConfig.discover()
-
-
-def _reparent_journal_path(config: Any) -> Path:
-    return config.hiraku_dir / ".reparent-transaction.json"
-
-
-def _recover_reparenting(config: Any) -> tuple[set[Path], list[Exception], bool]:
-    """Retry an interrupted reparent and hide stale copies while cleanup is pending."""
-    journal_path = _reparent_journal_path(config)
-    if not journal_path.exists():
-        return set(), [], True
-    try:
-        journal = json.loads(journal_path.read_text(encoding="utf-8"))
-        phase = journal["phase"]
-        raw_moves = journal["moves"]
-        old_root = journal["old_root"]
-        new_root = journal["new_root"]
-        affected_ids = journal["affected_ids"]
-        if (
-            phase not in {"preparing", "committed"}
-            or not isinstance(raw_moves, list)
-            or not isinstance(old_root, str)
-            or not isinstance(new_root, str)
-            or not isinstance(affected_ids, list)
-            or any(not isinstance(record_id, str) for record_id in affected_ids)
-            or len(raw_moves) != len(affected_ids)
-        ):
-            raise ValueError("invalid journal structure")
-        moves = []
-        for record_id, item in zip(affected_ids, raw_moves, strict=True):
-            old = Path(item["old"])
-            new = Path(item["new"])
-            if (
-                old.is_absolute()
-                or new.is_absolute()
-                or ".." in old.parts
-                or ".." in new.parts
-            ):
-                raise ValueError("journal paths must stay inside the records folder")
-            if (
-                old.parent != Path(old_root)
-                or new.parent != Path(new_root)
-                or old.name != f"{record_id}.md"
-                or new.name != f"{record_id}.md"
-            ):
-                raise ValueError("journal paths do not match the affected records")
-            moves.append((config.records_dir / old, config.records_dir / new))
-    except (OSError, KeyError, TypeError, ValueError) as exc:
-        raise ValidationError(
-            f"Cannot read reparent recovery journal {journal_path}: {exc}"
-        ) from exc
-
-    ignored_paths: set[Path] = set()
-    cleanup_errors: list[Exception] = []
-    if phase == "preparing":
-        missing_old = [old for old, _ in moves if not old.exists()]
-        if missing_old:
-            missing = ", ".join(str(path) for path in missing_old)
-            raise ValidationError(
-                f"Authoritative pre-commit copy is missing: {missing}"
-            )
-        ignored_paths.update(new for _, new in moves)
-        for _, new in moves:
-            try:
-                new.unlink(missing_ok=True)
-            except OSError as exc:
-                cleanup_errors.append(
-                    OSError(
-                        f"Could not remove incomplete destination copy {new}: {exc}"
-                    )
-                )
-        complete = all(not new.exists() for _, new in moves)
-    else:
-        missing_new = [new for _, new in moves if not new.exists()]
-        if missing_new:
-            missing = ", ".join(str(path) for path in missing_new)
-            raise ValidationError(f"Authoritative committed copy is missing: {missing}")
-        ignored_paths.update(old for old, _ in moves)
-        for old, _ in moves:
-            unlink_error: OSError | None = None
-            try:
-                old.unlink(missing_ok=True)
-            except OSError as exc:
-                unlink_error = exc
-            if old.exists():
-                detail = f": {unlink_error}" if unlink_error else ""
-                cleanup_errors.append(
-                    OSError(f"Could not remove old record copy {old}{detail}")
-                )
-        complete = all(not old.exists() and new.exists() for old, new in moves)
-
-    if complete:
-        try:
-            journal_path.unlink()
+                target.parent.rmdir()
         except OSError as exc:
-            cleanup_errors.append(
-                OSError(
-                    f"Could not clear reparent recovery journal {journal_path}: {exc}"
+            raise ValidationError(f"Cannot delete record at {target}: {exc}") from exc
+
+    def validate(self) -> None:
+        """Scan the collection and check that declared parent and related IDs exist.
+
+        Parent cycles are allowed.
+        """
+        records = self.list()
+        paths = {record.id for record in records}
+        for record in records:
+            if record.parent_id is not None and record.parent_id not in paths:
+                raise ValidationError(f"Missing parent record {record.parent_id!r}")
+            if any(path not in paths for path in record.related_to):
+                raise ValidationError(
+                    f"Record {record.id!r} has a missing related record"
                 )
-            )
-            complete = False
-    return ignored_paths, cleanup_errors, complete
 
-
-def _record_index(config: Any) -> dict[str, Record]:
-    ignored_paths, _, _ = _recover_reparenting(config)
-    index: dict[str, Record] = {}
-    for path in sorted(config.records_dir.glob("*/*.md")):
-        if path in ignored_paths:
-            continue
-        record = Record.load(path)
-        if record.id in index:
-            raise ValidationError(f"Duplicate record ID {record.id!r}")
-        index[record.id] = record
-    return index
-
-
-def _root_id(identifier: str, index: Mapping[str, Record]) -> str:
-    seen: set[str] = set()
-    while True:
-        if identifier in seen:
-            raise ValidationError(f"Record parent cycle at {identifier!r}")
-        seen.add(identifier)
+    @staticmethod
+    def _parse_markdown(path: Path) -> tuple[dict[str, Any], str]:
+        """Parse a Markdown document's YAML front matter and body."""
         try:
-            record = index[identifier]
-        except KeyError as exc:
-            raise RecordNotFoundError(
-                f"Parent record {identifier!r} not found"
+            text = path.read_text(encoding="utf-8")
+            if not text.startswith(("---\n", "---\r\n")) or not re.search(
+                r"^---[ \t]*$", text[4:], re.M
+            ):
+                raise ValidationError(f"Expected YAML front matter block in {path}")
+            metadata, content = frontmatter.parse(text, handler=_YAML_HANDLER)
+        except (OSError, UnicodeError) as exc:
+            raise ValidationError(f"Cannot read record {path}: {exc}") from exc
+        except (yaml.YAMLError, TypeError, ValueError) as exc:
+            raise ValidationError(
+                f"Malformed YAML front matter in {path}: {exc}"
             ) from exc
-        if record.parent_id is None:
-            return identifier
-        identifier = record.parent_id
+        if not metadata:
+            raise ValidationError(f"Expected YAML front matter mapping in {path}")
+        return metadata, content
 
-
-def _validate_tree(index: Mapping[str, Record], records_dir: Path) -> None:
-    for record in index.values():
-        root = _root_id(record.id, index)
-        expected = records_dir / root / f"{record.id}.md"
-        if record.path != expected:
-            raise ValidationError(f"Record {record.id!r} is outside its root folder")
-        for link in record.related_to:
-            if link not in index:
-                raise RecordNotFoundError(f"Related record {link!r} not found")
-
-
-def _resolve(
-    record: Record, index: Mapping[str, Record], seen: set[str]
-) -> ResolvedRecord:
-
-    if record.id in seen:
-        raise ValidationError(f"Record parent cycle at {record.id!r}")
-    seen.add(record.id)
-    values: dict[str, Any] = {}
-    sources: dict[str, Any] = {}
-    if record.parent_id is not None:
-        parent = _resolve(index[record.parent_id], index, seen)
-        values = {
-            key: value
-            for key, value in parent.values.items()
-            if key not in _LOCAL_FIELDS
-        }
-        sources = {
-            key: value
-            for key, value in parent.sources.items()
-            if key not in _LOCAL_FIELDS
-        }
-    for key, value in record.to_dict().items():
-        if key == "entrypoints" and isinstance(value, dict):
-            values[key] = {
-                **(values.get(key) or {}),
-                **{
-                    name: Entrypoint.model_validate(item)
-                    for name, item in value.items()
-                },
-            }
-            sources[key] = {
-                **(sources.get(key) or {}),
-                **dict.fromkeys(value, record.id),
-            }
-        elif key == "metrics" and isinstance(value, list):
-            values[key] = [Metric.model_validate(item) for item in value]
-            sources[key] = record.id
-        else:
-            values[key] = value
-            sources[key] = record.id
-    return ResolvedRecord(values, sources)
-
-
-def _is_descendant(
-    record: Record, ancestor_id: str, index: Mapping[str, Record]
-) -> bool:
-    seen: set[str] = set()
-    parent_id = record.parent_id
-    while parent_id is not None:
-        if parent_id in seen:
-            raise ValidationError(f"Record parent cycle at {parent_id!r}")
-        if parent_id == ancestor_id:
-            return True
-        seen.add(parent_id)
-        parent_id = index[parent_id].parent_id
-    return False
-
-
-def load_record(record_id: str, *, config: Any = None) -> Record:
-    validate_identifier(record_id, label="record ID")
-    selected = _config(config)
-    index = _record_index(selected)
-    _validate_tree(index, selected.records_dir)
-    try:
-        return index[record_id]
-    except KeyError as exc:
-        raise RecordNotFoundError(f"Record {record_id!r} not found") from exc
-
-
-def list_records(*, config: Any = None) -> list[Record]:
-    selected = _config(config)
-    index = _record_index(selected)
-    _validate_tree(index, selected.records_dir)
-    return [index[key] for key in sorted(index)]
+    def _check_vault_path(self, path: Path) -> None:
+        try:
+            path.resolve().relative_to(self.root.resolve())
+        except ValueError as exc:
+            raise ValidationError(f"Record path is outside vault: {path}") from exc

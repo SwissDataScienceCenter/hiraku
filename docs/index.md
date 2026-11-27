@@ -1,112 +1,56 @@
-<div class="sdsc-hero">
-<p class="sdsc-kicker">Swiss Data Science Center · Hiraku</p>
-
-<h1>Research, made traceable</h1>
-
-Hiraku gives data-science teams a small, scriptable loop for defining a goal,
-testing an idea, and keeping the evidence.
-
-<a class="md-button" href="examples/heart-disease/">Run your first experiment</a>
-</div>
-
-<div class="sdsc-flow">
-<div class="sdsc-flow-step">
-
-<h3>Define</h3>
-
-A research question, metric, and evaluation protocol.
-</div>
-<div class="sdsc-flow-step">
-
-<h3>Experiment</h3>
-
-Small, reproducible units track the research progress.
-</div>
-<div class="sdsc-flow-step">
-
-<h3>Learn</h3>
-
-Launch entrypoints, compare runs, and keep the research history visible.
-</div>
-</div>
 
 
+<div class="sdsc-home-hero" markdown="1">
+# Hiraku
 
-## Installation
+<h2 id="home-subtitle" class="sdsc-home-hero-subtitle">Collaborative data science, with agents.</h2>
 
-From a Hiraku source checkout, install the CLI with the optional adapters you
-need:
+Hiraku is built on a simple premise: **effective collaboration requires a shared structure.**
+
+Designed to support **user-driven development and scalable agentic workflows**, Hiraku provides a customizable workspace for human-agent collaboration.
+Built on the **open ecosystem**, Hiraku integrates with existing research infrastructure and adapts to *your* project needs.
+
 
 ```bash
-uv tool install --force '.[mlflow,wandb]'
-hiraku --help
+uv tool install hiraku
 ```
+[Get started](quickstart/first_experiment.md){ .md-button .md-button--primary }
+[Install options](quickstart/installation.md){ .md-button }
+[Explore concepts](quickstart/concepts.md){ .md-button }
 
-The MLflow and W&amp;B extras are optional. Use `uv tool install .` if you only
-need Hiraku's core CLI. `--force` replaces an existing tool installation, which
-is useful when reinstalling from a checkout after code changes that did not
-change the package version; it can be omitted for a first install.
+!!! warning "Beta release"
 
-For Hiraku development, install the full environment and run the checkout
-directly:
-
-```bash
-uv sync --all-extras
-uv run hiraku --help
-```
-
-
-## The Hiraku workflow
-
-Hiraku connects the research loop with records and tracked runs:
-
-```mermaid
-flowchart LR
-    T[Root record<br/>research goal] --> E[Child record<br/>focused attempt] --> R[Run<br/>metric trace]
-```
-
-* A root `Record` may define a research goal, metrics, shared entrypoints, and a tracking backend. It lives at `hiraku/records/{root-id}/{root-id}.md`.
-* A child `Record` may focus on an experiment, diagnosis, or review. It inherits through `parent_id` and may bind its own code commit.
-* A `Run` records one execution attributed to a `record_id`. Runs are managed by CSV, MLflow, W&B, or another backend and queried by Hiraku.
-* Additionally, an `Entrypoint` defines an executable command associated with documented arguments. Hiraku provides launch helpers and customizable dispatch scripts.
-
-??? tip "Branching and experiment lineage"
-    Git remains responsible for commits, branches, and source history.
-    Branches are optional for the core workflow.
-
-### Start here
-
-Follow the [heart disease example](examples/heart-disease/README.md) for a complete workflow.
-
-For a preview of a fully agentic workflow, see the [autoresearch example](examples/autoresearch/README.md).
-
-For more details, see [Essential concepts](concepts.md).
-
-## Documentation
-
-<div class="sdsc-card-grid">
-<div class="sdsc-card">
-
-<h3>Examples</h3>
-
-Run complete workflows with CSV, W&B, and MLflow.
-
-<a href="examples/">Browse examples</a>
+    Hiraku is in active development. Features and interfaces may change between releases. 
+    
+    Please provide feedback and report issues on [GitHub](https://github.com/SwissDataScienceCenter/hiraku/issues).
 </div>
-<div class="sdsc-card">
 
-<h3>Guides</h3>
+## Features
 
-Set up a project, choose a tracking backend, or connect an AI agent.
+Hiraku is a toolkit designed to integrate agentic capabilities into data science projects. It establishes shared conventions and interfaces through which humans and agents can carry out research workflows and share knowledge.
 
-<a href="guides/">Read the guides</a>
-</div>
-<div class="sdsc-card">
+- **Common interfaces:** Humans and agents interact with Hiraku through a common interface accessible via the CLI, MCP, and Python API.
+- **Shared knowledge base:** Markdown records document research progress and serve as a shared documentation layer for humans and agents, following the [Open Knowledge Format](https://github.com/open-knowledge-format/open-knowledge-format).
+- **Job submission:** Hiraku integrates local and HPC backends (e.g. Slurm) for job execution.
+- **Tracking leaderboards:** Hiraku retrieves experiment runs directly from user-managed tracking backends such as MLflow and Weights & Biases.
+- **User-driven development:** Implement your own ideas, follow up on agent experiments, a drive the development of your projects [using your preferred coding agent](quickstart/agentic_workflows.md).
+- **Agentic workflows:** Hiraku supports agentic workflows through LangGraph, which allows users to define project-specific graphs for agentic execution.
+- **Code and data access:** Humans and agents access code and data directly, using standard tools such as version-controlled repositories.
 
-<h3>API</h3>
+## Explore further
 
-Look up CLI commands and the Python API when you need exact details.
+<div class="sdsc-home-demos" markdown="1">
 
-<a href="api/cli/">CLI</a> · <a href="api/python/">Python API</a>
-</div>
+- [Examples](examples/index.md)
+
+    Get started with ready-to-run examples.
+
+- [User Guides](guides/index.md)
+
+    Learn about Hiraku concepts and how to use them.
+
+- [Demo Project](https://github.com/SwissDataScienceCenter/ogb-hiraku)
+
+    Explore a Hiraku demo project on the Open Graph Benchmark<sup>[↗](https://ogb.stanford.edu/)</sup>.
+
 </div>

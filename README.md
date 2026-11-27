@@ -1,161 +1,86 @@
 # Hiraku
 
-**Hiraku** is a toolkit for AI-assisted data science. It provides customizable workflows and a shared metadata record around the model development lifecycle of data science projects.
+[![Latest release][release-badge]](https://swissdatasciencecenter.github.io/hiraku/about/changelog/)
+[![Documentation](https://img.shields.io/badge/docs-read-2563EB)](https://swissdatasciencecenter.github.io/hiraku/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://swissdatasciencecenter.github.io/hiraku/quickstart/installation/)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](https://swissdatasciencecenter.github.io/hiraku/about/license/)
 
-<details>
-<summary>Why "Hiraku"?</summary>
+> [!WARNING]
+> **Beta release.** Hiraku is in active development. Features and interfaces may change between releases. Please provide feedback and report issues on [GitHub](https://github.com/SwissDataScienceCenter/hiraku/issues).
 
-It's a hint towards a possible integration with [renkulab.io](https://renkulab.io). In renku (連句), the traditional Japanese art of collaborative linked poetry, hiraku (平句) are the regular verses where the sequence develops, shifts, and explores new directions — a metaphor for iterative, exploratory research within the Renku ecosystem. *[Discuss here.](https://github.com/SwissDataScienceCenter/hiraku/discussions/105)*
+## Collaborative data science, with agents.
 
-</details>
+Hiraku is built on a simple premise: **effective collaboration requires a shared structure.**
 
-## Table of contents
+Designed to support **user-driven development and scalable agentic workflows**, Hiraku provides a customizable workspace for human-agent collaboration.
+Built on the **open ecosystem**, Hiraku integrates with existing research infrastructure and adapts to *your* project needs.
 
-* [How to Install](#how-to-install)
-* [Quickstart](#quickstart)
-* [Examples](#examples)
-* [Dashboard](#dashboard)
-* [Documentation](#documentation)
-* [Contributing](#contributing)
+## Get started
 
-## How to Install
-
-First clone the repository:
+Requires Python 3.11 or newer and [uv](https://docs.astral.sh/uv/getting-started/installation/).
+Install Hiraku and initialize a project.
 
 ```bash
-git clone https://github.com/SwissDataScienceCenter/hiraku.git
-cd hiraku
+uv tool install hiraku
+hiraku --help
 ```
 
-Install Hiraku from the checkout as a command-line tool:
-
+To initialize Hiraku on a new or existing project, run:
 ```bash
-uv tool install --force .
-```
-
-> [!TIP]
-> Omit `--force` on a first install. Use it when reinstalling from this
-> checkout after changing code without changing the package version.
-
-<details>
-<summary>Install optional tracking extras</summary>
-
-Examples that use MLflow or W&amp;B need the matching optional extra in the
-tool environment:
-
-```bash
-uv tool install --force '.[mlflow,wandb]'
-```
-
-See the [MLflow](docs/guides/tracking-mlflow.md) and
-[W&amp;B](docs/guides/tracking-wandb.md) guides. If Hiraku is installed in a
-project's environment, install the tracking SDK in that project instead.
-
-</details>
-
-## Quickstart
-
-Create and initialize a project (Git is optional):
-
-```bash
-hiraku init my-project
 cd my-project
+hiraku init .
 ```
+See the [installation guide](https://swissdatasciencecenter.github.io/hiraku/quickstart/installation/) for
+optional dependencies and other ways to install Hiraku.
 
-Hiraku connects research questions to experiment records, launches, tracked
-runs, and findings:
+Follow the [first experiment walkthrough](https://swissdatasciencecenter.github.io/hiraku/quickstart/first_experiment/) to record a
+research goal, evaluate a baseline twice, and compare the runs.
 
-```mermaid
-flowchart LR
-    Q[Research question] --> E[Experiment record] --> L[Launch] --> R[Tracked run] --> F[Finding]
-```
+## Features
 
-Follow the [Heart Disease example](docs/examples/heart-disease/README.md) for a
-complete walkthrough, or browse the other runnable projects below.
+Human and agents operate on a shared structure and interface. Hiraku provides:
+
+- **[Projects](https://swissdatasciencecenter.github.io/hiraku/guides/)** — initialize Hiraku in a new or existing
+  project, with configuration in `hiraku.yml` and project data under `hiraku/`
+  by default.
+- **[Research records](https://swissdatasciencecenter.github.io/hiraku/guides/records/)** — document research
+  tasks, experiments, and results in Markdown with YAML metadata, following the [Open Knowledge Format](https://github.com/open-knowledge-format/open-knowledge-format). Connect
+  related records, runs and code behind each experiment.
+- **[Jobs](https://swissdatasciencecenter.github.io/hiraku/guides/jobs/)** — run commands or submit
+  them to PSI/J executors, including local, Renku, and Slurm execution. Pass
+  record and job IDs to your scripts so they can attribute results.
+- **[Leaderboards](https://swissdatasciencecenter.github.io/hiraku/guides/leaderboards/)** — read runs from CSV, MLflow, or
+  Weights & Biases, choose comparison metrics, and review results across
+  experiments.
+- **[Workflows](https://swissdatasciencecenter.github.io/hiraku/guides/workflows/)** — define project-specific LangGraph
+  graphs to coordinate steps, with session history and checkpoints to preserve
+  progress between calls.
 
 ## Examples
 
-- [Heart Disease](docs/examples/heart-disease/README.md) — compare models with CSV tracking.
-- [Iris with W&B](docs/examples/iris-wandb/README.md) — log scikit-learn experiments to Weights & Biases.
-- [Digits with MLflow](docs/examples/digits-mlflow/README.md) — track model runs and metrics with MLflow.
-- [EuroSAT RGB](docs/examples/eurosat-rgb/README.md) — compare image-classification architectures with W&B.
-- [Workflow examples](docs/examples/workflows/README.md) — try small Python and Markdown workflows.
-- [Autoresearch](docs/examples/autoresearch/README.md) — run a research loop on Karpathy's autoresearch project.
-
-Initialize an example with `hiraku example create NAME`. To include prepared
-results or generate them, use one of these options:
-
-<details>
-<summary>Optional example data and result generation</summary>
-
-| Command | Result |
-| --- | --- |
-| `hiraku example create NAME` | Copy the runnable project files only |
-| `hiraku example create NAME --with-results` | Also copy bundled records and measured runs |
-| `hiraku example create NAME --with-generator` | Also copy `generate_results.py` for running later |
-| `hiraku example create NAME --generate` | Generate fresh records and runs immediately |
-
-Use `hiraku example list` to see the available starting points.
-
-`hiraku init [PATH]` initializes the current or explicit directory, optionally
-using a local `--template`. `hiraku example create NAME [PATH]` creates a project from a
-bundled example, without Git history or network access. Its default destination
-is `./NAME`. Use
-`hiraku example create NAME .` to initialize the current directory, or
-`hiraku example create NAME my-project` to choose another destination.
-Initialization does not require Git. Add `--git` to initialize the code repository
-as a convenience. Repeating plain `hiraku init` leaves an initialized project
-unchanged; repeating it with `--git` can add the code repository later.
-
-The results and generator modes are available for the Heart Disease and Digits
-examples. `--generate` cannot be combined with `--with-results`; generation can
-take time and may install the example's dependencies.
-
-</details>
-
-## Dashboard
-
-`hiraku dashboard` serves a local [marimo](https://marimo.io) notebook through a [marimo-studio](https://marimo-team.github.io/marimo-studio/) view with the record tree, the runs attributed to each record, run details with links to the tracking backend, and a performance plot. It needs the `dashboard` extra.
-
-| Command | What it does |
-| --- | --- |
-| `hiraku dashboard` | Serve the read-only dashboard |
-| `hiraku dashboard --include-code` | Also let the page show its notebook code (marimo menu, **⋯**) |
-| `hiraku dashboard --init` | Copy the notebook to `hiraku/dashboard/app.py` so you can customize it |
-| `hiraku dashboard --edit` | Open that copy in marimo-studio |
-| `hiraku dashboard --init --edit` | Both in one step |
-
-After `--init`, `hiraku dashboard` serves your copy. In the editor, the
-`runs_df` and `records_df` tables hold every run and record with its place in
-the tree, ready for your own plots or marimo's AI assistant.
-
-Try every dashboard mode without training by loading the bundled Digits runs:
+Browse the [Digits example](https://swissdatasciencecenter.github.io/hiraku/examples/digits/) to see how Hiraku
+tracks model runs and metrics with MLflow. Copy the example with its prepared
+results to try it locally.
 
 ```bash
-hiraku example create digits-mlflow digits-dashboard --with-results
-cd digits-dashboard
-hiraku dashboard --record digits                 # read-only
-hiraku dashboard --include-code --record digits  # read-only, with source
-hiraku dashboard --init --edit --record digits   # copy and edit
+hiraku example create digits --with-results
 ```
 
-Run the dashboard commands one at a time and press Ctrl-C before changing mode.
-The bundled database works without an MLflow server. To show **Open in
-mlflow** links, start the MLflow UI and configure its `ui_url`; the
-[dashboard guide](docs/guides/dashboard.md) has the complete commands.
+Explore a larger project in the
+[Open Graph Benchmark demo](https://github.com/SwissDataScienceCenter/ogb-hiraku).
 
 ## Documentation
 
-The [Hiraku documentation](https://swissdatasciencecenter.github.io/hiraku/) walks you through setting up a project, defining research records, launching experiments, and tracking runs.
-
-Browse the [examples](https://swissdatasciencecenter.github.io/hiraku/examples/) for runnable projects, or explore the [guides](https://swissdatasciencecenter.github.io/hiraku/guides/) for workflows, tracking backends, the MCP server, and the dashboard.
-
-For reference, see the [CLI commands](https://swissdatasciencecenter.github.io/hiraku/api/cli/), the [Python API](https://swissdatasciencecenter.github.io/hiraku/api/python/), and the [core concepts](https://swissdatasciencecenter.github.io/hiraku/concepts/).
+Read the [Hiraku documentation](https://swissdatasciencecenter.github.io/hiraku/)
+for [core concepts](https://swissdatasciencecenter.github.io/hiraku/quickstart/concepts/), [user guides](https://swissdatasciencecenter.github.io/hiraku/guides/), and
+the [Python API reference](https://swissdatasciencecenter.github.io/hiraku/api/). The guides cover
+[leaderboards](https://swissdatasciencecenter.github.io/hiraku/guides/leaderboards/), the [dashboard](https://swissdatasciencecenter.github.io/hiraku/guides/dashboard/),
+[MCP](https://swissdatasciencecenter.github.io/hiraku/guides/mcp/), and [workflows](https://swissdatasciencecenter.github.io/hiraku/guides/workflows/).
 
 ## Contributing
 
-Contributions are welcome. Pick a feature to add, create a feature branch and pull request.
+See the [contributor guide](https://swissdatasciencecenter.github.io/hiraku/about/contributing/) for development setup and checks.
+Report bugs and propose features through the
+[GitHub issue tracker](https://github.com/SwissDataScienceCenter/hiraku/issues).
 
-We track planned features and ideas using [GitHub issues](https://github.com/SwissDataScienceCenter/hiraku/issues). Read the [contribution guide](CONTRIBUTING.md) to get started.
-
-**Unsure where to start but you know what you like to do?** Write a [*User Story*](https://github.com/SwissDataScienceCenter/hiraku/issues/new?labels=%22user%20story%22) to describe your idea and get feedback.
+[release-badge]: https://img.shields.io/badge/dynamic/regex?url=https%3A%2F%2Fswissdatasciencecenter.github.io%2Fhiraku%2Fabout%2Fchangelog%2F&search=%3Ch2%5Cb%5B%5E%3E%5D%2A%3E%5Cs%2A%5C%5B%28%5B0-9%5D%2B%5C.%5B0-9%5D%2B%5C.%5B0-9%5D%2B%29%5C%5D&replace=v%241&label=release&color=2EA44F

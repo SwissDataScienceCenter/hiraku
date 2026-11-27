@@ -1,6 +1,11 @@
-# API
+# API reference
 
-Hiraku provides two interfaces:
+| Essential concept | Python API |
+| --- | --- |
+| Project | [Project](python/project.md) |
+| Record | [Record and Vault](python/records.md) |
+| Job | [Job](python/jobs.md) |
+| Leaderboard | [Leaderboard](python/leaderboards.md) |
+| Workflow | [Workflows](python/workflows.md) |
 
-- [CLI](cli.md) — manage projects, tasks, experiments, and runs from the terminal.
-- [Python API](python/) — use validated models and services from Python code.
+For command-line options, use `hiraku --help` or a command's own help, such as `hiraku record create --help`. For a job launch walkthrough, see [Jobs and executors](../guides/jobs.md#python).

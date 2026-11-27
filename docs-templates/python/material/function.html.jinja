@@ -1,0 +1,12 @@
+{% extends "_base/function.html.jinja" %}
+
+{% block source scoped %}
+  {% set implementation = function.final_target if function.is_alias else function %}
+  {% if implementation.lineno and implementation.endlineno and implementation.source %}
+    {% set path = implementation.relative_package_filepath.as_posix() %}
+    {% if path.startswith("hiraku/") %}
+      <p><a href="https://github.com/SwissDataScienceCenter/hiraku/blob/main/src/{{ path|e }}#L{{ implementation.lineno }}-L{{ implementation.endlineno }}">View source on GitHub</a></p>
+    {% endif %}
+  {% endif %}
+  {{ super() }}
+{% endblock source %}

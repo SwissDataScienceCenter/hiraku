@@ -1,0 +1,1 @@
+--8<-- "examples/digits/README.md"
