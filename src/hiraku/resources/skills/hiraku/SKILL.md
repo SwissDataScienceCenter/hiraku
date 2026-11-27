@@ -1,6 +1,6 @@
 ---
 name: hiraku
-description: Manage data science and research projects using Hiraku. Use when users ask to create, inspect, or update research records; launch or monitor computational jobs; inspect tracked experiment runs and leaderboards; or execute Hiraku project workflows. Prefer connected Hiraku MCP tools, with CLI fallback when available.
+description: Manage data science and research projects using Hiraku. Use when users ask to create, inspect, or update research records; launch or monitor jobs; inspect runs; execute workflows; or review literature. For experiment records that test or compare approaches, delegate design before writing the record. For implementation or requests to run end to end, delegate implementation and results analysis to the configured project subagents.
 ---
 
 # Hiraku quickstart
@@ -32,6 +32,47 @@ related records explicitly when their context matters.
 
 Create a record when requested or needed for the task. Keep its identity and
 relationships separate from its metadata fields.
+
+## Specialist delegation
+
+Check the project's configured agents and delegate each matching phase to its
+specialist. When the matching subagent is available, delegation is required;
+do not silently perform that phase yourself. Invoke the configured subagent by
+its exact name through the host's subagent feature, then wait for its result;
+reading its definition or mentioning the role does not count as delegation.
+
+- **Literature review:** For paper discovery, cited evidence, or research gaps,
+  delegate to `literature-reviewer`. It follows the
+  `hiraku-literature-review` skill and saves a cited synthesis in a context
+  record.
+- **Hypothesis and design:** For requests to test an idea or compare approaches,
+  delegate to `hypothesis-designer` before creating or updating the experiment
+  record. It follows the `hiraku-hypothesis-design` skill's generate → critique
+  → compare → refine → select procedure. This includes phrasing such as “create
+  a new record testing X rather than Y.” Wait for its selected falsifiable
+  hypothesis and experiment proposal, then create or update the record yourself
+  from that proposal.
+- **Implementation and execution:** When the user asks to implement, run, or
+  take an existing experiment end to end, delegate to `experiment-implementer`.
+  Pass the active record ID, agreed design, and the user's request. A direct
+  request to run or take it end to end authorizes the run; do not bypass the
+  subagent by submitting the job yourself. If the job is still running, report
+  that state accurately.
+- **Results analysis:** When asked to analyze results, or after a requested
+  end-to-end experiment has produced tracked results, delegate to
+  `results-analyst`. Pass the hypothesis, design, baseline, and run/job IDs.
+  Wait for its analysis before summarizing conclusions to the user.
+
+Follow-up requests such as “run it” or “take it end to end” refer to the active
+experiment unless the user says otherwise. Run dependent phases in order: wait
+for the design before recording it, and wait for tracked results before asking
+the analyst to interpret them. Do not start phases the user did not request.
+Give each specialist the goal, relevant record IDs, available evidence, and a
+clear expected output. Keep the main agent responsible for user communication,
+integrating results, and deciding what to save. If the required subagent is not
+available, do the work directly and state that delegation was unavailable.
+Subagent role instructions guide behavior; rely on host-enforced permissions
+for actual tool restrictions.
 
 ## Jobs and tracked evidence
 

@@ -254,7 +254,7 @@ def test_mcp_install_preserves_other_client_settings(
     (tmp_path / ".pi/mcp.json").write_text(
         json.dumps({"mcpServers": {"other": {"command": "other"}}})
     )
-    (tmp_path / ".codex").mkdir()
+    (tmp_path / ".codex").mkdir(exist_ok=True)
     codex = tmp_path / ".codex/config.toml"
     codex.write_text('model = "local"\n\n[mcp_servers.other]\ncommand = "other"\n')
     monkeypatch.chdir(tmp_path)
@@ -305,6 +305,8 @@ def test_init_and_example_create_accept_destination(
     assert Project.load(tmp_path / "research/hiraku.yml").root == (
         tmp_path / "research"
     )
+    assert (tmp_path / "research/.codex/agents/literature-reviewer.toml").is_file()
+    assert (tmp_path / "research/.claude/agents/literature-reviewer.md").is_file()
     assert Project.load(tmp_path / "demo/hiraku.yml").root == tmp_path / "demo"
     assert (tmp_path / "demo/train.py").is_file()
     assert (tmp_path / "demo/README.md").is_file()

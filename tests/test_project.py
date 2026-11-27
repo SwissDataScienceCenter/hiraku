@@ -9,6 +9,7 @@ import tomllib
 from importlib.resources import files
 from pathlib import Path
 
+import frontmatter
 import pytest
 from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
@@ -199,6 +200,37 @@ def test_init_installs_all_included_skill_files(tmp_path: Path) -> None:
             if path.is_file()
         }
         assert actual == expected
+
+
+@pytest.mark.parametrize(
+    "agent_name",
+    [
+        "literature-reviewer",
+        "hypothesis-designer",
+        "experiment-implementer",
+        "results-analyst",
+    ],
+)
+def test_init_installs_subagents_for_supported_clients(
+    tmp_path: Path, agent_name: str
+) -> None:
+    project = Project.create(tmp_path, install_mcp=False)
+    codex = tmp_path / ".codex/agents" / f"{agent_name}.toml"
+    claude = tmp_path / ".claude/agents" / f"{agent_name}.md"
+    bundled = files("hiraku.resources") / "agents" / codex.name
+
+    assert codex.read_bytes() == bundled.read_bytes()
+    definition = tomllib.loads(codex.read_text(encoding="utf-8"))
+    agent = frontmatter.loads(claude.read_text(encoding="utf-8"))
+    assert agent["name"] == definition["name"] == agent_name
+    assert agent["description"] == definition["description"].strip()
+    assert agent.content.strip() == definition["developer_instructions"].strip()
+
+    for destination in (codex, claude):
+        destination.write_text("local edits\n", encoding="utf-8")
+    project.install_subagents()
+    for destination in (codex, claude):
+        assert destination.read_text(encoding="utf-8") == "local edits\n"
 
 
 def test_load_project_through_symlinked_directory(tmp_path: Path) -> None:
