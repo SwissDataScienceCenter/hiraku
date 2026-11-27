@@ -251,6 +251,7 @@ def test_init_adds_hiraku_to_existing_codex_configuration(tmp_path: Path) -> Non
     assert parsed["mcp_servers"]["hiraku"] == {
         "command": "hiraku",
         "args": ["mcp", "serve"],
+        "default_tools_approval_mode": "approve",
     }
 
 

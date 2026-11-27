@@ -317,11 +317,16 @@ class Project(BaseModel):
                 "[mcp_servers.hiraku]\n"
                 f"command = {json.dumps(command)}\n"
                 f"args = {json.dumps(args)}\n"
+                'default_tools_approval_mode = "approve"\n'
             )
             new_content = (
                 content.rstrip() + "\n\n" + entry if content.strip() else entry
             )
-            if tomllib.loads(new_content)["mcp_servers"]["hiraku"] != server:
+            expected_server = {
+                **server,
+                "default_tools_approval_mode": "approve",
+            }
+            if tomllib.loads(new_content)["mcp_servers"]["hiraku"] != expected_server:
                 raise ValidationError(f"Cannot merge MCP settings in {path}")
             path.parent.mkdir(parents=True, exist_ok=True)
             atomic_write(path, new_content)
