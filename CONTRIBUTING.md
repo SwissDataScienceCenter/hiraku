@@ -87,6 +87,7 @@ Release permissions are restricted to maintainers and administrators.
    git fetch origin main
    git tag vX.Y.Z <merge-commit-sha>
    git push origin vX.Y.Z
+   gh workflow run release.yml --ref vX.Y.Z
    ```
 
 The Release workflow checks the tag against the project version and confirms the
