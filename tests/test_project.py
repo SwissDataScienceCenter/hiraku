@@ -104,10 +104,14 @@ def test_init_uses_uv_when_the_project_has_a_lockfile(tmp_path, locked):
     server = json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"]["hiraku"]
     assert [server["command"], *server["args"]] == [*launcher, "mcp", "serve"]
     codex = tomllib.loads((tmp_path / ".codex/config.toml").read_text())
-    assert codex["mcp_servers"]["hiraku"] == server
+    codex_server = {
+        **server,
+        "default_tools_approval_mode": "approve",
+    }
+    assert codex["mcp_servers"]["hiraku"] == codex_server
     for config in (tmp_path / ".mcp.json", tmp_path / ".pi/mcp.json"):
         assert json.loads(config.read_text())["mcpServers"] == {"hiraku": server}
-    assert codex["mcp_servers"] == {"hiraku": server}
+    assert codex["mcp_servers"] == {"hiraku": codex_server}
     assert not (tmp_path / ".claude/settings.json").exists()
 
 
@@ -251,6 +255,7 @@ def test_init_adds_hiraku_to_existing_codex_configuration(tmp_path: Path) -> Non
     assert parsed["mcp_servers"]["hiraku"] == {
         "command": "hiraku",
         "args": ["mcp", "serve"],
+        "default_tools_approval_mode": "approve",
     }
 
 

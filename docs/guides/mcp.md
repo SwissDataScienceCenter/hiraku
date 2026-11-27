@@ -39,6 +39,7 @@ Codex's `.codex/config.toml`:
 [mcp_servers.hiraku]
 command = "hiraku"
 args = ["mcp", "serve"]
+default_tools_approval_mode = "approve"
 ```
 
 Pi's `.pi/mcp.json`:
@@ -59,8 +60,11 @@ be extended, installation fails without changing that file; add the entry
 manually or repair the configuration and rerun `hiraku mcp install`.
 
 The host must be able to find the installed `hiraku` command. Claude Code asks
-for approval before using a project MCP server. Codex loads project config only
-for trusted projects. The MCP tools are exposed directly by the host, so no
+you to trust a project MCP server before using it. Codex loads project config
+only for trusted projects; `default_tools_approval_mode = "approve"` allows
+Hiraku MCP tool calls without a separate approval prompt. Claude Code does not
+use this Codex setting; manage its tool permissions through Claude Code's own
+permission settings. The MCP tools are exposed directly by the host, so no
 extra `AGENTS.md` or Claude skill instructions are needed to register them.
 For agent-launched commands, prefer the `job_submit` MCP tool. Read command
 output with `job_logs`; call `job_status` or `job_list` when execution state is

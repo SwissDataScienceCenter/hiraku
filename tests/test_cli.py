@@ -278,6 +278,7 @@ def test_mcp_install_preserves_other_client_settings(
     assert 'model = "local"' in codex.read_text()
     assert "[mcp_servers.other]" in codex.read_text()
     assert "[mcp_servers.hiraku]" in codex.read_text()
+    assert 'default_tools_approval_mode = "approve"' in codex.read_text()
 
 
 def test_example_list_works_outside_a_project(tmp_path: Path, monkeypatch) -> None:
