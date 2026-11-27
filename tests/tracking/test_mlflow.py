@@ -10,6 +10,12 @@ from hiraku.project import Project
 from hiraku.tracking import Leaderboard, MLflowBackend, MLflowBackendConfig
 
 
+def stub_mlflow_client(monkeypatch, factory):
+    monkeypatch.setitem(
+        sys.modules, "mlflow.tracking", SimpleNamespace(MlflowClient=factory)
+    )
+
+
 @pytest.fixture(autouse=True)
 def clear_mlflow_environment(monkeypatch):
     for name in (
@@ -25,6 +31,10 @@ def clear_mlflow_environment(monkeypatch):
     [{}, {"tracking_uri": "https://explicit.example"}],
 )
 def test_mlflow_destination_precedence(tmp_path, monkeypatch, options):
+    stub_mlflow_client(
+        monkeypatch,
+        lambda **kwargs: SimpleNamespace(get_experiment_by_name=lambda _: None),
+    )
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "https://environment.example")
     backend = MLflowBackend(Project(tmp_path), **options)
     expected = options.get("tracking_uri", "https://environment.example")
@@ -33,6 +43,10 @@ def test_mlflow_destination_precedence(tmp_path, monkeypatch, options):
 
 
 def test_explicit_server_overrides_invalid_environment(tmp_path, monkeypatch):
+    stub_mlflow_client(
+        monkeypatch,
+        lambda **kwargs: SimpleNamespace(get_experiment_by_name=lambda _: None),
+    )
     monkeypatch.setenv("MLFLOW_TRACKING_URI", "sqlite:///runs.db")
     backend = MLflowBackend(Project(tmp_path), tracking_uri="https://explicit.example")
     assert backend.tracking_uri == "https://explicit.example"
@@ -81,15 +95,45 @@ def test_mlflow_experiment_environment(
             return []
 
     monkeypatch.setattr(mlflow.tracking, "MlflowClient", FakeClient)
-    backend = MLflowBackend(
-        Project(tmp_path), tracking_uri="https://example.com", experiment_name=explicit
-    )
+    def create_backend():
+        return MLflowBackend(
+            Project(tmp_path),
+            tracking_uri="https://example.com",
+            experiment_name=explicit,
+        )
+
     if error:
         with pytest.raises(BackendError, match=error):
-            backend.list_runs()
+            create_backend()
     else:
-        assert backend.list_runs() == []
+        assert create_backend().list_runs() == []
     assert searched == ([] if error or name == "missing" else ["e1"])
+
+
+def test_mlflow_backend_reuses_connection(tmp_path, monkeypatch):
+    connections = []
+    writes = []
+    client = SimpleNamespace(
+        get_experiment_by_name=lambda name: SimpleNamespace(experiment_id="e1"),
+        search_runs=lambda **kwargs: [],
+        set_tag=lambda *args: writes.append(args),
+    )
+
+    def create_client(*, tracking_uri):
+        connections.append(tracking_uri)
+        return client
+
+    stub_mlflow_client(monkeypatch, create_client)
+    backend = MLflowBackend(
+        Project(tmp_path),
+        tracking_uri="https://example.com",
+        experiment_name="shared",
+    )
+    assert connections == ["https://example.com"]
+    assert backend.list_runs() == []
+    backend.set_tag("run-1", "hiraku.record_id", "experiments/new")
+    assert writes == [("run-1", "hiraku.record_id", "experiments/new")]
+    assert connections == ["https://example.com"]
 
 
 @pytest.mark.integration
@@ -244,12 +288,10 @@ def test_mlflow_backend_reports_missing_optional_dependency(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.setitem(sys.modules, "mlflow.tracking", None)
-    backend = MLflowBackend(
-        Project.create(tmp_path), tracking_uri="https://mlflow.example.com"
-    )
-
     with pytest.raises(BackendError, match="optional 'mlflow' dependency"):
-        backend.list_runs()
+        MLflowBackend(
+            Project.create(tmp_path), tracking_uri="https://mlflow.example.com"
+        )
 
 
 def test_mlflow_backend_returns_no_runs_for_unknown_experiment(
@@ -355,7 +397,11 @@ def test_mlflow_backend_config_rejects_unsafe_ui_url(value: str) -> None:
         ({"tracking_uri": "https://user:secret@mlflow.example.com"}, None),
     ],
 )
-def test_mlflow_backend_run_url(tmp_path, settings, expected) -> None:
+def test_mlflow_backend_run_url(tmp_path, monkeypatch, settings, expected) -> None:
+    stub_mlflow_client(
+        monkeypatch,
+        lambda **kwargs: SimpleNamespace(get_experiment_by_name=lambda _: None),
+    )
     backend = MLflowBackend(Project.create(tmp_path), **settings)
 
     assert backend._run_url("e/1", "r1") == expected

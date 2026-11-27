@@ -66,7 +66,7 @@ class MLflowBackend(BackendOperations):
                 "pointing to an HTTP(S) tracking server"
             )
         self.tracking_uri = _validate_mlflow_url(tracking_uri)
-        self._experiment_id = (
+        configured_experiment_id = (
             os.environ.get("MLFLOW_EXPERIMENT_ID") or None
             if settings.experiment_name is None
             else None
@@ -74,7 +74,7 @@ class MLflowBackend(BackendOperations):
         self.experiment_name = (
             settings.experiment_name
             or os.environ.get("MLFLOW_EXPERIMENT_NAME")
-            or (None if self._experiment_id else project.root.name)
+            or (None if configured_experiment_id else project.root.name)
         )
         # Credential-bearing tracking URIs stay usable but never become links.
         parsed = urlsplit(self.tracking_uri)
@@ -84,32 +84,59 @@ class MLflowBackend(BackendOperations):
             else None
         )
 
-    def _read_source_runs(self) -> list[Run]:
         try:
             from mlflow.tracking import MlflowClient
         except ImportError as exc:
             raise BackendError(
                 "mlflow backend requires the optional 'mlflow' dependency"
             ) from exc
+
         try:
-            client = MlflowClient(tracking_uri=self.tracking_uri)
+            self._mlflow_client = MlflowClient(tracking_uri=self.tracking_uri)
+            self._experiment_id: str | None = None
             if self.experiment_name:
-                experiment = client.get_experiment_by_name(self.experiment_name)
-                if self._experiment_id is not None and (
-                    experiment is None
-                    or experiment.experiment_id != self._experiment_id
+                experiment = self._mlflow_client.get_experiment_by_name(
+                    self.experiment_name
+                )
+                if experiment is not None:
+                    self._experiment_id = experiment.experiment_id
+                if (
+                    configured_experiment_id is not None
+                    and self._experiment_id != configured_experiment_id
                 ):
                     raise BackendError(
                         "MLFLOW_EXPERIMENT_NAME and MLFLOW_EXPERIMENT_ID "
                         "refer to different experiments"
                     )
-                if experiment is None:
-                    return []
-                experiment_ids = [experiment.experiment_id]
-            elif self._experiment_id is not None:
-                experiment_ids = [
-                    client.get_experiment(self._experiment_id).experiment_id
-                ]
+            elif configured_experiment_id is not None:
+                self._experiment_id = self._mlflow_client.get_experiment(
+                    configured_experiment_id
+                ).experiment_id
+        except BackendError:
+            raise
+        except Exception as exc:
+            raise BackendError(
+                f"mlflow backend could not initialize tracking: {exc}"
+            ) from exc
+
+    def set_tag(self, run_id: str, key: str, value: str) -> None:
+        """Set a tag on a run by ID on the configured MLflow server."""
+        try:
+            self._mlflow_client.set_tag(run_id, key, value)
+        except BackendError:
+            raise
+        except Exception as exc:
+            raise BackendError(
+                f"mlflow backend could not set the run tag: {exc}"
+            ) from exc
+
+    def _read_source_runs(self) -> list[Run]:
+        try:
+            client = self._mlflow_client
+            if self._experiment_id is not None:
+                experiment_ids = [self._experiment_id]
+            elif self.experiment_name:
+                return []
             else:
                 experiment_ids = []
                 token = None
